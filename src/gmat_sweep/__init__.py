@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from gmat_sweep.aggregate import lazy_multiindex
 from gmat_sweep.backends import Pool
 from gmat_sweep.errors import (
     BackendError,
@@ -35,4 +36,5 @@ __all__ = [
     "canonical_script_sha256",
     "expand_grid_to_run_specs",
     "full_factorial",
+    "lazy_multiindex",
 ]
