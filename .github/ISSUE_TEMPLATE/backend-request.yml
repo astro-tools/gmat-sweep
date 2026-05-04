@@ -1,0 +1,41 @@
+name: Backend request
+description: Request a new execution backend behind the Pool abstraction.
+title: "Backend: <name>"
+labels: ["type:backend-request"]
+body:
+  - type: input
+    id: backend_name
+    attributes:
+      label: Backend
+      description: Name of the execution surface (e.g. Slurm, Kubernetes, MPI, AWS Batch).
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why this backend
+      description: What can't you do with the shipped backends (LocalJoblibPool, DaskPool, RayPool)? Cluster you already have? Org policy? Scale ceiling?
+    validations:
+      required: true
+  - type: textarea
+    id: subprocess_isolation
+    attributes:
+      label: Subprocess-isolation contract
+      description: |
+        gmat-sweep guarantees one fresh Python interpreter per run (gmatpy cannot
+        be cleanly re-initialised in-process). Any backend that doesn't honour
+        this contract is rejected at import time. Briefly describe how the
+        proposed backend would satisfy it (one task per pod / one srun job per
+        run / etc.).
+    validations:
+      required: true
+  - type: textarea
+    id: prior_art
+    attributes:
+      label: Prior art
+      description: Existing Python wrappers, recipes, libraries you'd want us to consider.
+  - type: textarea
+    id: willingness
+    attributes:
+      label: Willingness to contribute
+      description: Are you offering a PR, an evaluation environment, sample workloads, or just flagging the need?

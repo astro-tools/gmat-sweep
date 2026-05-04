@@ -1,0 +1,41 @@
+name: Use-case fit
+description: I want to use gmat-sweep for X — does it fit?
+title: "<short summary of the use case>"
+labels: ["type:use-case-fit"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: What you want to do
+      description: Describe the analysis or workflow you have in mind. A launch-window scan? A dispersion study? Something else?
+    validations:
+      required: true
+  - type: textarea
+    id: parameters
+    attributes:
+      label: What you'd be sweeping
+      description: Which fields would vary, and roughly how (grid? Monte Carlo? Latin hypercube? something else)? Order-of-magnitude run count.
+    validations:
+      required: true
+  - type: textarea
+    id: existing_workflow
+    attributes:
+      label: How you do this today
+      description: Hand-rolled multiprocessing? A spreadsheet? Paramat? Nothing yet? Helps us understand the pain point.
+  - type: textarea
+    id: blockers
+    attributes:
+      label: What's stopping you from just trying it
+      description: Missing feature, unclear docs, uncertainty about scale, license concern, scope question?
+    validations:
+      required: true
+  - type: input
+    id: gmat_version
+    attributes:
+      label: GMAT version
+      placeholder: "e.g. R2026a"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Links to a paper, prior project, GMAT script — anything that helps us understand the use case.

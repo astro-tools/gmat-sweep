@@ -1,0 +1,25 @@
+name: Chore
+description: Tooling, infra, hygiene, or other non-feature work.
+title: "<short summary>"
+labels: ["type:chore"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why now. What's blocked or painful without it.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      value: |
+        - [ ]
