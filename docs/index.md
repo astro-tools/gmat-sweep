@@ -3,11 +3,6 @@
 Run parameter sweeps and Monte Carlo dispersions over [GMAT](https://software.nasa.gov/software/GSC-17177-1)
 missions in parallel from Python.
 
-!!! warning "Pre-alpha"
-    The public surface is not yet usable for production work. The
-    [v0.1 milestone](https://github.com/astro-tools/gmat-sweep/milestone/1)
-    tracks the work needed to ship the first PyPI release.
-
 ## What it does
 
 `gmat-sweep` takes one GMAT `.script` file and runs it many times under
