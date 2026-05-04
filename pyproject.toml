@@ -51,6 +51,7 @@ dependencies = [
 dask = ["distributed>=2024.1"]
 ray = ["ray[default]>=2.10"]
 plot = ["matplotlib>=3.8"]
+examples = ["matplotlib>=3.8"]
 
 [project.scripts]
 gmat-sweep = "gmat_sweep.cli:main"

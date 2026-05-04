@@ -1,0 +1,47 @@
+%  Two-axis sweep fixture for docs/examples/02_epoch_arrival_grid.ipynb.
+%
+%  The mission is contrived: launch at Sat.Epoch from an elliptical
+%  parking orbit, propagate for TOF seconds (a Variable so it can be
+%  overridden from gmat-sweep), and write the final inertial position
+%  to a ReportFile. The notebook overrides Sat.Epoch and TOF.Value as
+%  the two grid axes, then derives an "arrival miss distance" against
+%  a fixed inertial target and contours the result.
+%
+%  Point-mass Earth keeps every per-run sub-second so the ~36-cell grid
+%  finishes inside the CI smoke step's wall-clock budget.
+
+Create Spacecraft Sat
+Sat.DateFormat = UTCGregorian
+Sat.Epoch = '01 Jan 2026 00:00:00.000'
+Sat.CoordinateSystem = EarthMJ2000Eq
+Sat.DisplayStateType = Keplerian
+Sat.SMA = 12000
+Sat.ECC = 0.4
+Sat.INC = 28.5
+Sat.RAAN = 0
+Sat.AOP = 0
+Sat.TA = 0
+
+Create ForceModel FM
+FM.CentralBody = Earth
+FM.PointMasses = {Earth}
+FM.Drag = None
+FM.SRP = Off
+
+Create Propagator Prop
+Prop.FM = FM
+Prop.Type = PrinceDormand78
+Prop.InitialStepSize = 120
+Prop.Accuracy = 1e-9
+
+Create Variable TOF
+TOF = 7200
+
+Create ReportFile RF
+RF.Filename = 'transfer_porkchop_report.txt'
+RF.Precision = 16
+RF.WriteHeaders = true
+RF.Add = {Sat.UTCGregorian, Sat.X, Sat.Y, Sat.Z}
+
+BeginMissionSequence
+Propagate Prop(Sat) {Sat.ElapsedSecs = TOF}

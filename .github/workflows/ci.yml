@@ -75,6 +75,22 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
         run: uv run coverage report --include='src/gmat_sweep/aggregate.py' --fail-under=95
 
+      # Smoke-execute the example notebooks end-to-end. Catches "someone changed
+      # the public surface and forgot to refresh the committed notebook"
+      # regressions without paying the cost of nbval-style strict comparison
+      # (notebooks are committed with cleared outputs). One matrix combo is
+      # enough — the underlying surface is covered cross-platform by the rest
+      # of the test job. Notebook 03 uses signal.SIGINT against a child
+      # process, so it is Linux-only (Windows lacks the matching semantics).
+      - name: Smoke-execute example notebooks
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+        working-directory: docs/examples
+        run: |
+          uv sync --all-groups --extra examples
+          uv run jupyter execute 01_sma_scan.ipynb
+          uv run jupyter execute 02_epoch_arrival_grid.ipynb
+          uv run jupyter execute 03_killed_sweep_recovery.ipynb
+
   lint:
     name: lint
     runs-on: ubuntu-latest

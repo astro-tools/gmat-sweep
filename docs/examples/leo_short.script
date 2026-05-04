@@ -1,0 +1,39 @@
+%  Tiny LEO fixture for docs/examples/03_killed_sweep_recovery.ipynb.
+%
+%  60-second propagation, point-mass Earth, single ReportFile. Each per-run
+%  cost is sub-second so the kill-and-inspect demo finishes inside the CI
+%  smoke step's wall-clock budget while still producing several manifest
+%  entries before the SIGINT lands.
+
+Create Spacecraft Sat
+Sat.DateFormat = UTCGregorian
+Sat.Epoch = '01 Jan 2026 00:00:00.000'
+Sat.CoordinateSystem = EarthMJ2000Eq
+Sat.DisplayStateType = Keplerian
+Sat.SMA = 7000
+Sat.ECC = 0.001
+Sat.INC = 28.5
+Sat.RAAN = 0
+Sat.AOP = 0
+Sat.TA = 0
+
+Create ForceModel FM
+FM.CentralBody = Earth
+FM.PointMasses = {Earth}
+FM.Drag = None
+FM.SRP = Off
+
+Create Propagator Prop
+Prop.FM = FM
+Prop.Type = PrinceDormand78
+Prop.InitialStepSize = 30
+Prop.Accuracy = 1e-9
+
+Create ReportFile RF
+RF.Filename = 'leo_short_report.txt'
+RF.Precision = 16
+RF.WriteHeaders = true
+RF.Add = {Sat.UTCGregorian, Sat.X, Sat.Y, Sat.Z}
+
+BeginMissionSequence
+Propagate Prop(Sat) {Sat.ElapsedSecs = 60}
