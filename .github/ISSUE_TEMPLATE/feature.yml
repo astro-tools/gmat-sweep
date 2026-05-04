@@ -1,0 +1,39 @@
+name: Feature
+description: Propose a new capability or a non-trivial change.
+title: "<short summary>"
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences describing what this feature is.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why this matters. What can't users do today that they should be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete, testable checkboxes. An outside reviewer should be able to read these and tell whether the feature is done.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope / non-goals
+      description: What this issue deliberately does not cover. Helps keep scope honest.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Design notes, links to charter sections, references to prior art, open questions.

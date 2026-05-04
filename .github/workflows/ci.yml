@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }}, ${{ matrix.gmat-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # 2 OSes × 3 Python minors × 2 GMAT releases = 12 cells. macOS is
+      # deferred to v0.2 per the charter; R2026a is the primary target,
+      # R2025a is the previous release we still support.
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12']
+        gmat-version: [R2025a, R2026a]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: ${{ matrix.gmat-version }}
+          cache: true
+
+      - name: Install project
+        run: uv sync --all-groups
+
+      - name: Run pytest
+        # `-m "integration or not integration"` overrides the default
+        # marker filter in pyproject.toml so CI runs both unit and
+        # integration suites in a single invocation.
+        run: uv run pytest -m "integration or not integration" --cov --cov-report=term-missing
+
+      # Coverage gates run on a single matrix combination — the .coverage
+      # data is identical across runners. Overall floor matches the v0.1
+      # charter DoD; the four per-file gates match CONTRIBUTING.md.
+      #
+      # TODO(#11): re-enable once the validation test suite lands. Until
+      # then every module is a stub and the gates would be permanently red;
+      # `pytest --cov --cov-report=term-missing` above still surfaces the
+      # current coverage in CI logs so progress is visible.
+      #
+      # - name: Enforce overall coverage (>=80%)
+      #   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+      #   run: uv run coverage report --fail-under=80
+      #
+      # - name: Enforce grids.py coverage (>=95%)
+      #   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+      #   run: uv run coverage report --include='src/gmat_sweep/grids.py' --fail-under=95
+      #
+      # - name: Enforce distributions.py coverage (>=95%)
+      #   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+      #   run: uv run coverage report --include='src/gmat_sweep/distributions.py' --fail-under=95
+      #
+      # - name: Enforce manifest.py coverage (>=95%)
+      #   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+      #   run: uv run coverage report --include='src/gmat_sweep/manifest.py' --fail-under=95
+      #
+      # - name: Enforce aggregate.py coverage (>=95%)
+      #   if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
+      #   run: uv run coverage report --include='src/gmat_sweep/aggregate.py' --fail-under=95
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --all-groups
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --all-groups
+      - run: uv run mypy
+
+  # Smoke-check that `pip install gmat-sweep` (no extras, no dev group)
+  # imports cleanly. Catches an extras-only or dev-only dependency leaking
+  # into the default install path.
+  minimal-install:
+    name: minimal install smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install .
+      - run: python -c "import gmat_sweep"

@@ -1,0 +1,82 @@
+name: Bug
+description: Report a defect in gmat-sweep.
+title: "<short summary>"
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Observed behavior. Include error messages and tracebacks verbatim.
+    validations:
+      required: true
+  - type: textarea
+    id: what_expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Smallest snippet that triggers the bug. A `.script` fragment plus the Python that drives the sweep is ideal.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: gmat_sweep_version
+    attributes:
+      label: gmat-sweep version
+      placeholder: "e.g. 0.1.0, or git sha"
+    validations:
+      required: true
+  - type: input
+    id: gmat_run_version
+    attributes:
+      label: gmat-run version
+      placeholder: "e.g. 0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: gmat_version
+    attributes:
+      label: GMAT version
+      placeholder: "e.g. R2026a"
+    validations:
+      required: true
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "e.g. 3.12.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - LocalJoblibPool (default)
+        - DaskPool
+        - RayPool
+        - Other / unsure
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant per-worker logs, the sweep manifest, captured stderr, pytest output.
+      render: shell
