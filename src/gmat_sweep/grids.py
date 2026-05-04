@@ -59,13 +59,13 @@ def full_factorial(grid: Mapping[str, Iterable[Any]]) -> Iterator[dict[str, Any]
 
 def expand_grid_to_run_specs(
     grid: Mapping[str, Iterable[Any]],
-    mission: str | Path,
+    script_path: str | Path,
     output_dir: str | Path,
 ) -> list[RunSpec]:
     """Build a list of :class:`RunSpec` from a full-factorial expansion of ``grid``.
 
-    Each spec gets a sequential ``run_id`` starting at 0, ``script_path`` set
-    to ``mission``, ``output_dir`` set to ``<output_dir>/run-<run_id>``,
+    Each spec gets a sequential ``run_id`` starting at 0, ``script_path``
+    propagated through, ``output_dir`` set to ``<output_dir>/run-<run_id>``,
     ``seed=None``, and ``run_options={}``. The ordering contract from
     :func:`full_factorial` carries through unchanged: ``specs[i].run_id == i``
     and the override dicts appear in cartesian-product order.
@@ -73,11 +73,11 @@ def expand_grid_to_run_specs(
     Raises :class:`SweepConfigError` for the same reasons as
     :func:`full_factorial`.
     """
-    mission_path = Path(mission)
+    script_path_obj = Path(script_path)
     base_output_dir = Path(output_dir)
     return [
         RunSpec(
-            script_path=mission_path,
+            script_path=script_path_obj,
             overrides=overrides,
             output_dir=base_output_dir / f"run-{run_id}",
             run_id=run_id,

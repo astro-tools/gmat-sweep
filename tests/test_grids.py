@@ -115,7 +115,7 @@ def test_output_is_byte_for_byte_deterministic_across_calls() -> None:
 def test_expand_produces_sequential_run_ids_and_full_factorial_order() -> None:
     specs = expand_grid_to_run_specs(
         grid={"a": [1, 2], "b": [10, 20, 30]},
-        mission="/missions/flyby.script",
+        script_path="/missions/flyby.script",
         output_dir="/sweep-out",
     )
     assert tuple(s.run_id for s in specs) == (0, 1, 2, 3, 4, 5)
@@ -132,7 +132,7 @@ def test_expand_produces_sequential_run_ids_and_full_factorial_order() -> None:
 def test_expand_packs_script_path_output_dir_seed_and_run_options() -> None:
     specs = expand_grid_to_run_specs(
         grid={"x": [7, 8]},
-        mission=Path("/missions/m.script"),
+        script_path=Path("/missions/m.script"),
         output_dir=Path("/sweep-out"),
     )
     assert len(specs) == 2
@@ -144,10 +144,10 @@ def test_expand_packs_script_path_output_dir_seed_and_run_options() -> None:
         assert spec.run_options == {}
 
 
-def test_expand_accepts_string_mission_and_output_dir() -> None:
+def test_expand_accepts_string_script_path_and_output_dir() -> None:
     specs = expand_grid_to_run_specs(
         grid={"x": [1]},
-        mission="/missions/m.script",
+        script_path="/missions/m.script",
         output_dir="/out",
     )
     assert specs[0].script_path == Path("/missions/m.script")
@@ -157,7 +157,7 @@ def test_expand_accepts_string_mission_and_output_dir() -> None:
 def test_expand_empty_grid_yields_one_spec() -> None:
     specs = expand_grid_to_run_specs(
         grid={},
-        mission="/m.script",
+        script_path="/m.script",
         output_dir="/o",
     )
     assert len(specs) == 1
@@ -168,11 +168,11 @@ def test_expand_empty_grid_yields_one_spec() -> None:
 
 def test_expand_propagates_validation_errors() -> None:
     with pytest.raises(SweepConfigError):
-        expand_grid_to_run_specs(grid={"a": []}, mission="/m.script", output_dir="/o")
+        expand_grid_to_run_specs(grid={"a": []}, script_path="/m.script", output_dir="/o")
     with pytest.raises(SweepConfigError):
         expand_grid_to_run_specs(
             grid={1: [1]},  # type: ignore[dict-item]
-            mission="/m.script",
+            script_path="/m.script",
             output_dir="/o",
         )
 
@@ -180,7 +180,7 @@ def test_expand_propagates_validation_errors() -> None:
 def test_expand_output_round_trips_through_runspec_to_dict() -> None:
     specs = expand_grid_to_run_specs(
         grid={"a": [1, 2]},
-        mission="/m.script",
+        script_path="/m.script",
         output_dir="/o",
     )
     serialised = json.dumps([s.to_dict() for s in specs], sort_keys=True)
