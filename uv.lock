@@ -1258,6 +1258,9 @@ dependencies = [
 dask = [
     { name = "distributed" },
 ]
+examples = [
+    { name = "matplotlib" },
+]
 plot = [
     { name = "matplotlib" },
 ]
@@ -1286,6 +1289,7 @@ requires-dist = [
     { name = "distributed", marker = "extra == 'dask'", specifier = ">=2024.1" },
     { name = "gmat-run", specifier = ">=0.3" },
     { name = "joblib", specifier = ">=1.4" },
+    { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.8" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", specifier = ">=2.0" },
@@ -1294,7 +1298,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
-provides-extras = ["dask", "ray", "plot"]
+provides-extras = ["dask", "ray", "plot", "examples"]
 
 [package.metadata.requires-dev]
 dev = [

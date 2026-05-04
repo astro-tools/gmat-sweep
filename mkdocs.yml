@@ -38,11 +38,19 @@ nav:
   - Parameter spec: parameter-spec.md
   - Manifest schema: manifest-schema.md
   - Supported versions: supported-versions.md
+  - Examples:
+      - examples/index.md
+      - Single-axis SMA scan: examples/01_sma_scan.ipynb
+      - Epoch × TOF grid: examples/02_epoch_arrival_grid.ipynb
+      - Surviving a kill: examples/03_killed_sweep_recovery.ipynb
   - FAQ: faq.md
   - API reference: api.md
 
 plugins:
   - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
   - mkdocstrings:
       default_handler: python
       handlers:
