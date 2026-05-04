@@ -199,6 +199,30 @@ def test_sweep_with_empty_grid_runs_once(tmp_path: Path, fake_gmat_run: FakeGmat
     assert run_ids == [0]
 
 
+# ---- progress -----------------------------------------------------------
+
+
+def test_sweep_progress_false_quiet_on_stderr(
+    tmp_path: Path,
+    fake_gmat_run: FakeGmatRun,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """progress=False propagates from sweep() through to Sweep so the tqdm
+    progress bar does not paint to stderr — needed when notebooks are
+    committed with executed outputs (otherwise each tqdm refresh lands as a
+    captured stderr snapshot in the .ipynb)."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    sweep(script, grid={"Sat.SMA": [7000.0, 7100.0]}, workers=1, out=out, progress=False)
+
+    captured = capsys.readouterr()
+    assert "gmat-sweep" not in captured.err
+    assert "%" not in captured.err
+
+
 # ---- module-import-time logger config -----------------------------------
 
 
