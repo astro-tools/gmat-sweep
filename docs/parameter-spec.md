@@ -56,6 +56,53 @@ being passed in. `gmat-run` itself accepts numpy on the receive side, but
 `gmat-sweep`'s [`RunSpec`][gmat_sweep.RunSpec] is the worker-boundary
 serialisation surface and JSON does not encode numpy scalars natively.
 
+## Stochastic specs
+
+For Monte Carlo and Latin hypercube sweeps the per-axis value is a
+*distribution* rather than a sequence. `gmat-sweep` accepts three
+shorthand tuples and a pass-through for any pre-frozen
+[`scipy.stats`](https://docs.scipy.org/doc/scipy/reference/stats.html)
+distribution:
+
+| Spec                          | Equivalent `scipy.stats` call                       |
+|-------------------------------|------------------------------------------------------|
+| `("normal", mu, sigma)`       | `scipy.stats.norm(loc=mu, scale=sigma)`              |
+| `("uniform", lo, hi)`         | `scipy.stats.uniform(loc=lo, scale=hi - lo)`         |
+| `("lognormal", mu, sigma)`    | `scipy.stats.lognorm(s=sigma, scale=exp(mu))`        |
+| any `scipy.stats.*` frozen rv | the rv itself (passes through unchanged)             |
+
+```python
+import math
+from scipy import stats
+
+# Three shorthand forms.
+("normal", 7000.0, 5.0)            # SMA, ±5 km 1-σ
+("uniform", 0.0, 360.0)             # RAAN, anywhere on the equator
+("lognormal", math.log(100), 0.1)   # dry mass around 100 kg, log-normal spread
+
+# Anything else: hand in a pre-frozen distribution directly.
+stats.triang(c=0.5, loc=-1, scale=2)
+```
+
+The shorthands cover the cases that come up day-to-day in dispersion
+analyses; reach for the pre-frozen path when you need a different shape
+(triangular, beta, a truncated normal via `scipy.stats.truncnorm`, etc.).
+
+`mu` and `sigma` for `lognormal` are the parameters of the *underlying*
+normal — the mean and standard deviation of `log(X)`, not of `X`. This
+matches `scipy.stats.lognorm`'s convention but trips up callers expecting
+to specify the lognormal's own mean directly.
+
+Validation is strict and happens up front:
+
+- Tag must be one of `"normal"`, `"uniform"`, `"lognormal"`.
+- `sigma` must be `> 0` for `normal` and `lognormal`.
+- `hi` must be `> lo` for `uniform`.
+- All numeric parameters must be finite (no `nan` or `inf`).
+
+Any violation raises [`SweepConfigError`][gmat_sweep.SweepConfigError]
+before any run starts.
+
 ## Full-factorial expansion
 
 [`sweep()`][gmat_sweep.sweep] uses the full-factorial expansion in

@@ -131,6 +131,12 @@ ignore_missing_imports = true
 module = ["tqdm", "tqdm.*"]
 ignore_missing_imports = true
 
+# scipy ships no py.typed marker; distributions.py imports scipy.stats and
+# the rv_frozen base class for the small surface used by to_rv_frozen / sample.
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
