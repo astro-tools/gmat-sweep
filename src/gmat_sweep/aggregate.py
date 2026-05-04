@@ -20,6 +20,7 @@ v0.1 assumes one Parquet output per ``ok`` run. Multi-report runs raise
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -29,7 +30,6 @@ import pyarrow.dataset as ds
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from gmat_sweep.manifest import Manifest, ManifestEntry
 
@@ -122,14 +122,18 @@ def _read_ok_runs(
     if not paths_with_run_id:
         return pd.DataFrame()
 
-    paths_str = [str(p) for p, _ in paths_with_run_id]
-    path_to_run_id = {str(p): run_id for p, run_id in paths_with_run_id}
+    # pyarrow normalises filesystem paths to forward-slash form on every
+    # platform, so we key path -> run_id in POSIX form and look up
+    # fragment.path the same way. Without this, str(WindowsPath(...)) on
+    # Windows produces backslash keys that never match what pyarrow returns.
+    paths_str = [Path(p).as_posix() for p, _ in paths_with_run_id]
+    path_to_run_id = {Path(p).as_posix(): run_id for p, run_id in paths_with_run_id}
 
     dataset = ds.dataset(paths_str, format="parquet")  # type: ignore[no-untyped-call]
 
     frames: list[pd.DataFrame] = []
     for fragment in dataset.get_fragments():
-        run_id = path_to_run_id[fragment.path]
+        run_id = path_to_run_id[Path(fragment.path).as_posix()]
         if spool:
             for batch in fragment.to_batches():
                 frames.append(_batch_to_pandas(batch, run_id))
