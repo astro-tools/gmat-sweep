@@ -113,7 +113,7 @@ def test_worker_applies_overrides_before_run(leo_basic_script: Path, tmp_path: P
     outcome = run_one(spec)
     assert outcome.status == "ok", outcome.stderr
 
-    df = pd.read_parquet(outcome.output_paths["RF"])
+    df = pd.read_parquet(outcome.output_paths["report__RF"])
     # The first ReportFile row is the epoch state — Sat.Earth.SMA there
     # must equal the override exactly. If the worker dropped the override
     # (e.g. applied it after run() instead of before), the value would be

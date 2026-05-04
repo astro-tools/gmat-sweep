@@ -40,6 +40,10 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.lazy_multiindex
 
+::: gmat_sweep.lazy_ephemerides
+
+::: gmat_sweep.lazy_contacts
+
 ## Exceptions
 
 ::: gmat_sweep.GmatSweepError

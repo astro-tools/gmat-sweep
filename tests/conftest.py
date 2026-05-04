@@ -18,6 +18,8 @@ class FakeResults:
     """Stand-in for :class:`gmat_run.results.Results` — only the bits the worker reads."""
 
     reports: Mapping[str, pd.DataFrame] = field(default_factory=dict)
+    ephemerides: Mapping[str, pd.DataFrame] = field(default_factory=dict)
+    contacts: Mapping[str, pd.DataFrame] = field(default_factory=dict)
     log: str = ""
 
 

@@ -60,11 +60,11 @@ def test_run_one_ok_writes_parquet_and_returns_ok(
     assert outcome.stderr is None
     assert outcome.duration_s >= 0
     assert outcome.started_at <= outcome.ended_at
-    assert set(outcome.output_paths) == {"R1", "R2"}
+    assert set(outcome.output_paths) == {"report__R1", "report__R2"}
 
     # Parquet round-trip.
-    pd.testing.assert_frame_equal(pd.read_parquet(outcome.output_paths["R1"]), df_a)
-    pd.testing.assert_frame_equal(pd.read_parquet(outcome.output_paths["R2"]), df_b)
+    pd.testing.assert_frame_equal(pd.read_parquet(outcome.output_paths["report__R1"]), df_a)
+    pd.testing.assert_frame_equal(pd.read_parquet(outcome.output_paths["report__R2"]), df_b)
 
     # Worker log present and contains override + engine-log lines.
     log_text = (out_dir / "worker.log").read_text(encoding="utf-8")
@@ -201,9 +201,10 @@ def test_run_one_failed_when_parquet_write_fails(
 
     out_dir = tmp_path / "run-0"
     out_dir.mkdir()
-    # Block the parquet write by pre-creating R1.parquet as a *directory* —
-    # df.to_parquet then fails with IsADirectoryError / PermissionError.
-    (out_dir / "R1.parquet").mkdir()
+    # Block the parquet write by pre-creating report__R1.parquet as a
+    # *directory* — df.to_parquet then fails with
+    # IsADirectoryError / PermissionError.
+    (out_dir / "report__R1.parquet").mkdir()
 
     outcome = run_one(_make_spec(output_dir=out_dir))
 
@@ -286,7 +287,7 @@ def test_run_one_synthesizes_time_column_from_first_datetime(
     outcome = run_one(_make_spec(output_dir=out_dir))
 
     assert outcome.status == "ok"
-    written = pd.read_parquet(outcome.output_paths["R"])
+    written = pd.read_parquet(outcome.output_paths["report__R"])
     assert "time" in written.columns
     assert "Sat.UTCGregorian" in written.columns
     pd.testing.assert_series_equal(written["time"], written["Sat.UTCGregorian"], check_names=False)
@@ -305,7 +306,7 @@ def test_run_one_leaves_existing_time_column_untouched(
     fake_gmat_run.install_loader(run_hook=_run)
     outcome = run_one(_make_spec(output_dir=tmp_path / "run-0"))
 
-    written = pd.read_parquet(outcome.output_paths["R"])
+    written = pd.read_parquet(outcome.output_paths["report__R"])
     pd.testing.assert_series_equal(
         written["time"], pd.Series(explicit_time, name="time"), check_names=False
     )
@@ -325,9 +326,92 @@ def test_run_one_with_no_datetime_columns_writes_unchanged(
     fake_gmat_run.install_loader(run_hook=_run)
     outcome = run_one(_make_spec(output_dir=tmp_path / "run-0"))
 
-    written = pd.read_parquet(outcome.output_paths["R"])
+    written = pd.read_parquet(outcome.output_paths["report__R"])
     assert "time" not in written.columns
     pd.testing.assert_frame_equal(written, df)
+
+
+# ---- ephemeris writes ---------------------------------------------------
+#
+# EphemerisFile DataFrames carry their epoch in a column named "Epoch" (OEM,
+# STK, and SPK parsers all surface it that way). The worker reuses
+# _synthesize_time_column so the same (run_id, time) aggregator works against
+# ephemeris parquets without renaming the user's columns.
+
+
+def test_run_one_writes_ephemeris_parquet_with_synthesized_time(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    eph = pd.DataFrame(
+        {
+            "Epoch": pd.to_datetime(["2026-05-04T00:00:00", "2026-05-04T00:01:00"]),
+            "X": [7000.0, 7001.0],
+        }
+    )
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(ephemerides={"SatEphem": eph})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    out_dir = tmp_path / "run-0"
+    outcome = run_one(_make_spec(output_dir=out_dir))
+
+    assert outcome.status == "ok"
+    assert set(outcome.output_paths) == {"ephemeris__SatEphem"}
+    written = pd.read_parquet(outcome.output_paths["ephemeris__SatEphem"])
+    assert "time" in written.columns
+    assert "Epoch" in written.columns
+    pd.testing.assert_series_equal(written["time"], written["Epoch"], check_names=False)
+
+
+# ---- contact writes -----------------------------------------------------
+#
+# ContactLocator DataFrames have variable schemas (Legacy vs. five tabular
+# variants) and are intervals, not point samples. The worker assigns a fresh
+# integer interval_id column so the contacts aggregator can use
+# (run_id, interval_id) as the MultiIndex.
+
+
+def test_run_one_writes_contact_parquet_with_interval_id(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    starts = pd.to_datetime(["2026-05-04T00:00:00", "2026-05-04T01:00:00"])
+    stops = pd.to_datetime(["2026-05-04T00:05:00", "2026-05-04T01:08:00"])
+    contact = pd.DataFrame({"Start": starts, "Stop": stops, "Observer": ["GS1", "GS1"]})
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(contacts={"GroundContact": contact})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    out_dir = tmp_path / "run-0"
+    outcome = run_one(_make_spec(output_dir=out_dir))
+
+    assert outcome.status == "ok"
+    assert set(outcome.output_paths) == {"contact__GroundContact"}
+    written = pd.read_parquet(outcome.output_paths["contact__GroundContact"])
+    assert list(written["interval_id"]) == [0, 1]
+    assert list(written.columns) == ["Start", "Stop", "Observer", "interval_id"]
+
+
+def test_run_one_writes_all_three_kinds_side_by_side(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    report = pd.DataFrame({"time": pd.to_datetime(["2026-05-04T00:00:00"]), "x": [1.0]})
+    eph = pd.DataFrame({"Epoch": pd.to_datetime(["2026-05-04T00:00:00"]), "X": [7000.0]})
+    contact = pd.DataFrame({"Start": pd.to_datetime(["2026-05-04T00:00:00"]), "Duration": [60.0]})
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(reports={"R": report}, ephemerides={"E": eph}, contacts={"C": contact})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    out_dir = tmp_path / "run-0"
+    outcome = run_one(_make_spec(output_dir=out_dir))
+
+    assert outcome.status == "ok"
+    assert set(outcome.output_paths) == {"report__R", "ephemeris__E", "contact__C"}
+    assert (out_dir / "report__R.parquet").exists()
+    assert (out_dir / "ephemeris__E.parquet").exists()
+    assert (out_dir / "contact__C.parquet").exists()
 
 
 # ---- defensive: a stale handler on the same logger does not bleed across runs ----

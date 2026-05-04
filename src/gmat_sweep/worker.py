@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pandas as pd
@@ -39,8 +40,11 @@ def run_one(spec: RunSpec) -> RunOutcome:
     Loads the script via :class:`gmat_run.Mission`, applies every override in
     ``spec.overrides`` through the dotted-path setter, executes the mission
     with ``working_dir=spec.output_dir`` plus ``**spec.run_options``, and
-    writes each ``ReportFile`` output as a Parquet file under
-    ``spec.output_dir``. Returns :meth:`RunOutcome.ok` on success.
+    writes each ``ReportFile`` / ``EphemerisFile`` / ``ContactLocator``
+    output as a Parquet file under ``spec.output_dir`` named
+    ``<kind>__<resource_name>.parquet``. ``RunOutcome.output_paths`` is
+    keyed on the same prefixed basename so the aggregator can dispatch by
+    output kind. Returns :meth:`RunOutcome.ok` on success.
 
     Any exception raised inside the function (bootstrap failure, override
     rejection, ``GmatRunError``, Parquet write failure, …) is caught and
@@ -79,13 +83,33 @@ def run_one(spec: RunSpec) -> RunOutcome:
             mission[key] = value
         results = mission.run(working_dir=spec.output_dir, **spec.run_options)
 
-        output_paths = {}
-        for name, df in results.reports.items():
-            df = _synthesize_time_column(df)
-            parquet_path = spec.output_dir / f"{name}.parquet"
-            df.to_parquet(parquet_path)
-            output_paths[name] = parquet_path
-            logger.info("wrote report %s -> %s (%d rows)", name, parquet_path, len(df))
+        output_paths: dict[str, Path] = {}
+        for name, report_df in results.reports.items():
+            output_paths[f"report__{name}"] = _write_one(
+                spec.output_dir,
+                kind="report",
+                name=name,
+                df=_synthesize_time_column(report_df),
+                logger=logger,
+            )
+        for name, eph_df in results.ephemerides.items():
+            output_paths[f"ephemeris__{name}"] = _write_one(
+                spec.output_dir,
+                kind="ephemeris",
+                name=name,
+                df=_synthesize_time_column(eph_df),
+                logger=logger,
+            )
+        for name, con_df in results.contacts.items():
+            con_df = con_df.reset_index(drop=True).copy()
+            con_df["interval_id"] = range(len(con_df))
+            output_paths[f"contact__{name}"] = _write_one(
+                spec.output_dir,
+                kind="contact",
+                name=name,
+                df=con_df,
+                logger=logger,
+            )
 
         if results.log:
             logger.info("--- GMAT engine log ---\n%s", results.log)
@@ -115,6 +139,20 @@ def run_one(spec: RunSpec) -> RunOutcome:
     finally:
         logger.removeHandler(handler)
         handler.close()
+
+
+def _write_one(
+    output_dir: Path,
+    *,
+    kind: str,
+    name: str,
+    df: pd.DataFrame,
+    logger: logging.Logger,
+) -> Path:
+    parquet_path = output_dir / f"{kind}__{name}.parquet"
+    df.to_parquet(parquet_path)
+    logger.info("wrote %s %s -> %s (%d rows)", kind, name, parquet_path, len(df))
+    return parquet_path
 
 
 def _synthesize_time_column(df: pd.DataFrame) -> pd.DataFrame:
