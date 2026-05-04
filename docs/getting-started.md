@@ -2,18 +2,22 @@
 
 ## Install
 
-`gmat-sweep` is not yet on PyPI. Install from source:
-
 ```bash
-pip install git+https://github.com/astro-tools/gmat-sweep.git
+pip install gmat-sweep
 ```
 
-Or, if you are working inside a checkout:
+The `[examples]` extra pulls in `matplotlib` for the example notebooks:
+
+```bash
+pip install gmat-sweep[examples]
+```
+
+To work on `gmat-sweep` itself, clone and sync the dev groups:
 
 ```bash
 git clone https://github.com/astro-tools/gmat-sweep.git
 cd gmat-sweep
-uv sync
+uv sync --all-groups
 ```
 
 You also need a working **GMAT install** on the same machine. `gmat-sweep`
