@@ -116,6 +116,12 @@ ignore_missing_imports = true
 module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 
+# tqdm ships no py.typed marker; sweep.py imports tqdm.auto and only uses the
+# .update / .close surface for the orchestrator's progress bar.
+[[tool.mypy.overrides]]
+module = ["tqdm", "tqdm.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
