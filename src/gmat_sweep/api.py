@@ -1,9 +1,4 @@
-"""Public entry points: sweep, monte_carlo, latin_hypercube.
-
-v0.1 ships :func:`sweep` only — the full-factorial grid path and the
-explicit-row DataFrame path. The Monte Carlo and Latin hypercube wrappers
-land in v0.2 alongside :mod:`gmat_sweep.distributions`.
-"""
+"""Public entry points: sweep, monte_carlo, latin_hypercube."""
 
 from __future__ import annotations
 

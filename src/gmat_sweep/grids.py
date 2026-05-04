@@ -1,8 +1,5 @@
 """Full-factorial, explicit-row, Latin hypercube, and quasi-Monte-Carlo run generators.
 
-v0.1 ships the full-factorial generator and the explicit-row expander; Latin
-hypercube and quasi-Monte-Carlo samplers land in v0.2.
-
 The output of :func:`full_factorial` is byte-for-byte deterministic: keys are
 emitted in sorted (lexicographic) order and combinations enumerate in
 :func:`itertools.product` order over the materialised input iterables. This is
