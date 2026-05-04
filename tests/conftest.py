@@ -91,6 +91,15 @@ class FakeGmatRun:
         self.module.Mission = SimpleNamespace(load=_load)  # type: ignore[attr-defined]
 
 
+_DATA_DIR = Path(__file__).parent / "data"
+
+
+@pytest.fixture(scope="session")
+def leo_basic_script() -> Path:
+    """Absolute path to the minimal LEO mission fixture used by integration tests."""
+    return (_DATA_DIR / "leo_basic.script").resolve()
+
+
 @pytest.fixture
 def fake_gmat_run(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeGmatRun]:
     """Install a fake ``gmat_run`` module into :data:`sys.modules` for the test.

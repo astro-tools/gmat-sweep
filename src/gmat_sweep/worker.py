@@ -18,7 +18,9 @@ from __future__ import annotations
 import logging
 import traceback
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+import pandas as pd
 
 from gmat_sweep.spec import RunOutcome
 
@@ -79,6 +81,7 @@ def run_one(spec: RunSpec) -> RunOutcome:
 
         output_paths = {}
         for name, df in results.reports.items():
+            df = _synthesize_time_column(df)
             parquet_path = spec.output_dir / f"{name}.parquet"
             df.to_parquet(parquet_path)
             output_paths[name] = parquet_path
@@ -112,3 +115,17 @@ def run_one(spec: RunSpec) -> RunOutcome:
     finally:
         logger.removeHandler(handler)
         handler.close()
+
+
+def _synthesize_time_column(df: pd.DataFrame) -> pd.DataFrame:
+    # gmat-run names ReportFile columns after their GMAT field (e.g.
+    # "Sat.UTCGregorian"); aggregate.lazy_multiindex needs a column literally
+    # named "time" to build the (run_id, time) MultiIndex. Copy — don't rename
+    # — the first datetime column so the user's original column names round-trip
+    # untouched into the aggregated DataFrame.
+    if "time" in df.columns:
+        return df
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            return cast(pd.DataFrame, df.assign(time=df[col]))
+    return df
