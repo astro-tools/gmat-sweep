@@ -54,7 +54,7 @@ report more runs than the file actually contains during and after a
 | `python_version`       | `platform.python_version()`.                                                                     |
 | `os_platform`          | `platform.platform()` — same string `gmat-run` records.                                          |
 | `sweep_seed`           | The seed passed to [`sweep(seed=...)`][gmat_sweep.sweep], or `null`. Reserved for v0.2 Monte Carlo runs. |
-| `parameter_spec`       | The materialised grid: every iterable expanded to a list, keys preserved verbatim.               |
+| `parameter_spec`       | The materialised grid for grid sweeps (every iterable expanded to a list, keys preserved verbatim) or a tagged `{"_kind": "explicit", "columns": [...], "rows": [[...]]}` object for explicit-row sweeps. See [Parameter spec](parameter-spec.md#explicit-row-sweeps). |
 | `run_count`            | The number of runs in the sweep at launch.                                                       |
 
 ### Canonical script hash

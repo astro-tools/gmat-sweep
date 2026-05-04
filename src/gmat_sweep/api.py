@@ -1,8 +1,8 @@
 """Public entry points: sweep, monte_carlo, latin_hypercube.
 
-v0.1 ships :func:`sweep` only — the full-factorial parameter-grid path. The
-Monte Carlo and Latin hypercube wrappers land in v0.2 alongside
-:mod:`gmat_sweep.distributions`.
+v0.1 ships :func:`sweep` only — the full-factorial grid path and the
+explicit-row DataFrame path. The Monte Carlo and Latin hypercube wrappers
+land in v0.2 alongside :mod:`gmat_sweep.distributions`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gmat_sweep.backends.joblib import LocalJoblibPool
-from gmat_sweep.grids import expand_grid_to_run_specs
+from gmat_sweep.errors import SweepConfigError
+from gmat_sweep.grids import expand_grid_to_run_specs, expand_samples_to_run_specs
 from gmat_sweep.sweep import Sweep
 
 if TYPE_CHECKING:
@@ -31,19 +32,22 @@ _MANIFEST_FILENAME = "manifest.jsonl"
 def sweep(
     mission: str | Path,
     *,
-    grid: Mapping[str, Iterable[Any]],
+    grid: Mapping[str, Iterable[Any]] | None = None,
+    samples: pd.DataFrame | None = None,
     workers: int = -1,
     out: Path | None = None,
     seed: int | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
-    """Run a full-factorial parameter sweep over a GMAT mission.
+    """Run a parameter sweep over a GMAT mission.
 
-    Builds the cartesian product of ``grid`` into one :class:`RunSpec` per
-    combination, dispatches them through a fresh :class:`LocalJoblibPool`,
-    appends each completion to a JSON Lines manifest under ``out``, and
-    returns the aggregated ``(run_id, time)``-MultiIndexed
-    :class:`pandas.DataFrame`.
+    Two mutually exclusive run-set shapes are accepted: pass ``grid=`` for a
+    full-factorial cartesian product, or ``samples=`` for an explicit
+    pre-built DataFrame (one run per row, columns are dotted-path field
+    names). Exactly one must be provided. The expanded run set is dispatched
+    through a fresh :class:`LocalJoblibPool`, each completion is appended to
+    a JSON Lines manifest under ``out``, and the aggregated
+    ``(run_id, time)``-MultiIndexed :class:`pandas.DataFrame` is returned.
 
     Parameters
     ----------
@@ -52,7 +56,14 @@ def sweep(
     grid:
         Mapping from dotted-path field name (e.g. ``"Sat.SMA"``) to the
         sequence of values to sweep. Iterables are materialised once at call
-        time so callers may pass generators.
+        time so callers may pass generators. Mutually exclusive with
+        ``samples``.
+    samples:
+        :class:`pandas.DataFrame` whose columns are dotted-path field names
+        and whose rows are the run set. The default :class:`pandas.RangeIndex`
+        becomes ``run_id``; non-default indices raise. Mutually exclusive with
+        ``grid``. Use this when you have already built a sample design (Latin
+        hypercube, Halton/Sobol, custom) and want to hand it in directly.
     workers:
         Number of subprocess workers. ``-1`` (default) uses every available
         core; positive integers cap the pool. Forwarded to
@@ -80,14 +91,19 @@ def sweep(
         :func:`gmat_sweep.aggregate.lazy_multiindex`. Failed and skipped runs
         appear as one NaN-filled row with ``__status`` set accordingly — a
         single bad run does not abort the sweep or raise from this call.
-    """
-    mission_path = Path(mission)
 
-    # Materialise grid values once: expand_grid_to_run_specs would do it for
-    # the cartesian product, but we also need the materialised dict for the
-    # manifest header (generators don't survive json.dumps), so do it up
-    # front and reuse the same object.
-    materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
+    Raises
+    ------
+    SweepConfigError
+        If both ``grid`` and ``samples`` are passed, if neither is passed, or
+        if either argument fails its own structural validation.
+    """
+    if grid is not None and samples is not None:
+        raise SweepConfigError("sweep() accepts either grid= or samples=, not both")
+    if grid is None and samples is None:
+        raise SweepConfigError("sweep() requires one of grid= or samples=")
+
+    mission_path = Path(mission)
 
     tempdir: tempfile.TemporaryDirectory[str] | None
     if out is None:
@@ -98,7 +114,28 @@ def sweep(
         output_dir = Path(out)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    runs = expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
+    parameter_spec: dict[str, Any]
+    if grid is not None:
+        # Materialise grid values once: expand_grid_to_run_specs would do it
+        # for the cartesian product, but we also need the materialised dict
+        # for the manifest header (generators don't survive json.dumps), so
+        # do it up front and reuse the same object.
+        materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
+        runs = expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
+        parameter_spec = materialised_grid
+    else:
+        assert samples is not None  # narrowed by the XOR check above
+        runs = expand_samples_to_run_specs(samples, mission_path, output_dir)
+        # Tagged shape lets Manifest.load distinguish explicit-row sweeps from
+        # untagged grid headers without breaking back-compat with v0.1 grid
+        # manifests already on disk. ``rows`` is a list-of-lists in column
+        # order so the round-trip is a one-line pd.DataFrame(...) call.
+        parameter_spec = {
+            "_kind": "explicit",
+            "columns": [str(c) for c in samples.columns],
+            "rows": samples.values.tolist(),
+        }
+
     manifest_path = output_dir / _MANIFEST_FILENAME
 
     with LocalJoblibPool(workers=workers) as pool:
@@ -109,7 +146,7 @@ def sweep(
                 manifest_path=manifest_path,
                 output_dir=output_dir,
                 script_path=mission_path,
-                parameter_spec=materialised_grid,
+                parameter_spec=parameter_spec,
                 sweep_seed=seed,
                 progress=progress,
             )

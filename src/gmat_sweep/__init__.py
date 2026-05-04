@@ -13,7 +13,11 @@ from gmat_sweep.errors import (
     RunFailed,
     SweepConfigError,
 )
-from gmat_sweep.grids import expand_grid_to_run_specs, full_factorial
+from gmat_sweep.grids import (
+    expand_grid_to_run_specs,
+    expand_samples_to_run_specs,
+    full_factorial,
+)
 from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 from gmat_sweep.spec import RunOutcome, RunSpec, SweepSpec
 from gmat_sweep.sweep import Sweep
@@ -48,6 +52,7 @@ __all__ = [
     "__version__",
     "canonical_script_sha256",
     "expand_grid_to_run_specs",
+    "expand_samples_to_run_specs",
     "full_factorial",
     "lazy_contacts",
     "lazy_ephemerides",

@@ -135,6 +135,105 @@ overrides — the cartesian product of nothing has one element. Empty
 *values* (e.g. `{"a": []}`) are rejected with
 [`SweepConfigError`][gmat_sweep.SweepConfigError].
 
+## Explicit-row sweeps
+
+Pass a pre-built `pandas.DataFrame` as `samples=` instead of `grid=` when you
+want full control over which rows run. The DataFrame's columns are
+dotted-path field names, its rows are the run set, and its
+`pd.RangeIndex(start=0, …)` becomes the `run_id` axis on the result frame.
+
+```python
+import pandas as pd
+from gmat_sweep import sweep
+
+samples = pd.DataFrame(
+    {
+        "Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0],
+        "Sat.ECC": [0.001, 0.002, 0.003, 0.004],
+    }
+)
+df = sweep("mission.script", samples=samples)
+# 4 runs, run_ids 0..3, one per DataFrame row
+```
+
+`grid=` and `samples=` are **mutually exclusive** — passing both raises
+[`SweepConfigError`][gmat_sweep.SweepConfigError], and so does passing
+neither.
+
+This is the underlying primitive the upcoming `monte_carlo` and
+`latin_hypercube` wrappers build on. Until those land in v0.2 you can
+construct any sampling design yourself with
+[`scipy.stats.qmc`](https://docs.scipy.org/doc/scipy/reference/stats.qmc.html)
+and hand the result in directly.
+
+### Worked example: a 64-point Latin hypercube
+
+`scipy.stats.qmc.LatinHypercube` returns unit-cube samples; scale each
+column to its physical range with `qmc.scale`, wrap in a DataFrame, and
+pass through:
+
+```python
+import pandas as pd
+from scipy.stats import qmc
+
+from gmat_sweep import sweep
+
+# 1. Build the unit-cube design.
+sampler = qmc.LatinHypercube(d=2, seed=42)
+unit = sampler.random(n=64)  # shape (64, 2), each column ∈ [0, 1)
+
+# 2. Scale each column to its physical range.
+scaled = qmc.scale(
+    unit,
+    l_bounds=[6900.0, 0.0005],
+    u_bounds=[7400.0, 0.005],
+)
+
+# 3. Hand to sweep().
+samples = pd.DataFrame(scaled, columns=["Sat.SMA", "Sat.ECC"])
+df = sweep("mission.script", samples=samples, out="./lhs-sweep")
+```
+
+The DataFrame must have:
+
+- A default `pd.RangeIndex(start=0, stop=N)` — call `samples.reset_index(drop=True)`
+  if you sliced or filtered rows. A non-default index raises
+  [`SweepConfigError`][gmat_sweep.SweepConfigError].
+- Unique, all-`str` column names — duplicate columns would silently lose
+  data when each row is converted to an override dict.
+- No fully-NaN columns. A NaN inside a single cell is fine and is
+  forwarded to `gmat-run` as-is — `gmat-run` decides whether NaN is a
+  valid value for a given dotted path.
+
+### Manifest serialisation
+
+The manifest header records `samples` under `parameter_spec` with a
+discriminator tag so a later loader can tell sample-based sweeps apart
+from untagged grid headers:
+
+```json
+{
+  "parameter_spec": {
+    "_kind":   "explicit",
+    "columns": ["Sat.SMA", "Sat.ECC"],
+    "rows":    [[7000.0, 0.001], [7100.0, 0.002], …]
+  }
+}
+```
+
+Reconstructing the DataFrame after the fact is one line:
+
+```python
+from gmat_sweep import Manifest
+
+m = Manifest.load("./lhs-sweep/manifest.jsonl")
+samples = pd.DataFrame(m.parameter_spec["rows"], columns=m.parameter_spec["columns"])
+```
+
+Grid sweeps continue to use the untagged
+`{"<dotted-path>": [values, …], …}` header shape — the discriminator only
+appears on explicit-row sweeps.
+
 ## CLI mini-grammar
 
 The `gmat-sweep run` CLI accepts the same grids via repeated `--grid`
