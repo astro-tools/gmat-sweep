@@ -35,6 +35,7 @@ def sweep(
     workers: int = -1,
     out: Path | None = None,
     seed: int | None = None,
+    progress: bool = True,
 ) -> pd.DataFrame:
     """Run a full-factorial parameter sweep over a GMAT mission.
 
@@ -66,6 +67,11 @@ def sweep(
     seed:
         Optional integer recorded on the manifest header. v0.1 does not
         consume it; reserved for v0.2 Monte Carlo runs.
+    progress:
+        ``True`` (default) draws a :mod:`tqdm` progress bar on stderr as
+        runs complete. Set to ``False`` for non-interactive use (CI logs,
+        notebooks committed with outputs) where the progress bar would
+        otherwise be captured as noisy stderr snapshots.
 
     Returns
     -------
@@ -105,6 +111,7 @@ def sweep(
                 script_path=mission_path,
                 parameter_spec=materialised_grid,
                 sweep_seed=seed,
+                progress=progress,
             )
             .run()
             .to_dataframe()
