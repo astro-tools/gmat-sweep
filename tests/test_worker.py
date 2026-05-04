@@ -259,6 +259,77 @@ def test_run_one_never_raises_for_known_failure_modes(
     assert outcome.stderr
 
 
+# ---- time-column synthesis ----------------------------------------------
+#
+# gmat-run's ReportFile parser names columns after the GMAT field (e.g.
+# "Sat.UTCGregorian"); aggregate.lazy_multiindex needs a column literally
+# called "time". The worker copies the first datetime column to "time"
+# before to_parquet so the user's original column names survive into the
+# aggregated DataFrame.
+
+
+def test_run_one_synthesizes_time_column_from_first_datetime(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    df = pd.DataFrame(
+        {
+            "Sat.UTCGregorian": pd.to_datetime(["2026-05-04T00:00:00", "2026-05-04T00:00:30"]),
+            "Sat.SMA": [7000.0, 7000.0],
+        }
+    )
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(reports={"R": df})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    out_dir = tmp_path / "run-0"
+    outcome = run_one(_make_spec(output_dir=out_dir))
+
+    assert outcome.status == "ok"
+    written = pd.read_parquet(outcome.output_paths["R"])
+    assert "time" in written.columns
+    assert "Sat.UTCGregorian" in written.columns
+    pd.testing.assert_series_equal(written["time"], written["Sat.UTCGregorian"], check_names=False)
+
+
+def test_run_one_leaves_existing_time_column_untouched(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    explicit_time = pd.to_datetime(["2026-05-04T00:00:00"])
+    other_dt = pd.to_datetime(["2099-01-01T00:00:00"])
+    df = pd.DataFrame({"time": explicit_time, "Sat.UTCGregorian": other_dt, "x": [1.0]})
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(reports={"R": df})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    outcome = run_one(_make_spec(output_dir=tmp_path / "run-0"))
+
+    written = pd.read_parquet(outcome.output_paths["R"])
+    pd.testing.assert_series_equal(
+        written["time"], pd.Series(explicit_time, name="time"), check_names=False
+    )
+
+
+def test_run_one_with_no_datetime_columns_writes_unchanged(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    # No datetime column anywhere → nothing to synthesize. The Parquet matches
+    # the input frame verbatim; aggregate.lazy_multiindex's existing ValueError
+    # ("missing the 'time' column") still fires for this user, by design.
+    df = pd.DataFrame({"t_seconds": [0.0, 1.0], "x": [1.0, 2.0]})
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(reports={"R": df})
+
+    fake_gmat_run.install_loader(run_hook=_run)
+    outcome = run_one(_make_spec(output_dir=tmp_path / "run-0"))
+
+    written = pd.read_parquet(outcome.output_paths["R"])
+    assert "time" not in written.columns
+    pd.testing.assert_frame_equal(written, df)
+
+
 # ---- defensive: a stale handler on the same logger does not bleed across runs ----
 
 
