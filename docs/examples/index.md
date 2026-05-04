@@ -1,9 +1,9 @@
 # Examples
 
-End-to-end Jupyter notebooks that exercise the v0.1 `gmat-sweep` surface
-against a local GMAT install. Each notebook is committed with cleared cell
-outputs and re-executed in CI on every push, so the rendered docs always
-reflect the current code.
+End-to-end Jupyter notebooks that exercise the `gmat-sweep` API against a
+local GMAT install. Each notebook is committed with cleared cell outputs
+and re-executed in CI on every push, so the rendered docs always reflect
+the current code.
 
 You can run them locally after `pip install gmat-sweep[examples]` (the extra
 pulls in matplotlib).
@@ -17,5 +17,5 @@ pulls in matplotlib).
 - [Surviving a kill](03_killed_sweep_recovery.ipynb) — launch a sweep as a
   subprocess, send `SIGINT` mid-run, and walk through inspecting the partial
   manifest with `gmat-sweep show` and reloading the partial DataFrame from
-  disk. Demonstrates the v0.1 durability claim; programmatic
+  disk. Demonstrates the durability claim; programmatic
   `Sweep.from_manifest(...).resume()` lands in v0.2.
