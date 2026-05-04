@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
-from gmat_sweep.aggregate import lazy_multiindex
+from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
 from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 
 if TYPE_CHECKING:
@@ -140,9 +140,29 @@ class Sweep:
             raise RuntimeError("Sweep.to_manifest requires Sweep.run() to have been called")
         return self._manifest
 
-    def to_dataframe(self) -> pd.DataFrame:
-        """Aggregate the sweep's per-run Parquet outputs into one DataFrame."""
-        return lazy_multiindex(self.to_manifest(), self._output_dir)
+    def to_dataframe(self, name: str | None = None) -> pd.DataFrame:
+        """Aggregate the sweep's ``ReportFile`` outputs into one DataFrame.
+
+        ``name`` selects which report to aggregate when the sweep produced
+        multiple ``ReportFile`` resources per run; ``None`` (default) picks
+        the sole report when exactly one was produced. See
+        :func:`gmat_sweep.aggregate.lazy_multiindex` for the full contract.
+        """
+        return lazy_multiindex(self.to_manifest(), self._output_dir, name=name)
+
+    def to_ephemerides(self, name: str | None = None) -> pd.DataFrame:
+        """Aggregate the sweep's ``EphemerisFile`` outputs into one DataFrame.
+
+        See :func:`gmat_sweep.aggregate.lazy_ephemerides` for the contract.
+        """
+        return lazy_ephemerides(self.to_manifest(), self._output_dir, name=name)
+
+    def to_contacts(self, name: str | None = None) -> pd.DataFrame:
+        """Aggregate the sweep's ``ContactLocator`` outputs into one DataFrame.
+
+        See :func:`gmat_sweep.aggregate.lazy_contacts` for the contract.
+        """
+        return lazy_contacts(self.to_manifest(), self._output_dir, name=name)
 
     def _build_manifest(self) -> Manifest:
         # Local import: gmat_sweep.__init__ sets __version__ as part of module
