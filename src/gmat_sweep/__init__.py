@@ -10,6 +10,7 @@ from gmat_sweep.errors import (
     SweepConfigError,
 )
 from gmat_sweep.grids import expand_grid_to_run_specs, full_factorial
+from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 from gmat_sweep.spec import RunOutcome, RunSpec, SweepSpec
 
 try:
@@ -20,13 +21,16 @@ except PackageNotFoundError:
 __all__ = [
     "BackendError",
     "GmatSweepError",
+    "Manifest",
     "ManifestCorruptError",
+    "ManifestEntry",
     "RunFailed",
     "RunOutcome",
     "RunSpec",
     "SweepConfigError",
     "SweepSpec",
     "__version__",
+    "canonical_script_sha256",
     "expand_grid_to_run_specs",
     "full_factorial",
 ]
