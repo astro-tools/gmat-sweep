@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from gmat_sweep.backends import Pool
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -24,6 +25,7 @@ __all__ = [
     "Manifest",
     "ManifestCorruptError",
     "ManifestEntry",
+    "Pool",
     "RunFailed",
     "RunOutcome",
     "RunSpec",
