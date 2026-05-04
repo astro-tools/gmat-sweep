@@ -9,6 +9,7 @@ from gmat_sweep.errors import (
     RunFailed,
     SweepConfigError,
 )
+from gmat_sweep.grids import expand_grid_to_run_specs, full_factorial
 from gmat_sweep.spec import RunOutcome, RunSpec, SweepSpec
 
 try:
@@ -26,4 +27,6 @@ __all__ = [
     "SweepConfigError",
     "SweepSpec",
     "__version__",
+    "expand_grid_to_run_specs",
+    "full_factorial",
 ]
