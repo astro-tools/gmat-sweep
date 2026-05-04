@@ -1,0 +1,73 @@
+% Minimal LEO mission fixture for the gmat-sweep validation test layer.
+%
+% Hand-authored so the integration tests can stand up a 16-run sweep without
+% pulling in stock-sample SupportFiles (.cof, weather files) and without the
+% wall-clock cost of a full LEO stationkeeping run. One Spacecraft, a tiny
+% point-mass force model, RK89, one ImpulsiveBurn (so the param-roundtrip test
+% has a vector-typed field to set), one ReportFile, and a 60-second propagate.
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft Sat;
+Sat.DateFormat       = UTCGregorian;
+Sat.Epoch            = '01 Jan 2026 00:00:00.000';
+Sat.CoordinateSystem = EarthMJ2000Eq;
+Sat.DisplayStateType = Keplerian;
+Sat.SMA              = 7000;
+Sat.ECC              = 0.001;
+Sat.INC              = 28.5;
+Sat.RAAN             = 0;
+Sat.AOP              = 0;
+Sat.TA               = 0;
+
+%----------------------------------------
+%---------- ForceModel
+%----------------------------------------
+
+Create ForceModel FM;
+FM.CentralBody = Earth;
+FM.PrimaryBodies = {Earth};
+FM.Drag.AtmosphereModel = None;
+FM.SRP = Off;
+FM.GravityField.Earth.Degree = 0;
+FM.GravityField.Earth.Order = 0;
+
+%----------------------------------------
+%---------- Propagator
+%----------------------------------------
+
+Create Propagator Prop;
+Prop.FM        = FM;
+Prop.Type      = RungeKutta89;
+Prop.InitialStepSize = 30;
+Prop.Accuracy        = 1e-9;
+
+%----------------------------------------
+%---------- Burn (vector-valued field surface for param-roundtrip)
+%----------------------------------------
+
+Create ImpulsiveBurn DV;
+DV.CoordinateSystem = Local;
+DV.Origin           = Earth;
+DV.Axes             = VNB;
+DV.Element1         = 0.0;
+DV.Element2         = 0.0;
+DV.Element3         = 0.0;
+
+%----------------------------------------
+%---------- ReportFile
+%----------------------------------------
+
+Create ReportFile RF;
+RF.Filename     = 'sat.report';
+RF.WriteHeaders = On;
+RF.Add          = {Sat.UTCGregorian, Sat.EarthMJ2000Eq.X, Sat.EarthMJ2000Eq.Y, Sat.EarthMJ2000Eq.Z, Sat.Earth.SMA, Sat.Earth.ECC};
+
+%----------------------------------------
+%---------- Mission Sequence
+%----------------------------------------
+
+BeginMissionSequence;
+Propagate Prop(Sat) {Sat.ElapsedSecs = 60};
