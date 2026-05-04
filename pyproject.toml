@@ -74,6 +74,12 @@ docs = [
   "mkdocs-material>=9.5",
   "mkdocstrings[python]>=0.26",
   "mkdocs-jupyter>=0.25",
+  # Satisfies tqdm.auto's IProgress dependency at notebook-execution time.
+  # Without it, every `jupyter execute --inplace` of an example notebook
+  # captures a TqdmWarning to stderr (which bakes the executor's local venv
+  # path into the committed cell output). Required at refresh time, not at
+  # docs-build time, so it lives here rather than as a runtime dependency.
+  "ipywidgets>=8.1",
 ]
 
 [tool.hatch.build.targets.wheel]
