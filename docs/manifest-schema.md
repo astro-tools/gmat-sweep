@@ -86,7 +86,7 @@ checked out under different line-ending settings produce identical hashes.
 | `run_id`       | Sequential integer assigned at grid-expansion time, starting at `0`. Unique within a sweep.                  |
 | `overrides`    | The override dict applied for this run — exactly the slice of the grid that produced it.                     |
 | `status`       | One of `"ok"`, `"failed"`, `"skipped"`. v0.1 only emits `"ok"` and `"failed"`.                                |
-| `output_paths` | Map from the report name (matched against the parsed `ReportFile` resource) to the per-run Parquet path. Empty `{}` for non-`ok` runs. |
+| `output_paths` | Map from the prefixed output basename (`report__<name>`, `ephemeris__<name>`, `contact__<name>`) to the per-run Parquet path. Empty `{}` for non-`ok` runs. The prefix encodes the GMAT output kind so [`lazy_multiindex`][gmat_sweep.lazy_multiindex] / [`lazy_ephemerides`][gmat_sweep.lazy_ephemerides] / [`lazy_contacts`][gmat_sweep.lazy_contacts] can dispatch without reading the file. |
 | `started_at`   | UTC `datetime` the worker began this run, ISO-8601 with tz offset.                                           |
 | `ended_at`     | UTC `datetime` the worker returned its outcome, ISO-8601.                                                    |
 | `duration_s`   | `(ended_at - started_at).total_seconds()`. Computed once on the worker side; the three timing fields cannot disagree. |
@@ -95,12 +95,20 @@ checked out under different line-ending settings produce identical hashes.
 
 ### `output_paths` invariant
 
-For `status == "ok"` entries, `output_paths` is non-empty. v0.1 assumes
-exactly one `ReportFile` per run; if a future script produces multiple,
-[`lazy_multiindex()`][gmat_sweep.lazy_multiindex] raises `NotImplementedError`
-and defers to the v0.2 reshape helpers. Whether a Parquet path is recorded
-as relative or absolute depends on how the worker wrote it; the aggregator
-resolves relative paths against the sweep's `output_dir`.
+For `status == "ok"` entries, `output_paths` is non-empty. Each key is
+one of:
+
+- `report__<name>` — a `ReportFile` resource named `<name>` in the script.
+- `ephemeris__<name>` — an `EphemerisFile` resource (OEM, STK-TimePosVel,
+  or SPK; the worker writes the parsed DataFrame either way).
+- `contact__<name>` — a `ContactLocator` resource. The Parquet carries a
+  fresh integer `interval_id` column (`0..K-1` per run) the aggregator
+  uses as the secondary index.
+
+A single sweep may produce any mix of the three kinds, and any number of
+each. Whether a Parquet path is recorded as relative or absolute depends
+on how the worker wrote it; the aggregator resolves relative paths
+against the sweep's `output_dir`.
 
 ## Loading a manifest back
 
