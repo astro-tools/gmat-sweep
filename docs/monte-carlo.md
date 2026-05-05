@@ -59,9 +59,8 @@ overrides are identical at every `run_id`. Two calls at `seed=42` and
 `seed=43` produce different draws.
 
 The contract is process-independent — the per-run sub-seeds come from
-[`numpy.random.SeedSequence`][gmat_sweep.distributions.derive_run_seeds],
-so a fresh Python process given the same inputs reconstructs the same
-draws.
+`numpy.random.SeedSequence`, so a fresh Python process given the same
+inputs reconstructs the same draws.
 
 `seed=None` falls back to OS entropy and is **not** reproducible.
 

@@ -110,8 +110,8 @@ from each distribution; the empirical coverage of any single axis is only
 as good as the law of large numbers makes it for the chosen `n`.
 
 [`latin_hypercube()`][gmat_sweep.latin_hypercube] uses
-[`scipy.stats.qmc.LatinHypercube`][scipy.stats.qmc.LatinHypercube] to
-stratify each axis into `n` equal-probability bins before transforming
+[`scipy.stats.qmc.LatinHypercube`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html)
+to stratify each axis into `n` equal-probability bins before transforming
 through the distribution's quantile function. One sample per bin per axis
 is guaranteed by construction, so the marginal coverage of every axis is
 uniform at any `n`.
