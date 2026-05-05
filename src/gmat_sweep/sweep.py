@@ -64,8 +64,9 @@ class Sweep:
         The original sweep parameterisation (e.g. the materialised grid) —
         recorded verbatim in the manifest header for reproducibility.
     sweep_seed:
-        Optional integer seed recorded on the manifest. v0.1 does not consume
-        it; reserved for v0.2 Monte Carlo runs.
+        Optional integer seed recorded on the manifest. ``Sweep`` does not
+        consume it directly; the Monte Carlo and Latin hypercube wrappers
+        in :mod:`gmat_sweep.api` use it to derive their per-run draws.
     progress:
         ``True`` (default) wraps the drain loop in a :mod:`tqdm` bar.
         Set to ``False`` for non-interactive use (tests, CI logs).

@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from gmat_sweep.api import sweep
+from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest
 from tests.conftest import FakeGmatRun, FakeResults
@@ -355,3 +355,343 @@ def test_sweep_with_samples_manifest_round_trips_to_dataframe(
     spec = manifest.parameter_spec
     reconstructed = pd.DataFrame(spec["rows"], columns=spec["columns"])
     pd.testing.assert_frame_equal(reconstructed, samples)
+
+
+# ---- monte_carlo ---------------------------------------------------------
+
+
+def test_monte_carlo_returns_n_run_dataframe(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    """Issue #33 headline: ``monte_carlo(n=100, perturb=..., seed=42)``
+    returns a ``(run_id, time)``-indexed DataFrame with run_id cardinality
+    100."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    df = monte_carlo(
+        script,
+        n=100,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out,
+    )
+
+    assert df.index.names == ["run_id", "time"]
+    run_ids = sorted(df.index.get_level_values("run_id").unique().tolist())
+    assert run_ids == list(range(100))
+
+
+def test_monte_carlo_two_calls_at_same_seed_produce_equal_overrides(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Determinism contract: two calls at the same ``(n, perturb, seed)``
+    produce manifests whose recorded per-run overrides are identical at
+    every run_id."""
+    script = _write_script(tmp_path)
+    out_a = tmp_path / "out-a"
+    out_b = tmp_path / "out-b"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    monte_carlo(
+        script,
+        n=20,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out_a,
+    )
+    monte_carlo(
+        script,
+        n=20,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out_b,
+    )
+
+    a = {e.run_id: e.overrides for e in Manifest.load(out_a / "manifest.jsonl").entries}
+    b = {e.run_id: e.overrides for e in Manifest.load(out_b / "manifest.jsonl").entries}
+    assert a == b
+
+
+def test_monte_carlo_different_seed_produces_different_overrides(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    out_a = tmp_path / "out-a"
+    out_b = tmp_path / "out-b"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    monte_carlo(
+        script,
+        n=20,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out_a,
+    )
+    monte_carlo(
+        script,
+        n=20,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=43,
+        workers=1,
+        out=out_b,
+    )
+
+    a = {e.run_id: e.overrides for e in Manifest.load(out_a / "manifest.jsonl").entries}
+    b = {e.run_id: e.overrides for e in Manifest.load(out_b / "manifest.jsonl").entries}
+    assert a != b
+
+
+def test_monte_carlo_adding_a_perturbed_parameter_preserves_other_draws(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Issue #33 order-independence contract: adding a second perturbed
+    parameter to an existing perturb dict does not change the draws of the
+    first parameter at any run_id."""
+    script = _write_script(tmp_path)
+    out_one = tmp_path / "out-one"
+    out_two = tmp_path / "out-two"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    monte_carlo(
+        script,
+        n=20,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out_one,
+    )
+    monte_carlo(
+        script,
+        n=20,
+        perturb={
+            "Sat.SMA": ("normal", 7100.0, 50.0),
+            "Sat.INC": ("uniform", 0.0, 90.0),
+        },
+        seed=42,
+        workers=1,
+        out=out_two,
+    )
+
+    one = {
+        e.run_id: e.overrides["Sat.SMA"] for e in Manifest.load(out_one / "manifest.jsonl").entries
+    }
+    two = {
+        e.run_id: e.overrides["Sat.SMA"] for e in Manifest.load(out_two / "manifest.jsonl").entries
+    }
+    assert one == two
+
+
+def test_monte_carlo_accepts_pre_frozen_rv(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    from scipy import stats
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    df = monte_carlo(
+        script,
+        n=10,
+        perturb={"x": stats.beta(2, 5)},
+        seed=42,
+        workers=1,
+        out=out,
+    )
+    assert sorted(df.index.get_level_values("run_id").unique().tolist()) == list(range(10))
+
+
+def test_monte_carlo_failed_run_lands_as_nan_row(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """A worker exception inside an MC sweep surfaces as a NaN row with
+    ``__status="failed"`` — same contract as the grid path."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    call_count = {"n": 0}
+
+    def _setitem(_key: str, _value: Any) -> None:
+        call_count["n"] += 1
+        # Fail every other run.
+        if call_count["n"] % 2 == 0:
+            raise ValueError("rejected")
+
+    fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook())
+
+    df = monte_carlo(
+        script,
+        n=8,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out,
+    )
+
+    statuses = set(df["__status"].unique())
+    assert "failed" in statuses
+
+
+def test_monte_carlo_writes_tagged_parameter_spec(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """The manifest header carries a tagged ``parameter_spec`` so a later
+    loader can reproduce the same draws from the seed alone."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    monte_carlo(
+        script,
+        n=10,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        workers=1,
+        out=out,
+    )
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    spec = manifest.parameter_spec
+    assert spec["_kind"] == "monte_carlo"
+    assert spec["n"] == 10
+    assert spec["seed"] == 42
+    assert spec["perturb"] == {"Sat.SMA": ["normal", 7100.0, 50.0]}
+    assert manifest.sweep_seed == 42
+
+
+def test_monte_carlo_rejects_empty_perturb(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="non-empty perturb"):
+        monte_carlo(script, n=10, perturb={}, seed=42, workers=1, out=tmp_path / "out")
+
+
+def test_monte_carlo_rejects_n_less_than_one(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="requires n >= 1"):
+        monte_carlo(
+            script,
+            n=0,
+            perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+            seed=42,
+            workers=1,
+            out=tmp_path / "out",
+        )
+
+
+# ---- latin_hypercube -----------------------------------------------------
+
+
+def test_latin_hypercube_returns_n_run_dataframe(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Issue #35 headline: ``latin_hypercube(n=64, perturb=..., seed=42)``
+    returns a ``(run_id, time)``-indexed DataFrame with run_id cardinality
+    64."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    df = latin_hypercube(
+        script,
+        n=64,
+        perturb={
+            "Sat.SMA": ("normal", 7100.0, 50.0),
+            "Sat.INC": ("uniform", 0.0, 90.0),
+        },
+        seed=42,
+        workers=1,
+        out=out,
+    )
+
+    assert df.index.names == ["run_id", "time"]
+    run_ids = sorted(df.index.get_level_values("run_id").unique().tolist())
+    assert run_ids == list(range(64))
+
+
+def test_latin_hypercube_two_calls_at_same_seed_produce_equal_overrides(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    out_a = tmp_path / "out-a"
+    out_b = tmp_path / "out-b"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    perturb = {
+        "Sat.SMA": ("normal", 7100.0, 50.0),
+        "Sat.INC": ("uniform", 0.0, 90.0),
+    }
+    latin_hypercube(script, n=16, perturb=perturb, seed=42, workers=1, out=out_a)
+    latin_hypercube(script, n=16, perturb=perturb, seed=42, workers=1, out=out_b)
+
+    a = {e.run_id: e.overrides for e in Manifest.load(out_a / "manifest.jsonl").entries}
+    b = {e.run_id: e.overrides for e in Manifest.load(out_b / "manifest.jsonl").entries}
+    assert a == b
+
+
+def test_latin_hypercube_writes_tagged_parameter_spec(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Issue #35: manifest header records ``{"_kind": "latin_hypercube",
+    "perturb": <serialised>, "n": n, "seed": seed}`` so the seed plus the
+    spec is enough to reproduce the LH samples DataFrame."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    latin_hypercube(
+        script,
+        n=16,
+        perturb={
+            "Sat.SMA": ("normal", 7100.0, 50.0),
+            "Sat.INC": ("uniform", 0.0, 90.0),
+        },
+        seed=42,
+        workers=1,
+        out=out,
+    )
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    spec = manifest.parameter_spec
+    assert spec["_kind"] == "latin_hypercube"
+    assert spec["n"] == 16
+    assert spec["seed"] == 42
+    assert spec["perturb"] == {
+        "Sat.SMA": ["normal", 7100.0, 50.0],
+        "Sat.INC": ["uniform", 0.0, 90.0],
+    }
+    assert manifest.sweep_seed == 42
+
+
+def test_latin_hypercube_rejects_empty_perturb(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="non-empty perturb"):
+        latin_hypercube(script, n=10, perturb={}, seed=42, workers=1, out=tmp_path / "out")
+
+
+def test_latin_hypercube_rejects_n_less_than_one(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="requires n >= 1"):
+        latin_hypercube(
+            script,
+            n=0,
+            perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+            seed=42,
+            workers=1,
+            out=tmp_path / "out",
+        )

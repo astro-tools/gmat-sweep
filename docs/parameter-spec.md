@@ -103,6 +103,28 @@ Validation is strict and happens up front:
 Any violation raises [`SweepConfigError`][gmat_sweep.SweepConfigError]
 before any run starts.
 
+### Monte Carlo vs Latin hypercube
+
+[`monte_carlo()`][gmat_sweep.monte_carlo] draws each sample independently
+from each distribution; the empirical coverage of any single axis is only
+as good as the law of large numbers makes it for the chosen `n`.
+
+[`latin_hypercube()`][gmat_sweep.latin_hypercube] uses
+[`scipy.stats.qmc.LatinHypercube`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html)
+to stratify each axis into `n` equal-probability bins before transforming
+through the distribution's quantile function. One sample per bin per axis
+is guaranteed by construction, so the marginal coverage of every axis is
+uniform at any `n`.
+
+The rule of thumb: prefer LH when `n` is small relative to the number of
+perturbed parameters (so each axis only gets a handful of samples and the
+stratification visibly improves coverage). Plain Monte Carlo is the
+right call when `n` is large, when you want the joint distribution to
+match the product of marginals exactly (no LH-induced anti-correlation),
+or when you intend to extend the sample count incrementally — LH samples
+do not append cleanly across runs the way independent Monte Carlo draws
+do.
+
 ## Full-factorial expansion
 
 [`sweep()`][gmat_sweep.sweep] uses the full-factorial expansion in
@@ -160,17 +182,40 @@ df = sweep("mission.script", samples=samples)
 [`SweepConfigError`][gmat_sweep.SweepConfigError], and so does passing
 neither.
 
-This is the underlying primitive the upcoming `monte_carlo` and
-`latin_hypercube` wrappers build on. Until those land in v0.2 you can
-construct any sampling design yourself with
-[`scipy.stats.qmc`](https://docs.scipy.org/doc/scipy/reference/stats.qmc.html)
-and hand the result in directly.
+This is the underlying primitive the [`monte_carlo`][gmat_sweep.monte_carlo]
+and [`latin_hypercube`][gmat_sweep.latin_hypercube] wrappers build on. Use
+those when you want stochastic draws from named distributions; reach for
+`samples=` directly when you have already built a custom design (Halton,
+Sobol, a hand-curated edge-case grid) and want to hand it in unchanged.
 
 ### Worked example: a 64-point Latin hypercube
 
-`scipy.stats.qmc.LatinHypercube` returns unit-cube samples; scale each
-column to its physical range with `qmc.scale`, wrap in a DataFrame, and
-pass through:
+For Latin hypercube sampling against named distributions, reach for
+[`latin_hypercube()`][gmat_sweep.latin_hypercube] directly — it builds the
+unit-cube design, maps each axis through the user's distribution, and
+delegates to the same explicit-row primitive:
+
+```python
+from gmat_sweep import latin_hypercube
+
+df = latin_hypercube(
+    "mission.script",
+    n=64,
+    perturb={
+        "Sat.SMA": ("uniform", 6900.0, 7400.0),
+        "Sat.ECC": ("uniform", 0.0005, 0.005),
+    },
+    seed=42,
+    out="./lhs-sweep",
+)
+```
+
+The wrapper records `{"_kind": "latin_hypercube", "perturb": ..., "n": ...,
+"seed": ...}` on the manifest header so the design is reproducible from
+the seed alone.
+
+If you want a different stratified design (Halton, Sobol, a custom-built
+DataFrame) hand it in via `samples=` and bypass the wrapper:
 
 ```python
 import pandas as pd
@@ -178,20 +223,11 @@ from scipy.stats import qmc
 
 from gmat_sweep import sweep
 
-# 1. Build the unit-cube design.
-sampler = qmc.LatinHypercube(d=2, seed=42)
-unit = sampler.random(n=64)  # shape (64, 2), each column ∈ [0, 1)
-
-# 2. Scale each column to its physical range.
-scaled = qmc.scale(
-    unit,
-    l_bounds=[6900.0, 0.0005],
-    u_bounds=[7400.0, 0.005],
-)
-
-# 3. Hand to sweep().
+sampler = qmc.Halton(d=2, seed=42)
+unit = sampler.random(n=64)
+scaled = qmc.scale(unit, l_bounds=[6900.0, 0.0005], u_bounds=[7400.0, 0.005])
 samples = pd.DataFrame(scaled, columns=["Sat.SMA", "Sat.ECC"])
-df = sweep("mission.script", samples=samples, out="./lhs-sweep")
+df = sweep("mission.script", samples=samples, out="./halton-sweep")
 ```
 
 The DataFrame must have:

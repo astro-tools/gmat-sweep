@@ -12,7 +12,13 @@ import pytest
 from scipy import stats
 from scipy.stats._distn_infrastructure import rv_frozen
 
-from gmat_sweep.distributions import derive_run_seeds, sample, to_rv_frozen
+from gmat_sweep.distributions import (
+    _serialise_perturb,
+    derive_param_seed,
+    derive_run_seeds,
+    sample,
+    to_rv_frozen,
+)
 from gmat_sweep.errors import SweepConfigError
 
 # ---- to_rv_frozen: shorthand mapping --------------------------------------
@@ -262,3 +268,81 @@ def test_sample_works_with_pre_frozen_rv() -> None:
     b = sample(pre, seed=99)
     assert a == b
     assert isinstance(a, float)
+
+
+# ---- derive_param_seed ----------------------------------------------------
+
+
+def test_derive_param_seed_in_process_reproducible() -> None:
+    a = derive_param_seed(12345, "Sat.SMA")
+    b = derive_param_seed(12345, "Sat.SMA")
+    assert a == b
+
+
+def test_derive_param_seed_cross_process_reproducible() -> None:
+    code = (
+        "from gmat_sweep.distributions import derive_param_seed; "
+        "print(derive_param_seed(12345, 'Sat.SMA'))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    cross_proc = int(result.stdout.strip())
+    assert cross_proc == derive_param_seed(12345, "Sat.SMA")
+
+
+def test_derive_param_seed_distinct_names_give_distinct_seeds() -> None:
+    seeds = {derive_param_seed(7, name) for name in ["Sat.SMA", "Sat.INC", "Sat.RAAN"]}
+    assert len(seeds) == 3
+
+
+def test_derive_param_seed_distinct_run_seeds_give_distinct_param_seeds() -> None:
+    a = derive_param_seed(1, "Sat.SMA")
+    b = derive_param_seed(2, "Sat.SMA")
+    assert a != b
+
+
+def test_derive_param_seed_returns_python_int() -> None:
+    out = derive_param_seed(42, "Sat.SMA")
+    assert isinstance(out, int)
+
+
+# ---- _serialise_perturb ---------------------------------------------------
+
+
+def test_serialise_perturb_shorthand_tuples_become_lists() -> None:
+    out = _serialise_perturb({"x": ("normal", 1.0, 2.0), "y": ("uniform", 0.0, 10.0)})
+    assert out == {"x": ["normal", 1.0, 2.0], "y": ["uniform", 0.0, 10.0]}
+
+
+def test_serialise_perturb_rv_frozen_serialises_name_args_kwds() -> None:
+    out = _serialise_perturb({"x": stats.norm(loc=3.0, scale=2.0)})
+    assert out == {"x": {"name": "norm", "args": [], "kwds": {"loc": 3.0, "scale": 2.0}}}
+
+
+def test_serialise_perturb_rv_frozen_with_positional_args_round_trips() -> None:
+    """`stats.beta(2, 5)` carries shape parameters as positional args, not kwds."""
+    out = _serialise_perturb({"x": stats.beta(2, 5)})
+    payload = out["x"]
+    assert payload["name"] == "beta"
+    assert payload["args"] == [2, 5]
+    assert payload["kwds"] == {}
+
+
+def test_serialise_perturb_is_json_encodable() -> None:
+    perturb = {
+        "Sat.SMA": ("normal", 7100.0, 50.0),
+        "Sat.ECC": stats.uniform(loc=0.0, scale=0.05),
+    }
+    out = _serialise_perturb(perturb)
+    # Round-trip through json.dumps to confirm everything is JSON-encodable.
+    encoded = json.dumps(out, sort_keys=True)
+    assert json.loads(encoded) == out
+
+
+def test_serialise_perturb_rejects_non_tuple_non_rv() -> None:
+    with pytest.raises(SweepConfigError, match="must be a shorthand tuple or scipy rv_frozen"):
+        _serialise_perturb({"x": [1, 2, 3]})
