@@ -649,3 +649,27 @@ def test_save_and_load_round_trip_preserves_schema_version(tmp_path: Path) -> No
     reloaded = Manifest.load(path)
     assert reloaded.schema_version == MANIFEST_SCHEMA_VERSION
     assert reloaded == m
+
+
+def test_load_drops_unknown_extra_header_fields(tmp_path: Path) -> None:
+    """Forward-compat: a header carrying unknown extra fields still loads.
+
+    The schema-freeze policy promises that an older reader can keep loading a
+    manifest written by a newer writer until the schema_version is bumped — so
+    extra header fields the running gmat-sweep doesn't recognise must be
+    silently ignored, not rejected. Without this, every additive field would
+    become an immediate compatibility break.
+    """
+    m = _make_manifest(n_entries=1)
+    header = m._header_dict()
+    header["future_field_we_dont_know_about"] = {"hint": "v0.3 thing"}
+
+    path = tmp_path / "manifest.jsonl"
+    body = json.dumps(header, sort_keys=True) + "\n"
+    body += json.dumps(m.entries[0].to_dict(), sort_keys=True) + "\n"
+    path.write_text(body, encoding="utf-8")
+
+    reloaded = Manifest.load(path)
+    assert reloaded.script_sha256 == m.script_sha256
+    assert reloaded.run_count == m.run_count
+    assert [e.run_id for e in reloaded.entries] == [0]
