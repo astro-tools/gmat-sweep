@@ -394,6 +394,67 @@ def test_load_complete_entry_with_missing_field_raises(tmp_path: Path) -> None:
 # ---- find_failed / find_missing -----------------------------------------
 
 
+def test_load_dedupes_duplicate_run_ids_last_wins(tmp_path: Path) -> None:
+    """Resume appends a fresh entry with the same run_id as the failed one;
+    Manifest.load merges them last-wins so the resumed status survives."""
+    m = _make_manifest()
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+
+    failed = _make_entry(run_id=1, status="failed")
+    retried = _make_entry(run_id=1, status="ok")
+    m.append_entry(failed)
+    m.append_entry(retried)
+
+    reloaded = Manifest.load(path)
+    by_run_id = {e.run_id: e for e in reloaded.entries}
+    assert by_run_id[1].status == "ok"
+    assert by_run_id[1].output_paths != {}
+    # Only the resumed entry survives — there are no two run_id=1 entries.
+    assert sum(1 for e in reloaded.entries if e.run_id == 1) == 1
+
+
+def test_load_dedup_preserves_first_occurrence_position(tmp_path: Path) -> None:
+    """For unique run_ids load() must preserve file order. For a duplicated
+    run_id the entry stays at the position of its FIRST appearance — the
+    resumed entry rides the original's slot, not the tail."""
+    m = _make_manifest()
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    m.append_entry(_make_entry(run_id=0, status="ok"))
+    m.append_entry(_make_entry(run_id=1, status="failed"))
+    m.append_entry(_make_entry(run_id=2, status="ok"))
+    m.append_entry(_make_entry(run_id=1, status="ok"))  # resumed retry
+
+    reloaded = Manifest.load(path)
+    assert [e.run_id for e in reloaded.entries] == [0, 1, 2]
+    by_run_id = {e.run_id: e for e in reloaded.entries}
+    assert by_run_id[1].status == "ok"
+
+
+def test_load_dedup_no_op_when_run_ids_unique(tmp_path: Path) -> None:
+    """Manifests without resume duplicates must round-trip unchanged."""
+    m = _make_manifest(n_entries=3)
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+
+    reloaded = Manifest.load(path)
+    assert reloaded.entries == m.entries
+
+
+def test_find_failed_after_resume_excludes_recovered_run_ids(tmp_path: Path) -> None:
+    """After dedup, find_failed only surfaces run_ids whose LAST entry is failed."""
+    m = _make_manifest()
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    m.append_entry(_make_entry(run_id=0, status="failed"))
+    m.append_entry(_make_entry(run_id=1, status="failed"))
+    m.append_entry(_make_entry(run_id=0, status="ok"))  # recovered on resume
+
+    reloaded = Manifest.load(path)
+    assert reloaded.find_failed() == [1]
+
+
 def test_find_failed_returns_failed_run_ids_in_order() -> None:
     m = _make_manifest()
     m.entries = [

@@ -149,3 +149,15 @@ every entry that returned successfully from `append_entry` is durable.
 torn last line; anything more corrupted raises
 [`ManifestCorruptError`][gmat_sweep.ManifestCorruptError] with the offending
 file's path attached.
+
+## Last-wins merge on load
+
+A resumed run appends a new entry with the same `run_id` as the
+original failed entry, so the on-disk file may carry two (or more)
+lines for that `run_id`. [`Manifest.load`][gmat_sweep.Manifest.load]
+folds duplicate `run_id`s last-wins: the latest entry's content
+survives, kept in the position of the first occurrence. The
+in-memory `entries` list therefore has exactly one entry per
+`run_id`, and [`find_failed`][gmat_sweep.Manifest.find_failed] reflects
+the latest status. See [Resume](resume.md) for the resume flow that
+relies on this.

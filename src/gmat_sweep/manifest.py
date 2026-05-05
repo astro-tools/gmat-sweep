@@ -6,6 +6,13 @@ by :meth:`Manifest.save` and is never rewritten — :meth:`Manifest.append_entry
 only appends, and ``run_count`` on disk may therefore lag the entries below
 it. This is by design: a torn last line costs that one entry, the header
 stays valid, and a mid-sweep ``Ctrl-C`` leaves a parseable file.
+
+Resume merges entries last-wins per ``run_id``. The on-disk file is
+append-only — a resumed run writes a new entry with the same ``run_id`` as
+the original failed entry, so the file may carry two (or more) entries for
+that ``run_id``. :meth:`Manifest.load` keeps only the *last* occurrence per
+``run_id`` (preserving the position of the *first* occurrence), so the
+in-memory ``entries`` list is deduplicated and the resumed status wins.
 """
 
 from __future__ import annotations
@@ -200,6 +207,11 @@ class Manifest:
         except (KeyError, TypeError, ValueError) as exc:
             raise ManifestCorruptError(f"manifest header is missing fields: {exc}", path) from exc
 
+        # Last-wins per run_id: a resumed run appends a new entry with the
+        # same run_id as the original failed entry. We keep only the last
+        # occurrence's content but preserve the position of the first
+        # occurrence so unique-run_id manifests load in file order unchanged.
+        by_run_id: dict[int, ManifestEntry] = {}
         for i, line in enumerate(complete_lines[1:], start=2):
             try:
                 entry_data = json.loads(line)
@@ -208,7 +220,8 @@ class Manifest:
                 raise ManifestCorruptError(
                     f"manifest entry on line {i} is malformed: {exc}", path
                 ) from exc
-            manifest.entries.append(entry)
+            by_run_id[entry.run_id] = entry
+        manifest.entries.extend(by_run_id.values())
 
         manifest._path = path
         return manifest

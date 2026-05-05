@@ -197,3 +197,39 @@ def _serialise_perturb(perturb: Mapping[str, DistSpec]) -> dict[str, Any]:
                 f"got {type(v).__name__}"
             )
     return out
+
+
+def _deserialise_perturb(serialised: Mapping[str, Any]) -> dict[str, DistSpec]:
+    """Inverse of :func:`_serialise_perturb` — used by the resume flow.
+
+    A list value is treated as a shorthand tuple (JSON has no tuple type, so
+    :func:`_serialise_perturb` writes ``["normal", mu, sigma]``). A dict
+    value with a ``"name"`` key is reconstructed as
+    ``getattr(scipy.stats, name)(*args, **kwds)`` — the round-trip for
+    pre-frozen :class:`scipy.stats._distn_infrastructure.rv_frozen` inputs.
+
+    Raises :class:`SweepConfigError` when an entry's shape is neither of the
+    above, or when the rv_frozen factory name is not a member of
+    :mod:`scipy.stats`. The result is suitable input to
+    :func:`expand_monte_carlo_to_run_specs` and
+    :func:`expand_latin_hypercube_to_run_specs`; the per-parameter draws are
+    bit-equal to the original sweep when those wrappers are called with the
+    same ``n`` and ``seed``.
+    """
+    out: dict[str, DistSpec] = {}
+    for k, v in serialised.items():
+        if isinstance(v, list):
+            out[k] = cast(DistSpec, tuple(v))
+        elif isinstance(v, dict) and "name" in v:
+            name = v["name"]
+            factory = getattr(stats, name, None)
+            if factory is None:
+                raise SweepConfigError(
+                    f"perturb entry {k!r} references unknown scipy.stats distribution {name!r}"
+                )
+            args = list(v.get("args", []))
+            kwds = dict(v.get("kwds", {}))
+            out[k] = cast(rv_frozen, factory(*args, **kwds))
+        else:
+            raise SweepConfigError(f"perturb entry {k!r} has unrecognised serialised shape: {v!r}")
+    return out
