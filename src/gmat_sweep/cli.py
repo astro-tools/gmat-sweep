@@ -1,8 +1,9 @@
-"""Console-script entry point: ``gmat-sweep run`` / ``gmat-sweep show``.
+"""Console-script entry point for the ``gmat-sweep`` command.
 
-The CLI is a thin wrapper over :func:`gmat_sweep.api.sweep` and
-:meth:`gmat_sweep.manifest.Manifest.load`. Argument parsing and grid-spec
-parsing live here; everything else delegates to the existing public surface.
+The CLI is a thin wrapper over :mod:`gmat_sweep.api` and
+:meth:`gmat_sweep.manifest.Manifest.load`. Argument parsing, grid-spec parsing,
+and perturb-spec parsing live here; everything else delegates to the existing
+public surface.
 
 Exit codes
 ----------
@@ -19,11 +20,11 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from gmat_sweep.api import sweep
+from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -32,6 +33,11 @@ from gmat_sweep.errors import (
 )
 from gmat_sweep.manifest import Manifest
 
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from gmat_sweep.distributions import DistSpec
+
 __all__ = ["main"]
 
 EXIT_OK = 0
@@ -39,6 +45,8 @@ EXIT_GENERIC = 1
 EXIT_CONFIG = 2
 EXIT_MANIFEST = 3
 EXIT_BACKEND = 4
+
+_PERTURB_TAGS = ("normal", "uniform", "lognormal")
 
 
 def _parse_grid_value(token: str) -> int | float | str:
@@ -110,6 +118,76 @@ def _parse_grid_spec(spec: str) -> tuple[str, list[Any]]:
     return name, [_parse_grid_value(t) for t in tokens]
 
 
+def _parse_perturb_spec(spec: str) -> tuple[str, DistSpec]:
+    """Parse one ``--perturb`` argument into ``(dotted_path, DistSpec)``.
+
+    Three shorthand forms — ``name=normal:mu:sigma``,
+    ``name=uniform:lo:hi``, and ``name=lognormal:mu:sigma`` — mirroring the
+    tuple specs accepted by :func:`gmat_sweep.monte_carlo` and
+    :func:`gmat_sweep.latin_hypercube`. The unknown-tag check happens here so
+    a typo surfaces at parse time; numeric validation (``sigma > 0``,
+    ``hi > lo``, finiteness) is left to
+    :func:`gmat_sweep.distributions.to_rv_frozen`, which raises the same
+    :class:`SweepConfigError` downstream.
+    """
+    if "=" not in spec:
+        raise SweepConfigError(
+            f"perturb spec must contain '=': {spec!r} "
+            "(expected 'name=normal:mu:sigma', 'name=uniform:lo:hi', "
+            "or 'name=lognormal:mu:sigma')"
+        )
+    name, _, rhs = spec.partition("=")
+    name = name.strip()
+    if not name:
+        raise SweepConfigError(f"perturb spec is missing a name: {spec!r}")
+    if not rhs:
+        raise SweepConfigError(f"perturb spec for {name!r} has no distribution: {spec!r}")
+
+    parts = rhs.split(":")
+    if len(parts) != 3:
+        raise SweepConfigError(
+            f"perturb spec for {name!r} must have three colon-separated parts "
+            f"'tag:p1:p2', got {rhs!r}"
+        )
+    tag, p1_str, p2_str = parts
+    if tag not in _PERTURB_TAGS:
+        raise SweepConfigError(
+            f"unknown perturb distribution tag {tag!r} for {name!r}; "
+            f"expected one of {', '.join(_PERTURB_TAGS)}"
+        )
+    try:
+        p1 = float(p1_str)
+        p2 = float(p2_str)
+    except ValueError as exc:
+        raise SweepConfigError(
+            f"perturb parameters for {name!r} must be numeric, got {p1_str!r}:{p2_str!r}"
+        ) from exc
+    return name, (tag, p1, p2)
+
+
+def _load_samples(path: Path) -> pd.DataFrame:
+    """Load an explicit-row samples DataFrame from CSV or Parquet.
+
+    Suffix-dispatched: ``.csv`` reads via :func:`pandas.read_csv`, ``.parquet``
+    via :func:`pandas.read_parquet`. Any other suffix raises
+    :class:`SweepConfigError`. A missing file also raises
+    :class:`SweepConfigError` so the CLI's "bad config" exit code applies
+    uniformly.
+    """
+    if not path.is_file():
+        raise SweepConfigError(f"samples file not found: {path}")
+    suffix = path.suffix.lower()
+    import pandas as pd
+
+    if suffix == ".csv":
+        return pd.read_csv(path)
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    raise SweepConfigError(
+        f"samples file suffix {suffix!r} is not supported; expected '.csv' or '.parquet'"
+    )
+
+
 def _format_summary(manifest: Manifest, output_dir: Path) -> str:
     """One-line summary: ``N runs (A ok[, B failed][, C skipped]) in T.TT s — output: PATH``.
 
@@ -155,6 +233,103 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return EXIT_MANIFEST
     manifest = Manifest.load(manifest_path)
     print(_format_summary(manifest, manifest_path.parent))
+    return EXIT_OK
+
+
+def _collect_perturb(raw_specs: list[str]) -> dict[str, DistSpec]:
+    """Parse repeated ``--perturb`` flags into a single mapping; reject duplicates."""
+    perturb: dict[str, DistSpec] = {}
+    for raw in raw_specs:
+        name, dist = _parse_perturb_spec(raw)
+        if name in perturb:
+            raise SweepConfigError(f"perturb spec for {name!r} given more than once")
+        perturb[name] = dist
+    return perturb
+
+
+def _cmd_monte_carlo(args: argparse.Namespace) -> int:
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    perturb = _collect_perturb(args.perturb)
+    out = Path(args.out)
+    monte_carlo(
+        script,
+        n=args.n,
+        perturb=perturb,
+        seed=args.seed,
+        workers=args.workers,
+        out=out,
+    )
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    print(_format_summary(manifest, out))
+    return EXIT_OK
+
+
+def _cmd_latin_hypercube(args: argparse.Namespace) -> int:
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    perturb = _collect_perturb(args.perturb)
+    out = Path(args.out)
+    latin_hypercube(
+        script,
+        n=args.n,
+        perturb=perturb,
+        seed=args.seed,
+        workers=args.workers,
+        out=out,
+    )
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    print(_format_summary(manifest, out))
+    return EXIT_OK
+
+
+def _cmd_explicit(args: argparse.Namespace) -> int:
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    samples = _load_samples(Path(args.samples))
+    out = Path(args.out)
+    sweep(script, samples=samples, workers=args.workers, out=out)
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    print(_format_summary(manifest, out))
+    return EXIT_OK
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_file():
+        print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
+        return EXIT_MANIFEST
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    # Local imports keep gmat_sweep.cli's import-time surface narrow — these
+    # are only needed by the resume path.
+    from gmat_sweep.backends.joblib import LocalJoblibPool
+    from gmat_sweep.sweep import Sweep
+
+    with LocalJoblibPool(workers=args.workers) as pool:
+        sweep_obj = Sweep.from_manifest(
+            manifest_path,
+            script,
+            backend=pool,
+            allow_script_drift=args.allow_script_drift,
+        ).resume()
+
+    print(_format_summary(sweep_obj.to_manifest(), manifest_path.parent))
     return EXIT_OK
 
 
@@ -217,6 +392,192 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a manifest.jsonl produced by 'gmat-sweep run'.",
     )
     show.set_defaults(func=_cmd_show)
+
+    monte = subparsers.add_parser(
+        "monte-carlo",
+        help="Run a Monte Carlo dispersion sweep over a GMAT script.",
+        description=(
+            "Run n stochastic samples by independently sampling each --perturb "
+            "parameter from its own distribution. With --seed set, the run set "
+            "is reproducible."
+        ),
+    )
+    monte.add_argument(
+        "--n",
+        type=int,
+        required=True,
+        metavar="N",
+        help="Number of stochastic runs (>= 1).",
+    )
+    monte.add_argument(
+        "--perturb",
+        action="append",
+        default=[],
+        required=True,
+        metavar="SPEC",
+        help=(
+            "Perturb axis spec. Three forms: "
+            "'name=normal:mu:sigma', 'name=uniform:lo:hi', 'name=lognormal:mu:sigma' "
+            "(e.g. 'Sat.SMA=normal:7100:50'). Repeat --perturb for additional axes."
+        ),
+    )
+    monte.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="SEED",
+        help="Optional integer parent seed. Omit for OS entropy (non-reproducible).",
+    )
+    monte.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Number of subprocess workers. Default -1 uses every available core.",
+    )
+    monte.add_argument(
+        "--out",
+        required=True,
+        metavar="PATH",
+        help="Output directory for per-run artefacts and manifest.jsonl.",
+    )
+    monte.add_argument(
+        "script",
+        metavar="SCRIPT",
+        help="Path to the GMAT .script file.",
+    )
+    monte.set_defaults(func=_cmd_monte_carlo)
+
+    lhs = subparsers.add_parser(
+        "latin-hypercube",
+        help="Run a Latin hypercube sweep over a GMAT script.",
+        description=(
+            "Draw n Latin hypercube points stratified across each --perturb axis "
+            "and map them through the user's distribution. Same --perturb syntax "
+            "as 'monte-carlo'."
+        ),
+    )
+    lhs.add_argument(
+        "--n",
+        type=int,
+        required=True,
+        metavar="N",
+        help="Number of Latin hypercube points (>= 1).",
+    )
+    lhs.add_argument(
+        "--perturb",
+        action="append",
+        default=[],
+        required=True,
+        metavar="SPEC",
+        help=(
+            "Perturb axis spec. Three forms: "
+            "'name=normal:mu:sigma', 'name=uniform:lo:hi', 'name=lognormal:mu:sigma'. "
+            "Repeat --perturb for additional axes."
+        ),
+    )
+    lhs.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        metavar="SEED",
+        help="Optional integer seed for the Latin hypercube sampler.",
+    )
+    lhs.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Number of subprocess workers. Default -1 uses every available core.",
+    )
+    lhs.add_argument(
+        "--out",
+        required=True,
+        metavar="PATH",
+        help="Output directory for per-run artefacts and manifest.jsonl.",
+    )
+    lhs.add_argument(
+        "script",
+        metavar="SCRIPT",
+        help="Path to the GMAT .script file.",
+    )
+    lhs.set_defaults(func=_cmd_latin_hypercube)
+
+    explicit = subparsers.add_parser(
+        "explicit",
+        help="Run an explicit-row sweep from a CSV or Parquet sample design.",
+        description=(
+            "Load --samples (CSV or Parquet) into a DataFrame and run one mission "
+            "per row. Column names are dotted-path field names; the row index "
+            "becomes run_id."
+        ),
+    )
+    explicit.add_argument(
+        "--samples",
+        required=True,
+        metavar="PATH",
+        help="Path to a .csv or .parquet sample design.",
+    )
+    explicit.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Number of subprocess workers. Default -1 uses every available core.",
+    )
+    explicit.add_argument(
+        "--out",
+        required=True,
+        metavar="PATH",
+        help="Output directory for per-run artefacts and manifest.jsonl.",
+    )
+    explicit.add_argument(
+        "script",
+        metavar="SCRIPT",
+        help="Path to the GMAT .script file.",
+    )
+    explicit.set_defaults(func=_cmd_explicit)
+
+    resume = subparsers.add_parser(
+        "resume",
+        help="Re-run only the failed and missing entries from an existing manifest.",
+        description=(
+            "Reload a manifest.jsonl, rebuild the original run iterable, and "
+            "re-submit only the runs whose latest entry is 'failed' or that have "
+            "no entry on disk yet. Successful runs' Parquet files are reused."
+        ),
+    )
+    resume.add_argument(
+        "manifest",
+        metavar="MANIFEST",
+        help="Path to a manifest.jsonl produced by a prior sweep.",
+    )
+    resume.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the original sweep loaded. Its canonical "
+            "SHA-256 must equal the manifest's script_sha256 unless --allow-script-drift "
+            "is set."
+        ),
+    )
+    resume.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Number of subprocess workers. Default -1 uses every available core.",
+    )
+    resume.add_argument(
+        "--allow-script-drift",
+        action="store_true",
+        help=(
+            "Proceed even if the script's canonical hash differs from the manifest's. "
+            "Emits a RuntimeWarning."
+        ),
+    )
+    resume.set_defaults(func=_cmd_resume)
 
     return parser
 

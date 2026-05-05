@@ -56,6 +56,8 @@ order-independence contracts.
   and the CLI's mini-grammar work.
 - **[Monte Carlo](monte-carlo.md)** — stochastic dispersion sweeps with
   named distributions and a determinism contract.
+- **[CLI reference](cli.md)** — the `gmat-sweep` console script: every
+  Python entry point exposed as a subcommand.
 - **[Manifest schema](manifest-schema.md)** — the JSON Lines manifest each
   sweep writes alongside its outputs.
 - **[Supported versions](supported-versions.md)** — GMAT × Python × OS matrix.
