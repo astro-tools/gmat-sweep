@@ -141,9 +141,10 @@ gmat-sweep explicit \
 
 `--samples PATH` accepts `.csv` (loaded via `pandas.read_csv`) and `.parquet`
 (loaded via `pandas.read_parquet`). Other suffixes exit with code `2`. The
-DataFrame must use a default `RangeIndex(start=0)` and unique string column
-names — see [`expand_samples_to_run_specs`][gmat_sweep.expand_samples_to_run_specs]
-for the full validation surface.
+loaded DataFrame must use a default `RangeIndex(start=0)`, have unique string
+column names, and contain no all-NaN columns — any violation surfaces as a
+[`SweepConfigError`][gmat_sweep.SweepConfigError] (exit code `2`) before any
+runs start.
 
 Use `explicit` when you have already built a sampling design (Halton, Sobol,
 custom optimisation results) and want to hand it in directly.
