@@ -1,15 +1,21 @@
-"""Tests for gmat_sweep.grids — full-factorial cartesian-product expansion."""
+"""Tests for gmat_sweep.grids — full-factorial and explicit-row run-spec expansion."""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from gmat_sweep.errors import SweepConfigError
-from gmat_sweep.grids import expand_grid_to_run_specs, full_factorial
+from gmat_sweep.grids import (
+    expand_grid_to_run_specs,
+    expand_samples_to_run_specs,
+    full_factorial,
+)
 from gmat_sweep.spec import RunSpec
 
 # ---- full_factorial -------------------------------------------------------
@@ -183,6 +189,142 @@ def test_expand_output_round_trips_through_runspec_to_dict() -> None:
         script_path="/m.script",
         output_dir="/o",
     )
+    serialised = json.dumps([s.to_dict() for s in specs], sort_keys=True)
+    restored = [RunSpec.from_dict(d) for d in json.loads(serialised)]
+    assert restored == specs
+
+
+# ---- expand_samples_to_run_specs -----------------------------------------
+
+
+def test_expand_samples_acceptance_four_row_dataframe() -> None:
+    """The issue's headline acceptance: a 4-row DataFrame yields 4 specs with
+    sequential run_ids and the per-row override applied."""
+    samples = pd.DataFrame({"Sat.SMA": [7000, 7100, 7200, 7300]})
+    specs = expand_samples_to_run_specs(
+        samples,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.run_id for s in specs] == [0, 1, 2, 3]
+    assert [s.overrides for s in specs] == [
+        {"Sat.SMA": 7000},
+        {"Sat.SMA": 7100},
+        {"Sat.SMA": 7200},
+        {"Sat.SMA": 7300},
+    ]
+
+
+def test_expand_samples_packs_script_path_output_dir_seed_and_run_options() -> None:
+    samples = pd.DataFrame({"x": [1, 2]})
+    specs = expand_samples_to_run_specs(
+        samples,
+        script_path=Path("/missions/m.script"),
+        output_dir=Path("/sweep-out"),
+    )
+    assert len(specs) == 2
+    for spec, expected_id in zip(specs, (0, 1), strict=True):
+        assert isinstance(spec, RunSpec)
+        assert spec.script_path == Path("/missions/m.script")
+        assert spec.output_dir == Path(f"/sweep-out/run-{expected_id}")
+        assert spec.seed is None
+        assert spec.run_options == {}
+
+
+def test_expand_samples_accepts_string_paths() -> None:
+    samples = pd.DataFrame({"x": [1]})
+    specs = expand_samples_to_run_specs(
+        samples,
+        script_path="/missions/m.script",
+        output_dir="/out",
+    )
+    assert specs[0].script_path == Path("/missions/m.script")
+    assert specs[0].output_dir == Path("/out/run-0")
+
+
+def test_expand_samples_multiple_columns_preserves_row_overrides() -> None:
+    samples = pd.DataFrame(
+        {
+            "Sat.SMA": [7000.0, 7100.0],
+            "Sat.ECC": [0.001, 0.002],
+        }
+    )
+    specs = expand_samples_to_run_specs(samples, "/m.script", "/o")
+    assert specs[0].overrides == {"Sat.SMA": 7000.0, "Sat.ECC": 0.001}
+    assert specs[1].overrides == {"Sat.SMA": 7100.0, "Sat.ECC": 0.002}
+
+
+def test_expand_samples_empty_dataframe_yields_zero_specs() -> None:
+    """Empty DataFrame is degenerate but valid: 0 rows → 0 specs. The
+    all-NaN check is skipped because ``.isna().all()`` is vacuously true
+    on a zero-length column."""
+    samples = pd.DataFrame({"x": pd.Series([], dtype=float)})
+    specs = expand_samples_to_run_specs(samples, "/m.script", "/o")
+    assert specs == []
+
+
+def test_expand_samples_rejects_non_dataframe() -> None:
+    with pytest.raises(SweepConfigError, match=r"must be a pandas\.DataFrame"):
+        expand_samples_to_run_specs(
+            {"x": [1, 2]},  # type: ignore[arg-type]
+            "/m.script",
+            "/o",
+        )
+
+
+def test_expand_samples_rejects_non_string_columns() -> None:
+    samples = pd.DataFrame([[1, 2]], columns=[0, 1])
+    with pytest.raises(SweepConfigError, match="column names must be strings"):
+        expand_samples_to_run_specs(samples, "/m.script", "/o")
+
+
+def test_expand_samples_rejects_duplicate_columns() -> None:
+    samples = pd.DataFrame([[1, 2], [3, 4]], columns=["a", "a"])
+    with pytest.raises(SweepConfigError, match="duplicate column names"):
+        expand_samples_to_run_specs(samples, "/m.script", "/o")
+
+
+def test_expand_samples_rejects_non_default_index() -> None:
+    samples = pd.DataFrame({"x": [1, 2, 3, 4]}, index=pd.RangeIndex(10, 14))
+    with pytest.raises(SweepConfigError, match="default RangeIndex"):
+        expand_samples_to_run_specs(samples, "/m.script", "/o")
+
+
+def test_expand_samples_rejects_string_index() -> None:
+    samples = pd.DataFrame({"x": [1, 2]}, index=["a", "b"])
+    with pytest.raises(SweepConfigError, match="default RangeIndex"):
+        expand_samples_to_run_specs(samples, "/m.script", "/o")
+
+
+def test_expand_samples_rejects_all_nan_column() -> None:
+    samples = pd.DataFrame(
+        {
+            "Sat.SMA": [7000.0, 7100.0],
+            "Sat.Dead": [float("nan"), float("nan")],
+        }
+    )
+    with pytest.raises(SweepConfigError, match="all-NaN columns"):
+        expand_samples_to_run_specs(samples, "/m.script", "/o")
+
+
+def test_expand_samples_per_cell_nan_is_forwarded() -> None:
+    """Per-cell NaN passes through unchanged — gmat-run is the line that
+    decides whether NaN is a valid value for a given dotted path. The
+    expander stays out of the way."""
+    samples = pd.DataFrame(
+        {
+            "Sat.SMA": [7000.0, float("nan"), 7200.0],
+        }
+    )
+    specs = expand_samples_to_run_specs(samples, "/m.script", "/o")
+    assert specs[0].overrides == {"Sat.SMA": 7000.0}
+    assert math.isnan(specs[1].overrides["Sat.SMA"])
+    assert specs[2].overrides == {"Sat.SMA": 7200.0}
+
+
+def test_expand_samples_runspec_round_trips_through_to_dict() -> None:
+    samples = pd.DataFrame({"a": [1, 2], "b": [10.0, 20.0]})
+    specs = expand_samples_to_run_specs(samples, "/m.script", "/o")
     serialised = json.dumps([s.to_dict() for s in specs], sort_keys=True)
     restored = [RunSpec.from_dict(d) for d in json.loads(serialised)]
     assert restored == specs

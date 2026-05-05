@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from gmat_sweep.api import sweep
+from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest
 from tests.conftest import FakeGmatRun, FakeResults
 
@@ -232,3 +233,125 @@ def test_gmat_sweep_logger_default_level_is_warning() -> None:
     import logging
 
     assert logging.getLogger("gmat_sweep").level == logging.WARNING
+
+
+# ---- explicit-row sweep (samples=DataFrame) ------------------------------
+
+
+def test_sweep_with_samples_returns_one_run_per_row(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Issue #34 headline acceptance: a 4-row DataFrame produces a sweep
+    result whose ``run_id`` cardinality is 4 and whose per-row override is
+    applied (verified by reading the override back via the fake setitem
+    hook)."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    seen: list[tuple[str, Any]] = []
+
+    def _setitem(key: str, value: Any) -> None:
+        seen.append((key, value))
+
+    fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook())
+
+    samples = pd.DataFrame({"Sat.SMA": [7000, 7100, 7200, 7300]})
+    df = sweep(script, samples=samples, workers=1, out=out)
+
+    run_ids = sorted(df.index.get_level_values("run_id").unique().tolist())
+    assert run_ids == [0, 1, 2, 3]
+    # Worker side saw the per-row override applied to the live mission.
+    assert ("Sat.SMA", 7000) in seen
+    assert ("Sat.SMA", 7100) in seen
+    assert ("Sat.SMA", 7200) in seen
+    assert ("Sat.SMA", 7300) in seen
+
+
+def test_sweep_with_both_grid_and_samples_raises(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="not both"):
+        sweep(
+            script,
+            grid={"Sat.SMA": [7000.0]},
+            samples=pd.DataFrame({"Sat.SMA": [7000.0]}),
+            workers=1,
+            out=tmp_path / "out",
+        )
+
+
+def test_sweep_with_neither_grid_nor_samples_raises(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    with pytest.raises(SweepConfigError, match="one of grid= or samples="):
+        sweep(script, workers=1, out=tmp_path / "out")
+
+
+def test_sweep_with_samples_non_default_index_raises(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    samples = pd.DataFrame(
+        {"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
+        index=pd.RangeIndex(10, 14),
+    )
+    with pytest.raises(SweepConfigError, match="default RangeIndex"):
+        sweep(script, samples=samples, workers=1, out=tmp_path / "out")
+
+
+def test_sweep_with_samples_writes_explicit_kind_in_manifest(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Manifest tags the parameter_spec with ``_kind: "explicit"`` so a
+    later loader can distinguish a sample-based sweep from an untagged grid
+    header."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    samples = pd.DataFrame(
+        {
+            "Sat.SMA": [7000.0, 7100.0],
+            "Sat.ECC": [0.001, 0.002],
+        }
+    )
+    sweep(script, samples=samples, workers=1, out=out)
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    spec = manifest.parameter_spec
+    assert spec["_kind"] == "explicit"
+    assert spec["columns"] == ["Sat.SMA", "Sat.ECC"]
+    assert spec["rows"] == [[7000.0, 0.001], [7100.0, 0.002]]
+
+
+def test_sweep_with_samples_manifest_round_trips_to_dataframe(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Manifest.load(saved).parameter_spec reconstructs a DataFrame whose
+    contents equal the input — the round-trip acceptance criterion."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    samples = pd.DataFrame(
+        {
+            "Sat.SMA": [7000.0, 7100.0, 7200.0],
+            "Sat.ECC": [0.001, 0.002, 0.003],
+        }
+    )
+    sweep(script, samples=samples, workers=1, out=out)
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    spec = manifest.parameter_spec
+    reconstructed = pd.DataFrame(spec["rows"], columns=spec["columns"])
+    pd.testing.assert_frame_equal(reconstructed, samples)
