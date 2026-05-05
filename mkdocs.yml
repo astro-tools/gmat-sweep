@@ -38,6 +38,7 @@ nav:
   - Parameter spec: parameter-spec.md
   - Monte Carlo: monte-carlo.md
   - Aggregation: aggregation.md
+  - Resume: resume.md
   - Manifest schema: manifest-schema.md
   - Supported versions: supported-versions.md
   - Examples:

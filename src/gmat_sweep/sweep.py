@@ -15,6 +15,7 @@ wrapper takes care of this for the common case.
 from __future__ import annotations
 
 import platform
+import warnings
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future
 from pathlib import Path
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from tqdm.auto import tqdm
 
 from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
+from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 
 if TYPE_CHECKING:
@@ -93,6 +95,9 @@ class Sweep:
         self._sweep_seed = sweep_seed
         self._progress = progress
         self._manifest: Manifest | None = None
+        # Set by :meth:`from_manifest`. Gates :meth:`resume` so a freshly-
+        # constructed Sweep can't accidentally append onto an unrelated file.
+        self._loaded_from_manifest: bool = False
 
     def run(self) -> Sweep:
         """Submit every run, drain outcomes in completion order, return ``self``.
@@ -133,6 +138,144 @@ class Sweep:
         finally:
             progress_bar.close()
 
+        return self
+
+    @classmethod
+    def from_manifest(
+        cls,
+        manifest_path: str | Path,
+        script_path: str | Path,
+        *,
+        backend: Pool,
+        allow_script_drift: bool = False,
+        progress: bool = True,
+    ) -> Sweep:
+        """Rebuild a :class:`Sweep` from a manifest written by a prior run.
+
+        Reads ``manifest_path``, validates that the on-disk script still
+        matches the manifest's recorded ``script_sha256``, reconstructs the
+        run iterable from the manifest's ``parameter_spec``, and returns a
+        :class:`Sweep` whose manifest is pre-bound to the loaded one. The
+        returned sweep is suitable input to :meth:`resume`; calling
+        :meth:`run` on it would re-execute every run from scratch and is
+        not the intended flow.
+
+        Parameters
+        ----------
+        manifest_path:
+            Path to the existing ``manifest.jsonl``. Its parent is treated
+            as the sweep's ``output_dir`` and must still exist on disk —
+            successful runs' Parquet files are read from there as-is.
+        script_path:
+            Path to the GMAT ``.script`` to load. The file's canonical
+            SHA-256 must equal the manifest's ``script_sha256`` unless
+            ``allow_script_drift`` is set.
+        backend:
+            A constructed :class:`Pool`. The caller owns its lifecycle —
+            same contract as the regular constructor.
+        allow_script_drift:
+            ``False`` (default) raises :class:`SweepConfigError` on a hash
+            mismatch with both hashes in the message. ``True`` proceeds
+            anyway and emits a :class:`RuntimeWarning`.
+        progress:
+            Forwarded to the constructor — controls the :mod:`tqdm` bar in
+            :meth:`resume`.
+
+        Raises
+        ------
+        SweepConfigError
+            If ``manifest_path``'s parent directory does not exist, the
+            script hash drifted and ``allow_script_drift`` is ``False``, or
+            the manifest's ``parameter_spec`` carries an unknown ``_kind``.
+        """
+        manifest_path_obj = Path(manifest_path)
+        script_path_obj = Path(script_path)
+        output_dir = manifest_path_obj.parent
+        if not output_dir.exists():
+            raise SweepConfigError(
+                f"manifest output directory does not exist: {output_dir} — "
+                f"successful runs' Parquet files must still be on disk to be reused"
+            )
+
+        manifest = Manifest.load(manifest_path_obj)
+
+        current_sha = canonical_script_sha256(script_path_obj)
+        if current_sha != manifest.script_sha256:
+            msg = (
+                f"script hash mismatch for {script_path_obj}: "
+                f"manifest={manifest.script_sha256}, current={current_sha}"
+            )
+            if not allow_script_drift:
+                raise SweepConfigError(msg)
+            warnings.warn(msg, RuntimeWarning, stacklevel=2)
+
+        runs = _build_runs_from_parameter_spec(
+            manifest.parameter_spec,
+            script_path=script_path_obj,
+            output_dir=output_dir,
+        )
+
+        sweep = cls(
+            runs=runs,
+            backend=backend,
+            manifest_path=manifest_path_obj,
+            output_dir=output_dir,
+            script_path=script_path_obj,
+            parameter_spec=manifest.parameter_spec,
+            sweep_seed=manifest.sweep_seed,
+            progress=progress,
+        )
+        sweep._manifest = manifest
+        sweep._loaded_from_manifest = True
+        return sweep
+
+    def resume(self) -> Sweep:
+        """Re-run only the failed and missing runs from the loaded manifest.
+
+        Submits specs for the union of ``manifest.find_failed()`` and ``manifest.find_missing(...)``
+        through the bound backend, appends one new :class:`ManifestEntry`
+        per outcome (with the same ``run_id`` as the original), and reloads
+        the manifest so the in-memory ``entries`` reflect the last-wins
+        merge. Returns ``self`` for chaining.
+
+        Raises :exc:`RuntimeError` when called on a :class:`Sweep` not
+        produced by :meth:`from_manifest`.
+        """
+        if not self._loaded_from_manifest or self._manifest is None:
+            raise RuntimeError("Sweep.resume requires a Sweep built via Sweep.from_manifest")
+        manifest = self._manifest
+
+        expected_run_ids = [s.run_id for s in self._runs]
+        to_retry: set[int] = set(manifest.find_failed()) | set(
+            manifest.find_missing(expected_run_ids)
+        )
+        specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in self._runs}
+        runs_to_submit: list[RunSpec] = [specs_by_run_id[rid] for rid in sorted(to_retry)]
+
+        futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in runs_to_submit]
+
+        progress_bar = tqdm(
+            total=len(runs_to_submit),
+            disable=not self._progress,
+            desc="gmat-sweep resume",
+            unit="run",
+        )
+        try:
+            for outcome in self._backend.as_completed(futures):
+                spec = specs_by_run_id[outcome.run_id]
+                entry = ManifestEntry.from_outcome(
+                    outcome,
+                    overrides=spec.overrides,
+                    log_path=spec.output_dir / _WORKER_LOG_NAME,
+                )
+                manifest.append_entry(entry)
+                progress_bar.update(1)
+        finally:
+            progress_bar.close()
+
+        # Reload so the in-memory entries list is deduplicated last-wins.
+        # append_entry leaves duplicates in memory; load() folds them.
+        self._manifest = Manifest.load(self._manifest_path)
         return self
 
     def to_manifest(self) -> Manifest:
@@ -182,6 +325,69 @@ class Sweep:
             parameter_spec=self._parameter_spec,
             run_count=len(self._runs),
         )
+
+
+def _build_runs_from_parameter_spec(
+    parameter_spec: Mapping[str, Any],
+    *,
+    script_path: Path,
+    output_dir: Path,
+) -> list[RunSpec]:
+    """Reconstruct the run iterable a manifest's ``parameter_spec`` describes.
+
+    Dispatches on ``parameter_spec["_kind"]``: ``None`` (no key) is the
+    v0.1 grid manifest shape, kept for backwards compatibility; the four
+    explicit kinds round-trip through their matching expander. Resumed
+    Monte Carlo and Latin hypercube runs draw bit-equal values to the
+    original sweep because the expanders are deterministic in
+    ``(perturb, n, seed)``.
+    """
+    # Local imports keep gmat_sweep.sweep cycle-free at import time —
+    # gmat_sweep.grids depends on gmat_sweep.distributions, which pulls in
+    # scipy, and we only pay that cost on resume.
+    from gmat_sweep.distributions import _deserialise_perturb
+    from gmat_sweep.grids import (
+        expand_grid_to_run_specs,
+        expand_latin_hypercube_to_run_specs,
+        expand_monte_carlo_to_run_specs,
+        expand_samples_to_run_specs,
+    )
+
+    kind = parameter_spec.get("_kind")
+    if kind is None:
+        # Untagged → v0.1 grid manifest. The mapping is the materialised
+        # grid: {dotted-path: [values]}.
+        grid = {k: v for k, v in parameter_spec.items() if k != "_kind"}
+        return expand_grid_to_run_specs(grid, script_path, output_dir)
+    if kind == "explicit":
+        import pandas as pd
+
+        samples = pd.DataFrame(parameter_spec["rows"], columns=list(parameter_spec["columns"]))
+        return expand_samples_to_run_specs(samples, script_path, output_dir)
+    if kind == "monte_carlo":
+        perturb = _deserialise_perturb(parameter_spec["perturb"])
+        seed = parameter_spec.get("seed")
+        return expand_monte_carlo_to_run_specs(
+            perturb,
+            n=int(parameter_spec["n"]),
+            seed=None if seed is None else int(seed),
+            script_path=script_path,
+            output_dir=output_dir,
+        )
+    if kind == "latin_hypercube":
+        perturb = _deserialise_perturb(parameter_spec["perturb"])
+        seed = parameter_spec.get("seed")
+        return expand_latin_hypercube_to_run_specs(
+            perturb,
+            n=int(parameter_spec["n"]),
+            seed=None if seed is None else int(seed),
+            script_path=script_path,
+            output_dir=output_dir,
+        )
+    raise SweepConfigError(
+        f"unknown parameter_spec _kind: {kind!r} — "
+        f"expected one of None (grid), 'explicit', 'monte_carlo', 'latin_hypercube'"
+    )
 
 
 def _gmat_run_version() -> str:

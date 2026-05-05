@@ -13,6 +13,7 @@ from scipy import stats
 from scipy.stats._distn_infrastructure import rv_frozen
 
 from gmat_sweep.distributions import (
+    _deserialise_perturb,
     _serialise_perturb,
     derive_param_seed,
     derive_run_seeds,
@@ -346,3 +347,42 @@ def test_serialise_perturb_is_json_encodable() -> None:
 def test_serialise_perturb_rejects_non_tuple_non_rv() -> None:
     with pytest.raises(SweepConfigError, match="must be a shorthand tuple or scipy rv_frozen"):
         _serialise_perturb({"x": [1, 2, 3]})
+
+
+# ---- _deserialise_perturb -------------------------------------------------
+
+
+def test_deserialise_perturb_inverts_serialise_for_shorthand_tuples() -> None:
+    original = {"x": ("normal", 1.0, 2.0), "y": ("uniform", 0.0, 10.0)}
+    round_tripped = _deserialise_perturb(_serialise_perturb(original))
+    assert round_tripped == original
+
+
+def test_deserialise_perturb_inverts_serialise_for_rv_frozen() -> None:
+    """rv_frozen reconstruction goes through scipy.stats by name; the
+    reconstructed distribution samples bit-equal to the original at the
+    same seed."""
+    original = stats.norm(loc=3.0, scale=2.0)
+    serialised = _serialise_perturb({"x": original})
+    deserialised = _deserialise_perturb(serialised)
+    rv = deserialised["x"]
+    assert isinstance(rv, rv_frozen)
+    # Sampling at the same seed produces identical draws, which is the
+    # contract resumed Monte Carlo replays rely on.
+    assert sample(rv, 42) == sample(original, 42)
+
+
+def test_deserialise_perturb_rv_frozen_with_positional_args_round_trips() -> None:
+    original = stats.beta(2, 5)
+    deserialised = _deserialise_perturb(_serialise_perturb({"x": original}))
+    assert sample(deserialised["x"], 7) == sample(original, 7)
+
+
+def test_deserialise_perturb_unknown_scipy_name_raises() -> None:
+    with pytest.raises(SweepConfigError, match=r"unknown scipy\.stats distribution"):
+        _deserialise_perturb({"x": {"name": "not_a_real_distribution", "args": [], "kwds": {}}})
+
+
+def test_deserialise_perturb_unrecognised_shape_raises() -> None:
+    with pytest.raises(SweepConfigError, match="unrecognised serialised shape"):
+        _deserialise_perturb({"x": 42})  # neither list nor name-keyed dict
