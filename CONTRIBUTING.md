@@ -37,9 +37,9 @@ uv run ruff format --check  # formatting
 uv run mypy                 # types
 ```
 
-CI re-runs all four on Ubuntu and Windows (macOS is added in v0.2). Integration
-tests run in CI against a cached GMAT install; you do not need to run them
-locally unless you are touching the worker, pool, or aggregation paths.
+CI re-runs all four on Ubuntu, Windows, and macOS. Integration tests run in
+CI against a cached GMAT install; you do not need to run them locally unless
+you are touching the worker, pool, or aggregation paths.
 
 ### Coverage thresholds
 

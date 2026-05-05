@@ -47,12 +47,11 @@ JSON Lines manifest alongside the results so any sweep is reproducible bit-for-b
 
 | GMAT release | Status | CI |
 |---|---|---|
-| R2026a | Primary development target | Exercised on every PR (Ubuntu + Windows, Python 3.10/3.11/3.12) |
-| R2025a | Supported | Exercised on every PR (Ubuntu + Windows, Python 3.10/3.11/3.12) |
+| R2026a | Primary development target | Exercised on every PR (Ubuntu + Windows + macOS, Python 3.10/3.11/3.12) |
+| R2025a | Supported | Exercised on every PR (Ubuntu + Windows + macOS, Python 3.10/3.11/3.12) |
 
 R2023a and R2024a were never released by the upstream GMAT project; R2025a and R2026a are
-the only releases supported in v0.1. macOS is exercised by `gmat-run` and lands in
-`gmat-sweep`'s CI matrix in v0.2.
+the only releases supported.
 
 ## Installation
 
@@ -140,7 +139,7 @@ Runnable example notebooks:
 | Release | Scope |
 |---|---|
 | **v0.1** *(current)* | Full-factorial `sweep(grid=...)`. `LocalJoblibPool` default backend with subprocess isolation per run. Lazy `(run_id, time)` aggregation from per-run Parquet. JSON Lines manifest with append/fsync durability. `gmat-sweep run`/`show` CLI. Ubuntu + Windows CI on R2025a + R2026a × Python 3.10/3.11/3.12. |
-| **v0.2** *(next)* | `monte_carlo()` and `latin_hypercube()` plus explicit-row `samples=DataFrame` sweeps. Programmatic resume via `Sweep.from_manifest(...).resume()`. Ephemeris and contact aggregation across runs. macOS added to CI. Manifest format frozen as a stable v1 schema. Coverage gate raised to 85%. |
+| **v0.2** *(next)* | `monte_carlo()` and `latin_hypercube()` plus explicit-row `samples=DataFrame` sweeps. Programmatic resume via `Sweep.from_manifest(...).resume()`. Ephemeris and contact aggregation across runs. Manifest format frozen as a stable v1 schema. Coverage gate raised to 85%. |
 
 Past releases live in [`CHANGELOG.md`](CHANGELOG.md).
 

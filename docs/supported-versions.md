@@ -1,17 +1,17 @@
 # Supported versions
 
-The CI matrix below is the authoritative supported set for v0.1. `gmat-sweep`
+The CI matrix below is the authoritative supported set. `gmat-sweep`
 runs on every cell on every PR, with both unit and integration suites enabled.
 
-## v0.1 matrix
+## CI matrix
 
 | Axis      | Versions                                                       |
 |-----------|----------------------------------------------------------------|
 | GMAT      | R2025a, R2026a (R2026a is the primary development target)      |
 | Python    | 3.10, 3.11, 3.12                                               |
-| Operating system | Ubuntu (`ubuntu-latest`), Windows (`windows-latest`)    |
+| Operating system | Ubuntu (`ubuntu-latest`), Windows (`windows-latest`), macOS (`macos-latest`) |
 
-That gives 2 × 3 × 2 = 12 cells covered on every PR.
+That gives 2 × 3 × 3 = 18 cells covered on every PR.
 
 ### Notes per axis
 
@@ -26,7 +26,7 @@ walks through unpacking and pointing Python at it.
 
 Older GMAT releases (R2022a and earlier) are not in the matrix. The GMAT
 project skipped public R2023a and R2024a releases, so R2025a and R2026a are
-the only releases supported in v0.1.
+the only releases supported.
 
 #### Python
 
@@ -36,10 +36,10 @@ loky backend ship stable wheels for it.
 
 #### Operating system
 
-macOS is **deferred to v0.2**. The blocker is `setup-gmat`'s macOS support,
-not `gmat-sweep` itself. If you need macOS today, building a stub `Pool`
-implementation that runs jobs in-process is straightforward — see the
-[`Pool`][gmat_sweep.Pool] ABC for the contract.
+`macos-latest` is Apple Silicon (arm64); R2025a and R2026a both ship
+arm64-compatible `gmatpy` bindings, so both versions run natively on the
+runner. GMAT installs are provisioned by `setup-gmat` on macOS the same way
+they are on Linux and Windows.
 
 ## Runtime dependencies
 
