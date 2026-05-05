@@ -15,6 +15,13 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gmat_sweep.distributions import (
+    DistSpec,
+    derive_param_seed,
+    derive_run_seeds,
+    sample,
+    to_rv_frozen,
+)
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.spec import RunSpec
 
@@ -23,8 +30,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "expand_grid_to_run_specs",
+    "expand_latin_hypercube_to_run_specs",
+    "expand_monte_carlo_to_run_specs",
     "expand_samples_to_run_specs",
     "full_factorial",
+    "latin_hypercube_samples",
 ]
 
 
@@ -168,3 +178,132 @@ def expand_samples_to_run_specs(
         )
         for run_id, record in enumerate(records)
     ]
+
+
+def expand_monte_carlo_to_run_specs(
+    perturb: Mapping[str, DistSpec],
+    n: int,
+    seed: int | None,
+    script_path: str | Path,
+    output_dir: str | Path,
+) -> list[RunSpec]:
+    """Build :class:`RunSpec` instances for a Monte Carlo dispersion sweep.
+
+    For each ``run_id`` ``i in range(n)``:
+
+    1. Derive the run-level seed via :func:`derive_run_seeds(seed, n)[i]
+       <gmat_sweep.distributions.derive_run_seeds>` — recorded on
+       :attr:`RunSpec.seed`.
+    2. For each parameter ``k`` in lexicographically-sorted ``perturb``:
+       derive a per-parameter sub-seed via
+       :func:`derive_param_seed(run_seed, k)
+       <gmat_sweep.distributions.derive_param_seed>` and sample one float
+       through :func:`sample(perturb[k], sub_seed)
+       <gmat_sweep.distributions.sample>`.
+
+    Per-parameter sub-seeds are derived from the parameter *name*, not its
+    position in the mapping, so adding a perturbed parameter to an existing
+    sweep does not change the draws of any other parameter at any
+    ``run_id``. Two calls at the same ``(perturb, n, seed, script_path)``
+    return identical specs.
+
+    Raises :class:`SweepConfigError` if ``perturb`` is empty, ``n < 1``, or
+    any parameter spec fails its own validation in
+    :func:`to_rv_frozen <gmat_sweep.distributions.to_rv_frozen>`.
+    """
+    if not perturb:
+        raise SweepConfigError("monte_carlo requires a non-empty perturb mapping")
+    if n < 1:
+        raise SweepConfigError(f"monte_carlo requires n >= 1, got {n}")
+
+    sorted_keys = sorted(perturb)
+    # Validate every spec up front so the failure is reported before any
+    # work — matches full_factorial's "validation runs before any
+    # combination is yielded" contract.
+    for k in sorted_keys:
+        to_rv_frozen(perturb[k])
+
+    run_seeds = derive_run_seeds(seed, n)
+    script_path_obj = Path(script_path)
+    base_output_dir = Path(output_dir)
+
+    specs: list[RunSpec] = []
+    for run_id, run_seed in enumerate(run_seeds):
+        overrides: dict[str, Any] = {}
+        for k in sorted_keys:
+            sub_seed = derive_param_seed(run_seed, k)
+            overrides[k] = sample(perturb[k], sub_seed)
+        specs.append(
+            RunSpec(
+                script_path=script_path_obj,
+                overrides=overrides,
+                output_dir=base_output_dir / f"run-{run_id}",
+                run_id=run_id,
+                seed=run_seed,
+                run_options={},
+            )
+        )
+    return specs
+
+
+def latin_hypercube_samples(
+    perturb: Mapping[str, DistSpec],
+    n: int,
+    seed: int | None,
+) -> pd.DataFrame:
+    """Build the Latin hypercube samples DataFrame for a stochastic sweep.
+
+    Builds a :class:`scipy.stats.qmc.LatinHypercube` sampler with
+    ``d = len(perturb)`` and ``seed = seed``, draws ``n`` unit-cube points,
+    then maps each column through ``to_rv_frozen(perturb[k]).ppf(...)`` to
+    leave the unit cube.
+
+    Columns are emitted in lexicographic order so the run set is stable
+    under ``perturb``-dict reordering. The returned DataFrame has a default
+    :class:`pandas.RangeIndex` and is suitable input to
+    :func:`expand_samples_to_run_specs`.
+
+    Determinism: two calls with the same ``(perturb, n, seed)`` produce
+    bit-equal DataFrames.
+
+    Raises :class:`SweepConfigError` if ``perturb`` is empty, ``n < 1``, or
+    any parameter spec fails its own validation in
+    :func:`to_rv_frozen <gmat_sweep.distributions.to_rv_frozen>`.
+    """
+    import pandas as pd
+    from scipy.stats import qmc
+
+    if not perturb:
+        raise SweepConfigError("latin_hypercube requires a non-empty perturb mapping")
+    if n < 1:
+        raise SweepConfigError(f"latin_hypercube requires n >= 1, got {n}")
+
+    sorted_keys = sorted(perturb)
+    rvs = [to_rv_frozen(perturb[k]) for k in sorted_keys]
+
+    sampler = qmc.LatinHypercube(d=len(sorted_keys), seed=seed)
+    unit = sampler.random(n=n)  # shape (n, d), each entry in [0, 1)
+
+    columns: dict[str, Any] = {}
+    for col_idx, key in enumerate(sorted_keys):
+        columns[key] = rvs[col_idx].ppf(unit[:, col_idx])
+    return pd.DataFrame(columns)
+
+
+def expand_latin_hypercube_to_run_specs(
+    perturb: Mapping[str, DistSpec],
+    n: int,
+    seed: int | None,
+    script_path: str | Path,
+    output_dir: str | Path,
+) -> list[RunSpec]:
+    """Build :class:`RunSpec` instances for a Latin hypercube sweep.
+
+    Convenience wrapper that builds the samples DataFrame via
+    :func:`latin_hypercube_samples` and forwards to
+    :func:`expand_samples_to_run_specs`. Per-run seeds are not populated:
+    the draw set is fully determined by ``(perturb, n, seed)`` so
+    individual runs do not need their own RNG state.
+    """
+    samples = latin_hypercube_samples(perturb, n=n, seed=seed)
+    return expand_samples_to_run_specs(samples, script_path, output_dir)

@@ -15,7 +15,9 @@ lets a Monte Carlo sweep be replayed run-by-run from its manifest alone.
 
 from __future__ import annotations
 
+import hashlib
 import math
+from collections.abc import Mapping
 from typing import Any, Literal, TypeAlias, cast
 
 import numpy as np
@@ -26,6 +28,7 @@ from gmat_sweep.errors import SweepConfigError
 
 __all__ = [
     "DistSpec",
+    "derive_param_seed",
     "derive_run_seeds",
     "sample",
     "to_rv_frozen",
@@ -150,3 +153,47 @@ def sample(spec: DistSpec, seed: int) -> float:
     rv = to_rv_frozen(spec)
     rng = np.random.default_rng(seed)
     return float(rv.rvs(size=1, random_state=rng)[0])
+
+
+def derive_param_seed(run_seed: int, param_name: str) -> int:
+    """Derive a per-parameter sub-seed from a run-level seed and a parameter name.
+
+    The sub-seed depends on the parameter's *name*, not its position inside
+    a ``perturb`` mapping, so adding a parameter to an existing Monte Carlo
+    sweep does not perturb the draws of any other parameter at any
+    ``run_id``. Reproducible across processes — uses
+    :class:`numpy.random.SeedSequence` mixed with a stable SHA-256 digest of
+    the parameter name (avoids :func:`hash`, which is salt-randomised
+    per-process).
+    """
+    name_hash = int.from_bytes(hashlib.sha256(param_name.encode("utf-8")).digest()[:4], "big")
+    seq = np.random.SeedSequence([run_seed, name_hash])
+    return int(seq.generate_state(1)[0])
+
+
+def _serialise_perturb(perturb: Mapping[str, DistSpec]) -> dict[str, Any]:
+    """Serialise a ``perturb`` mapping into a JSON-encodable dict.
+
+    Shorthand tuples become lists (JSON has no tuple type). Pre-frozen
+    :class:`scipy.stats._distn_infrastructure.rv_frozen` instances become
+    ``{"name": dist.name, "args": [...], "kwds": {...}}`` so the original
+    distribution can be reconstructed downstream. Anything else raises
+    :class:`SweepConfigError` — same surface as :func:`to_rv_frozen`, but
+    surfaced up front rather than at first sample.
+    """
+    out: dict[str, Any] = {}
+    for k, v in perturb.items():
+        if isinstance(v, rv_frozen):
+            out[k] = {
+                "name": v.dist.name,
+                "args": list(v.args),
+                "kwds": dict(v.kwds),
+            }
+        elif isinstance(v, tuple):
+            out[k] = list(v)
+        else:
+            raise SweepConfigError(
+                f"perturb value for {k!r} must be a shorthand tuple or scipy rv_frozen, "
+                f"got {type(v).__name__}"
+            )
+    return out

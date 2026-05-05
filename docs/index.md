@@ -28,12 +28,34 @@ GMAT subprocess per run, and returns a `(run_id, time)`-MultiIndexed
 DataFrame with one row per (run, time-step) pair plus a `__status` column
 flagging `ok` / `failed` / `skipped` runs.
 
+For stochastic studies — launch dispersions, sensitivity analyses,
+margin sweeps — reach for [`monte_carlo()`][gmat_sweep.monte_carlo] or
+[`latin_hypercube()`][gmat_sweep.latin_hypercube]. They take the same
+mission script and a `perturb` mapping of named distributions, and
+return the same DataFrame shape:
+
+```python
+from gmat_sweep import monte_carlo
+
+df = monte_carlo(
+    "mission.script",
+    n=500,
+    perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+    seed=42,
+)
+```
+
+See [Monte Carlo](monte-carlo.md) for the determinism and
+order-independence contracts.
+
 ## Where to go next
 
 - **[Getting started](getting-started.md)** — install and the four-line
   vision snippet.
 - **[Parameter spec](parameter-spec.md)** — how grids, dotted-path overrides,
   and the CLI's mini-grammar work.
+- **[Monte Carlo](monte-carlo.md)** — stochastic dispersion sweeps with
+  named distributions and a determinism contract.
 - **[Manifest schema](manifest-schema.md)** — the JSON Lines manifest each
   sweep writes alongside its outputs.
 - **[Supported versions](supported-versions.md)** — GMAT × Python × OS matrix.

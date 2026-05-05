@@ -13,8 +13,11 @@ import pytest
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.grids import (
     expand_grid_to_run_specs,
+    expand_latin_hypercube_to_run_specs,
+    expand_monte_carlo_to_run_specs,
     expand_samples_to_run_specs,
     full_factorial,
+    latin_hypercube_samples,
 )
 from gmat_sweep.spec import RunSpec
 
@@ -328,3 +331,237 @@ def test_expand_samples_runspec_round_trips_through_to_dict() -> None:
     serialised = json.dumps([s.to_dict() for s in specs], sort_keys=True)
     restored = [RunSpec.from_dict(d) for d in json.loads(serialised)]
     assert restored == specs
+
+
+# ---- expand_monte_carlo_to_run_specs --------------------------------------
+
+
+def test_expand_monte_carlo_returns_n_specs_with_per_run_seeds() -> None:
+    specs = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=10,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.run_id for s in specs] == list(range(10))
+    assert all(isinstance(s.seed, int) for s in specs)
+    # Per-run seeds are distinct (the `derive_run_seeds` contract).
+    assert len({s.seed for s in specs}) == 10
+    assert all(set(s.overrides.keys()) == {"Sat.SMA"} for s in specs)
+
+
+def test_expand_monte_carlo_deterministic_per_seed() -> None:
+    a = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=20,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    b = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=20,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.overrides for s in a] == [s.overrides for s in b]
+    assert [s.seed for s in a] == [s.seed for s in b]
+
+
+def test_expand_monte_carlo_different_seed_different_draws() -> None:
+    a = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=20,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    b = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=20,
+        seed=43,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.overrides for s in a] != [s.overrides for s in b]
+
+
+def test_expand_monte_carlo_per_param_seed_is_name_stable() -> None:
+    """Adding a perturbed parameter must not change the draws of any other
+    parameter at any run_id, regardless of where the new parameter falls
+    in lexicographic order. This is the headline order-independence
+    contract from issue #33."""
+    one = expand_monte_carlo_to_run_specs(
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        n=20,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    # New param "Aaa.X" sorts BEFORE Sat.SMA — positional spawning would
+    # have shifted Sat.SMA's draws. The name-derived sub-seed leaves them
+    # intact.
+    two = expand_monte_carlo_to_run_specs(
+        perturb={
+            "Aaa.X": ("uniform", 0.0, 1.0),
+            "Sat.SMA": ("normal", 7100.0, 50.0),
+        },
+        n=20,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    sma_one = [s.overrides["Sat.SMA"] for s in one]
+    sma_two = [s.overrides["Sat.SMA"] for s in two]
+    assert sma_one == sma_two
+
+
+def test_expand_monte_carlo_accepts_pre_frozen_rv() -> None:
+    from scipy import stats
+
+    specs = expand_monte_carlo_to_run_specs(
+        perturb={"x": stats.beta(2, 5)},
+        n=5,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert len(specs) == 5
+    # beta(2, 5) is bounded on [0, 1].
+    for s in specs:
+        v = s.overrides["x"]
+        assert 0.0 <= v <= 1.0
+
+
+def test_expand_monte_carlo_rejects_empty_perturb() -> None:
+    with pytest.raises(SweepConfigError, match="non-empty perturb"):
+        expand_monte_carlo_to_run_specs(
+            perturb={}, n=5, seed=42, script_path="/m.script", output_dir="/o"
+        )
+
+
+def test_expand_monte_carlo_rejects_n_less_than_one() -> None:
+    with pytest.raises(SweepConfigError, match="requires n >= 1"):
+        expand_monte_carlo_to_run_specs(
+            perturb={"x": ("normal", 0, 1)},
+            n=0,
+            seed=42,
+            script_path="/m.script",
+            output_dir="/o",
+        )
+
+
+def test_expand_monte_carlo_propagates_distribution_validation() -> None:
+    with pytest.raises(SweepConfigError, match="sigma must be > 0"):
+        expand_monte_carlo_to_run_specs(
+            perturb={"x": ("normal", 0.0, -1.0)},
+            n=5,
+            seed=42,
+            script_path="/m.script",
+            output_dir="/o",
+        )
+
+
+# ---- latin_hypercube_samples ----------------------------------------------
+
+
+def test_latin_hypercube_samples_returns_n_rows_and_lex_sorted_columns() -> None:
+    samples = latin_hypercube_samples(
+        perturb={
+            "Sat.SMA": ("uniform", 7000.0, 7400.0),
+            "Sat.INC": ("uniform", 0.0, 90.0),
+        },
+        n=64,
+        seed=42,
+    )
+    assert isinstance(samples, pd.DataFrame)
+    assert len(samples) == 64
+    assert list(samples.columns) == ["Sat.INC", "Sat.SMA"]
+
+
+def test_latin_hypercube_samples_deterministic_per_seed() -> None:
+    a = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 1.0)}, n=64, seed=42)
+    b = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 1.0)}, n=64, seed=42)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_latin_hypercube_samples_different_seed_different_draws() -> None:
+    a = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 1.0)}, n=64, seed=42)
+    b = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 1.0)}, n=64, seed=43)
+    assert not a.equals(b)
+
+
+def test_latin_hypercube_samples_stratification_one_per_n_tile() -> None:
+    """The stratification guarantee: after sorting, sample i (out of n) lies
+    in the unit-cube stratum [i/n, (i+1)/n). For a uniform(0, 1)
+    distribution the cdf is the identity, so the sample values themselves
+    must obey the stratum bounds."""
+    n = 1000
+    samples = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 1.0)}, n=n, seed=42)
+    sorted_vals = samples["x"].sort_values().to_numpy()
+    for i, v in enumerate(sorted_vals):
+        assert i / n <= v < (i + 1) / n, f"sample {i}={v} outside stratum [{i / n}, {(i + 1) / n})"
+
+
+def test_latin_hypercube_samples_ppf_transform_respects_user_distribution() -> None:
+    """Mapping uniform[0, 5] should give samples in [0, 5] exactly — the
+    LH-on-the-unit-cube strata composed with `uniform(loc=0, scale=5).ppf`
+    keep the sample range pinned to the requested distribution support."""
+    samples = latin_hypercube_samples(perturb={"x": ("uniform", 0.0, 5.0)}, n=200, seed=42)
+    assert samples["x"].min() >= 0.0
+    assert samples["x"].max() <= 5.0
+
+
+def test_latin_hypercube_samples_rejects_empty_perturb() -> None:
+    with pytest.raises(SweepConfigError, match="non-empty perturb"):
+        latin_hypercube_samples(perturb={}, n=10, seed=42)
+
+
+def test_latin_hypercube_samples_rejects_n_less_than_one() -> None:
+    with pytest.raises(SweepConfigError, match="requires n >= 1"):
+        latin_hypercube_samples(perturb={"x": ("uniform", 0, 1)}, n=0, seed=42)
+
+
+def test_latin_hypercube_samples_propagates_distribution_validation() -> None:
+    with pytest.raises(SweepConfigError, match="requires hi > lo"):
+        latin_hypercube_samples(perturb={"x": ("uniform", 5.0, 1.0)}, n=10, seed=42)
+
+
+# ---- expand_latin_hypercube_to_run_specs ---------------------------------
+
+
+def test_expand_latin_hypercube_returns_n_specs_in_lex_column_order() -> None:
+    specs = expand_latin_hypercube_to_run_specs(
+        perturb={
+            "Sat.SMA": ("uniform", 7000.0, 7400.0),
+            "Sat.INC": ("uniform", 0.0, 90.0),
+        },
+        n=8,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.run_id for s in specs] == list(range(8))
+    # Lex-sorted columns: Sat.INC before Sat.SMA.
+    for s in specs:
+        assert list(s.overrides.keys()) == ["Sat.INC", "Sat.SMA"]
+
+
+def test_expand_latin_hypercube_deterministic_per_seed() -> None:
+    a = expand_latin_hypercube_to_run_specs(
+        perturb={"x": ("uniform", 0.0, 1.0)},
+        n=16,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    b = expand_latin_hypercube_to_run_specs(
+        perturb={"x": ("uniform", 0.0, 1.0)},
+        n=16,
+        seed=42,
+        script_path="/m.script",
+        output_dir="/o",
+    )
+    assert [s.overrides for s in a] == [s.overrides for s in b]

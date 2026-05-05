@@ -4,19 +4,26 @@ from __future__ import annotations
 
 import tempfile
 import weakref
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gmat_sweep.backends.joblib import LocalJoblibPool
+from gmat_sweep.distributions import DistSpec, _serialise_perturb
 from gmat_sweep.errors import SweepConfigError
-from gmat_sweep.grids import expand_grid_to_run_specs, expand_samples_to_run_specs
+from gmat_sweep.grids import (
+    expand_grid_to_run_specs,
+    expand_latin_hypercube_to_run_specs,
+    expand_monte_carlo_to_run_specs,
+    expand_samples_to_run_specs,
+)
+from gmat_sweep.spec import RunSpec
 from gmat_sweep.sweep import Sweep
 
 if TYPE_CHECKING:
     import pandas as pd
 
-__all__ = ["sweep"]
+__all__ = ["latin_hypercube", "monte_carlo", "sweep"]
 
 # Manifest filename inside the sweep's output directory. Picked to match the
 # JSON Lines format suffix for grep-friendliness; downstream consumers
@@ -71,8 +78,11 @@ def sweep(
         trick. Pass an explicit path to keep the per-run Parquet files and
         the manifest after the call returns.
     seed:
-        Optional integer recorded on the manifest header. v0.1 does not
-        consume it; reserved for v0.2 Monte Carlo runs.
+        Optional integer recorded on the manifest header. ``sweep()`` itself
+        does not consume it for grid or explicit-row sweeps; the value lives
+        on the manifest for round-trip introspection. :func:`monte_carlo`
+        and :func:`latin_hypercube` are the wrappers that consume a seed to
+        derive their per-run draws.
     progress:
         ``True`` (default) draws a :mod:`tqdm` progress bar on stderr as
         runs complete. Set to ``False`` for non-interactive use (CI logs,
@@ -100,27 +110,20 @@ def sweep(
 
     mission_path = Path(mission)
 
-    tempdir: tempfile.TemporaryDirectory[str] | None
-    if out is None:
-        tempdir = tempfile.TemporaryDirectory(prefix="gmat-sweep-")
-        output_dir = Path(tempdir.name)
-    else:
-        tempdir = None
-        output_dir = Path(out)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
     parameter_spec: dict[str, Any]
+    build_runs: Callable[[Path], list[RunSpec]]
     if grid is not None:
         # Materialise grid values once: expand_grid_to_run_specs would do it
         # for the cartesian product, but we also need the materialised dict
         # for the manifest header (generators don't survive json.dumps), so
         # do it up front and reuse the same object.
         materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
-        runs = expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
         parameter_spec = materialised_grid
+
+        def build_runs(output_dir: Path) -> list[RunSpec]:
+            return expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
     else:
         assert samples is not None  # narrowed by the XOR check above
-        runs = expand_samples_to_run_specs(samples, mission_path, output_dir)
         # Tagged shape lets Manifest.load distinguish explicit-row sweeps from
         # untagged grid headers without breaking back-compat with v0.1 grid
         # manifests already on disk. ``rows`` is a list-of-lists in column
@@ -131,6 +134,205 @@ def sweep(
             "rows": samples.values.tolist(),
         }
 
+        def build_runs(output_dir: Path) -> list[RunSpec]:
+            return expand_samples_to_run_specs(samples, mission_path, output_dir)
+
+    return _run_sweep(
+        mission_path=mission_path,
+        build_runs=build_runs,
+        parameter_spec=parameter_spec,
+        sweep_seed=seed,
+        workers=workers,
+        out=out,
+        progress=progress,
+    )
+
+
+def monte_carlo(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = None,
+    workers: int = -1,
+    out: Path | None = None,
+    progress: bool = True,
+) -> pd.DataFrame:
+    """Run a Monte Carlo dispersion sweep over a GMAT mission.
+
+    Builds an explicit-row run set of ``n`` runs by independently sampling
+    each ``perturb`` parameter from its own distribution. Per-parameter
+    sub-seeds are derived from the parameter *name* via
+    :func:`derive_param_seed <gmat_sweep.distributions.derive_param_seed>`,
+    so adding a perturbed parameter to an existing sweep does not change
+    the draws of any other parameter at any ``run_id``.
+
+    Parameters
+    ----------
+    mission:
+        Path to the GMAT ``.script`` file every run loads.
+    n:
+        Number of stochastic runs. Must be ``>= 1``.
+    perturb:
+        Mapping from dotted-path field name to a distribution spec. Each
+        value is one of the three shorthand tuples (``("normal", mu,
+        sigma)``, ``("uniform", lo, hi)``, ``("lognormal", mu, sigma)``) or
+        any pre-frozen :class:`scipy.stats._distn_infrastructure.rv_frozen`.
+        See :data:`gmat_sweep.distributions.DistSpec` for the full surface.
+    seed:
+        Optional integer parent seed. ``None`` falls back to OS entropy and
+        is **not** reproducible. With an integer seed two calls at the same
+        ``(mission, n, perturb, seed)`` produce bit-equal DataFrames.
+    workers:
+        Number of subprocess workers; same semantics as :func:`sweep`.
+    out:
+        Sweep output directory; same semantics as :func:`sweep`.
+    progress:
+        Whether to draw the :mod:`tqdm` progress bar; same semantics as
+        :func:`sweep`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``(run_id, time)``-MultiIndexed frame, one row per (run, time-step)
+        pair, with ``run_id`` cardinality ``n``. A failed run lands as one
+        NaN row with ``__status="failed"`` — same contract as :func:`sweep`.
+
+    Raises
+    ------
+    SweepConfigError
+        If ``perturb`` is empty, ``n < 1``, or any parameter spec is
+        ill-formed.
+    """
+    mission_path = Path(mission)
+    parameter_spec: dict[str, Any] = {
+        "_kind": "monte_carlo",
+        "perturb": _serialise_perturb(perturb),
+        "n": n,
+        "seed": seed,
+    }
+
+    def build_runs(output_dir: Path) -> list[RunSpec]:
+        return expand_monte_carlo_to_run_specs(
+            perturb, n=n, seed=seed, script_path=mission_path, output_dir=output_dir
+        )
+
+    return _run_sweep(
+        mission_path=mission_path,
+        build_runs=build_runs,
+        parameter_spec=parameter_spec,
+        sweep_seed=seed,
+        workers=workers,
+        out=out,
+        progress=progress,
+    )
+
+
+def latin_hypercube(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = None,
+    workers: int = -1,
+    out: Path | None = None,
+    progress: bool = True,
+) -> pd.DataFrame:
+    """Run a Latin hypercube sweep over a GMAT mission.
+
+    Backed by :class:`scipy.stats.qmc.LatinHypercube`: draws ``n`` unit-cube
+    points stratified across each of ``len(perturb)`` axes and maps each
+    column through the user's distribution via ``rv.ppf(...)``. Latin
+    hypercube sampling typically beats plain Monte Carlo when ``n`` is
+    small relative to the problem's dimensionality, because the coverage
+    of each axis is enforced by construction.
+
+    Parameters
+    ----------
+    mission:
+        Path to the GMAT ``.script`` file every run loads.
+    n:
+        Number of Latin hypercube points. Must be ``>= 1``.
+    perturb:
+        Mapping from dotted-path field name to a distribution spec — same
+        accepted shapes as :func:`monte_carlo`.
+    seed:
+        Optional integer seed forwarded to
+        :class:`scipy.stats.qmc.LatinHypercube`. ``None`` falls back to OS
+        entropy and is **not** reproducible. With an integer seed two calls
+        at the same ``(mission, n, perturb, seed)`` produce bit-equal
+        DataFrames.
+    workers:
+        Same semantics as :func:`sweep`.
+    out:
+        Same semantics as :func:`sweep`.
+    progress:
+        Same semantics as :func:`sweep`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``(run_id, time)``-MultiIndexed frame with ``run_id`` cardinality
+        ``n``. Same failure-as-row contract as :func:`sweep`.
+
+    Raises
+    ------
+    SweepConfigError
+        If ``perturb`` is empty, ``n < 1``, or any parameter spec is
+        ill-formed.
+    """
+    mission_path = Path(mission)
+    parameter_spec: dict[str, Any] = {
+        "_kind": "latin_hypercube",
+        "perturb": _serialise_perturb(perturb),
+        "n": n,
+        "seed": seed,
+    }
+
+    def build_runs(output_dir: Path) -> list[RunSpec]:
+        return expand_latin_hypercube_to_run_specs(
+            perturb, n=n, seed=seed, script_path=mission_path, output_dir=output_dir
+        )
+
+    return _run_sweep(
+        mission_path=mission_path,
+        build_runs=build_runs,
+        parameter_spec=parameter_spec,
+        sweep_seed=seed,
+        workers=workers,
+        out=out,
+        progress=progress,
+    )
+
+
+def _run_sweep(
+    *,
+    mission_path: Path,
+    build_runs: Callable[[Path], list[RunSpec]],
+    parameter_spec: dict[str, Any],
+    sweep_seed: int | None,
+    workers: int,
+    out: Path | None,
+    progress: bool,
+) -> pd.DataFrame:
+    """Shared orchestration for the public entry points.
+
+    Resolves the output directory (creating a sweep-scoped temp dir when
+    ``out`` is ``None``), builds the run set against that directory, runs
+    them through a fresh :class:`LocalJoblibPool`, and returns the
+    aggregated DataFrame. When a temp dir was created its cleanup is
+    deferred to the moment the returned DataFrame is garbage-collected.
+    """
+    tempdir: tempfile.TemporaryDirectory[str] | None
+    if out is None:
+        tempdir = tempfile.TemporaryDirectory(prefix="gmat-sweep-")
+        output_dir = Path(tempdir.name)
+    else:
+        tempdir = None
+        output_dir = Path(out)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    runs = build_runs(output_dir)
     manifest_path = output_dir / _MANIFEST_FILENAME
 
     with LocalJoblibPool(workers=workers) as pool:
@@ -142,7 +344,7 @@ def sweep(
                 output_dir=output_dir,
                 script_path=mission_path,
                 parameter_spec=parameter_spec,
-                sweep_seed=seed,
+                sweep_seed=sweep_seed,
                 progress=progress,
             )
             .run()

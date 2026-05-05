@@ -36,6 +36,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Parameter spec: parameter-spec.md
+  - Monte Carlo: monte-carlo.md
   - Aggregation: aggregation.md
   - Manifest schema: manifest-schema.md
   - Supported versions: supported-versions.md

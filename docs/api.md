@@ -8,6 +8,10 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.sweep
 
+::: gmat_sweep.monte_carlo
+
+::: gmat_sweep.latin_hypercube
+
 ::: gmat_sweep.Sweep
 
 ## Execution backend
