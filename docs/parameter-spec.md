@@ -266,8 +266,7 @@ m = Manifest.load("./lhs-sweep/manifest.jsonl")
 samples = pd.DataFrame(m.parameter_spec["rows"], columns=m.parameter_spec["columns"])
 ```
 
-Grid sweeps from `gmat_sweep` 0.2 onward emit `_kind: "grid"` alongside
-the materialised axes:
+Grid sweeps emit `_kind: "grid"` alongside the materialised axes:
 
 ```json
 {
@@ -279,11 +278,11 @@ the materialised axes:
 }
 ```
 
-Manifests written by `gmat_sweep` 0.1 omit `_kind` on grid sweeps;
-[`Manifest.load`][gmat_sweep.Manifest.load] keeps loading them by
-treating the absent discriminator as `"grid"`. See [Manifest schema
-→ `parameter_spec` shapes](manifest-schema.md#parameter_spec-shapes)
-for the full enumeration.
+Older manifests that omit `_kind` on grid sweeps keep loading:
+[`Manifest.load`][gmat_sweep.Manifest.load] treats the absent
+discriminator as `"grid"`. See [Manifest schema → `parameter_spec`
+shapes](manifest-schema.md#parameter_spec-shapes) for the full
+enumeration.
 
 ## CLI mini-grammar
 

@@ -14,12 +14,12 @@ that ``run_id``. :meth:`Manifest.load` keeps only the *last* occurrence per
 ``run_id`` (preserving the position of the *first* occurrence), so the
 in-memory ``entries`` list is deduplicated and the resumed status wins.
 
-The on-disk shape is frozen as ``schema_version=1`` from v0.2 onward; the
-canonical reference is ``docs/manifest-schema.md``. v0.1 manifests written
-before the freeze omitted ``schema_version`` entirely; :meth:`Manifest.load`
-treats a missing field as ``1`` so they keep loading. A header carrying a
-``schema_version`` greater than :data:`MANIFEST_SCHEMA_VERSION` is rejected
-with :class:`ManifestCorruptError` — the running ``gmat-sweep`` is older
+The on-disk shape is frozen as ``schema_version=1``; the canonical
+reference is ``docs/manifest-schema.md``. Older manifests that omit
+``schema_version`` are loaded as ``1`` for backwards compatibility. A
+header carrying a ``schema_version`` greater than
+:data:`MANIFEST_SCHEMA_VERSION` is rejected with
+:class:`ManifestCorruptError` — the running ``gmat-sweep`` is older
 than the manifest's writer and cannot parse it safely.
 """
 
@@ -48,11 +48,12 @@ __all__ = [
 MANIFEST_SCHEMA_VERSION: int = 1
 """On-disk manifest schema version this ``gmat-sweep`` writes and reads.
 
-Frozen from v0.2 onward. :meth:`Manifest.load` accepts any header whose
-``schema_version`` is ``<= MANIFEST_SCHEMA_VERSION`` (a missing field is
-treated as ``1`` for v0.1 backwards compatibility) and rejects anything
-greater. See ``docs/manifest-schema.md`` for the field-by-field contract
-and the compatibility policy that governs future bumps.
+:meth:`Manifest.load` accepts any header whose ``schema_version`` is
+``<= MANIFEST_SCHEMA_VERSION`` (a missing field is treated as ``1`` for
+backwards compatibility with manifests written before the field was
+introduced) and rejects anything greater. See
+``docs/manifest-schema.md`` for the field-by-field contract and the
+compatibility policy that governs future bumps.
 """
 
 
@@ -165,9 +166,10 @@ class Manifest:
 
     @classmethod
     def _header_from_dict(cls, data: dict[str, Any]) -> Manifest:
-        # schema_version is absent on v0.1 manifests written before the freeze;
-        # default to 1 so they keep loading. Manifest.load() guards against
-        # versions newer than this gmat-sweep supports before getting here.
+        # schema_version is absent on manifests written before the field was
+        # introduced; default to 1 so they keep loading. Manifest.load() guards
+        # against versions newer than this gmat-sweep supports before getting
+        # here.
         return cls(
             script_sha256=str(data["script_sha256"]),
             gmat_sweep_version=str(data["gmat_sweep_version"]),

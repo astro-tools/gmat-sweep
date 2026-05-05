@@ -369,9 +369,9 @@ def _build_grid_manifest(
 
 
 def test_from_manifest_grid_rebuilds_runs(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
-    """v0.1 untagged grid manifests (no ``_kind`` key) keep loading after the
-    v1 schema freeze — ``_build_runs_from_parameter_spec`` treats a missing
-    ``_kind`` as ``"grid"`` for backwards compatibility."""
+    """Untagged grid manifests (no ``_kind`` key) keep loading —
+    ``_build_runs_from_parameter_spec`` treats a missing ``_kind`` as
+    ``"grid"`` for backwards compatibility."""
     script, output_dir = _build_grid_manifest(tmp_path, fake_gmat_run, n=4)
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
 
@@ -390,9 +390,9 @@ def test_from_manifest_grid_rebuilds_runs(tmp_path: Path, fake_gmat_run: FakeGma
 def test_from_manifest_tagged_grid_kind_rebuilds_runs(
     tmp_path: Path, fake_gmat_run: FakeGmatRun
 ) -> None:
-    """A v1 grid manifest written by ``sweep(grid=...)`` carries
-    ``_kind: "grid"``; ``from_manifest`` dispatches it to the same expander
-    as the v0.1 untagged shape."""
+    """A grid manifest written by ``sweep(grid=...)`` carries
+    ``_kind: "grid"``; ``from_manifest`` dispatches it to the same
+    expander as the untagged shape."""
     from gmat_sweep import sweep as sweep_api
 
     script = _write_script(tmp_path)

@@ -591,11 +591,13 @@ def test_save_writes_schema_version_in_header(tmp_path: Path) -> None:
     assert header["schema_version"] == MANIFEST_SCHEMA_VERSION
 
 
-def test_load_v01_manifest_without_schema_version_loads_as_v1(tmp_path: Path) -> None:
-    """A v0.1 manifest header (no schema_version field) loads as schema_version=1."""
+def test_load_manifest_without_schema_version_loads_as_v1(tmp_path: Path) -> None:
+    """A manifest header that omits schema_version loads as schema_version=1
+    for backwards compatibility with manifests written before the field was
+    introduced."""
     m = _make_manifest(n_entries=2)
     header = m._header_dict()
-    del header["schema_version"]  # pretend we are reading a v0.1-era manifest
+    del header["schema_version"]  # simulate a manifest from before the field landed
 
     path = tmp_path / "manifest.jsonl"
     lines = [json.dumps(header, sort_keys=True)]

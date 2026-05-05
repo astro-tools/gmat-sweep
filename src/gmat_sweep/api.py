@@ -118,10 +118,10 @@ def sweep(
         # for the manifest header (generators don't survive json.dumps), so
         # do it up front and reuse the same object.
         materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
-        # v1 schema tags every parameter_spec shape with a ``_kind``
-        # discriminator so a downstream reader doesn't have to infer the
-        # sweep kind from the keys present. v0.1 grid manifests omit the tag
-        # and ``Manifest.load`` keeps loading them as if ``_kind="grid"``.
+        # Every parameter_spec shape carries a ``_kind`` discriminator so a
+        # downstream reader doesn't have to infer the sweep kind from the
+        # keys present. Older grid manifests omit the tag, and
+        # ``Manifest.load`` keeps loading them as if ``_kind="grid"``.
         parameter_spec = {"_kind": "grid", **materialised_grid}
 
         def build_runs(output_dir: Path) -> list[RunSpec]:

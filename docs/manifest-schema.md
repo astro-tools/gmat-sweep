@@ -35,11 +35,11 @@ report more runs than the file actually contains during and after a
 {
   "schema_version":      1,
   "script_sha256":       "<hex>",
-  "gmat_sweep_version":  "0.2.0",
-  "gmat_run_version":    "0.4.x",
-  "gmat_install_version": "R2026a",
-  "python_version":      "3.12.x",
-  "os_platform":         "Linux-6.x.x-...",
+  "gmat_sweep_version":  "<x.y.z>",
+  "gmat_run_version":    "<x.y.z>",
+  "gmat_install_version": "<R20yya>",
+  "python_version":      "<x.y.z>",
+  "os_platform":         "<platform.platform()>",
   "sweep_seed":          null,
   "parameter_spec":      { "_kind": "grid", "<dotted-path>": [<value>, ...], ... },
   "run_count":           <int>
@@ -48,7 +48,7 @@ report more runs than the file actually contains during and after a
 
 | Field                  | What it carries                                                                                  |
 |------------------------|--------------------------------------------------------------------------------------------------|
-| `schema_version`       | Manifest schema version. `1` from v0.2 onward. v0.1 manifests omit the field entirely; [`Manifest.load`][gmat_sweep.Manifest.load] treats the absence as `1` for backwards compatibility. See [Compatibility policy](#compatibility-policy). |
+| `schema_version`       | Manifest schema version. Currently `1`. Older manifests that omit the field are loaded as `1` for backwards compatibility. See [Compatibility policy](#compatibility-policy). |
 | `script_sha256`        | SHA-256 of the `.script` after line-ending and trailing-newline normalisation. See below.        |
 | `gmat_sweep_version`   | `gmat_sweep.__version__` at sweep time.                                                          |
 | `gmat_run_version`     | `gmat_run.__version__`, or `"unknown"` if `gmat_run` is not importable.                          |
@@ -76,17 +76,18 @@ payload shape:
 See [Parameter spec](parameter-spec.md) for the user-facing semantics of
 each shape and how to reconstruct the run set from a manifest.
 
-#### v0.1 untagged grid headers
+#### Untagged grid headers
 
-Manifests written by `gmat_sweep` 0.1.x omit `_kind` on grid sweeps and
-present `parameter_spec` as the bare materialised grid:
+Older manifests omit `_kind` on grid sweeps and present `parameter_spec`
+as the bare materialised grid:
 
 ```json
 { "parameter_spec": { "<dotted-path>": [<value>, ...], ... } }
 ```
 
-These keep loading under v0.2+: the dispatch in [`Sweep.from_manifest`][gmat_sweep.Sweep.from_manifest]
-treats a missing `_kind` as `"grid"`. New sweeps always tag the shape.
+These keep loading: the dispatch in
+[`Sweep.from_manifest`][gmat_sweep.Sweep.from_manifest] treats a missing
+`_kind` as `"grid"`. New sweeps always tag the shape.
 
 ### Canonical script hash
 
@@ -195,8 +196,7 @@ relies on this.
 
 ## Compatibility policy
 
-The on-disk shape is frozen as `schema_version=1` from `gmat_sweep` 0.2
-onward. The exposed constant
+The on-disk shape is frozen as `schema_version=1`. The exposed constant
 [`gmat_sweep.MANIFEST_SCHEMA_VERSION`][gmat_sweep.MANIFEST_SCHEMA_VERSION]
 is what the running `gmat-sweep` writes and the maximum it accepts on
 load.
@@ -204,8 +204,8 @@ load.
 **Read rules.**
 
 - A manifest with `schema_version <= MANIFEST_SCHEMA_VERSION` loads. A
-  missing `schema_version` is treated as `1` for v0.1 backwards
-  compatibility.
+  missing `schema_version` is treated as `1` for backwards compatibility
+  with manifests written before the field was introduced.
 - A manifest with `schema_version > MANIFEST_SCHEMA_VERSION` is rejected
   with [`ManifestCorruptError`][gmat_sweep.ManifestCorruptError]: the
   reader is older than the writer and may have lost or changed semantics
