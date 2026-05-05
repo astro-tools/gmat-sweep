@@ -39,6 +39,7 @@ nav:
   - Monte Carlo: monte-carlo.md
   - Aggregation: aggregation.md
   - Resume: resume.md
+  - CLI reference: cli.md
   - Manifest schema: manifest-schema.md
   - Supported versions: supported-versions.md
   - Examples:

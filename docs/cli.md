@@ -1,0 +1,183 @@
+# CLI reference
+
+`gmat-sweep` ships a `gmat-sweep` console script. Every Python entry point on
+the public surface has a matching subcommand, so you can drive a sweep,
+inspect a manifest, or resume a partial run without writing Python.
+
+```text
+gmat-sweep <subcommand> [options] [SCRIPT]
+```
+
+The subcommands:
+
+- [`run`](#run) — full-factorial grid sweep.
+- [`monte-carlo`](#monte-carlo) — stochastic dispersion sweep.
+- [`latin-hypercube`](#latin-hypercube) — Latin hypercube sweep.
+- [`explicit`](#explicit) — explicit-row sweep from a CSV or Parquet design.
+- [`resume`](#resume) — re-run only the failed and missing entries from a
+  prior manifest.
+- [`show`](#show) — print a one-line summary of a manifest.
+
+`gmat-sweep --help` lists them. Each subcommand has its own `--help`.
+
+## Common options
+
+The sweep-running subcommands (`run`, `monte-carlo`, `latin-hypercube`,
+`explicit`) share three flags:
+
+| Flag         | Default | Meaning                                                                      |
+|--------------|---------|------------------------------------------------------------------------------|
+| `--workers N`| `-1`    | Number of subprocess workers. `-1` uses every available core.                |
+| `--out PATH` | —       | Required. Output directory for per-run artefacts and `manifest.jsonl`.       |
+| `SCRIPT`     | —       | Required positional. Path to the GMAT `.script` every run loads.             |
+
+Each of those four subcommands writes a `manifest.jsonl` under `--out` and
+prints a one-line summary to stdout when the sweep finishes:
+
+```text
+N runs (A ok[, B failed][, C skipped]) in T.TT s — output: PATH
+```
+
+## Exit codes
+
+| Code | Meaning                                                                        |
+|------|--------------------------------------------------------------------------------|
+| `0`  | success                                                                        |
+| `1`  | any other [`GmatSweepError`][gmat_sweep.GmatSweepError]                        |
+| `2`  | [`SweepConfigError`][gmat_sweep.SweepConfigError] or argparse usage error      |
+| `3`  | [`ManifestCorruptError`][gmat_sweep.ManifestCorruptError] or missing manifest  |
+| `4`  | [`BackendError`][gmat_sweep.BackendError]                                      |
+
+## `run`
+
+Run a full-factorial grid sweep. Each `--grid` flag adds one axis; multiple
+flags combine into the cartesian product.
+
+```bash
+gmat-sweep run \
+    --grid 'Sat.SMA=7000:8000:5' \
+    --grid 'Sat.DryMass=100,200,300' \
+    --workers 4 \
+    --out ./sweep-out \
+    mission.script
+```
+
+`--grid SPEC` accepts two forms:
+
+- `name=lo:hi:count` — `count` evenly-spaced points from `lo` to `hi`
+  inclusive (numpy linspace). `count` must be ≥ 2.
+- `name=v1,v2,v3` — explicit comma-separated values, each coerced via
+  int → float → str fallback.
+
+Repeated `--grid` flags for the same axis name exit with code `2`.
+
+## `monte-carlo`
+
+Run `n` independent stochastic samples by sampling each `--perturb`
+parameter from its own distribution. With `--seed` set, the run set is
+reproducible across machines.
+
+```bash
+gmat-sweep monte-carlo \
+    --n 1000 \
+    --perturb 'Sat.SMA=normal:7100:50' \
+    --perturb 'Sat.INC=uniform:0:90' \
+    --seed 42 \
+    --workers 8 \
+    --out ./mc-out \
+    mission.script
+```
+
+`--perturb SPEC` takes one of three shorthands:
+
+| Form                         | scipy equivalent                            |
+|------------------------------|---------------------------------------------|
+| `name=normal:mu:sigma`       | `scipy.stats.norm(loc=mu, scale=sigma)`     |
+| `name=uniform:lo:hi`         | `scipy.stats.uniform(loc=lo, scale=hi-lo)`  |
+| `name=lognormal:mu:sigma`    | `scipy.stats.lognorm(s=sigma, scale=exp(mu))`|
+
+Per-parameter sub-seeds are derived from the parameter's *name*, so adding a
+`--perturb` flag to an existing sweep does not change the draws of any other
+parameter at any `run_id` — see [Monte Carlo](monte-carlo.md) for the full
+determinism contract.
+
+`--seed` is optional; without it, the draw set falls back to OS entropy and
+is not reproducible. An unknown distribution tag (e.g. `triangular`) exits
+with code `2`.
+
+## `latin-hypercube`
+
+Draw `n` Latin hypercube points stratified across each `--perturb` axis,
+mapping each axis through the user's distribution. Same `--perturb` syntax as
+`monte-carlo`.
+
+```bash
+gmat-sweep latin-hypercube \
+    --n 100 \
+    --perturb 'Sat.SMA=normal:7100:50' \
+    --seed 42 \
+    --workers 4 \
+    --out ./lhs-out \
+    mission.script
+```
+
+Latin hypercube sampling typically beats plain Monte Carlo when `n` is small
+relative to the problem's dimensionality, because the per-axis coverage is
+enforced by construction.
+
+## `explicit`
+
+Run one mission per row of a pre-built sample design. Column names are
+[dotted-path field names](parameter-spec.md#dotted-path-keys); the row index
+becomes `run_id`.
+
+```bash
+gmat-sweep explicit \
+    --samples ./samples.csv \
+    --workers 4 \
+    --out ./explicit-out \
+    mission.script
+```
+
+`--samples PATH` accepts `.csv` (loaded via `pandas.read_csv`) and `.parquet`
+(loaded via `pandas.read_parquet`). Other suffixes exit with code `2`. The
+loaded DataFrame must use a default `RangeIndex(start=0)`, have unique string
+column names, and contain no all-NaN columns — any violation surfaces as a
+[`SweepConfigError`][gmat_sweep.SweepConfigError] (exit code `2`) before any
+runs start.
+
+Use `explicit` when you have already built a sampling design (Halton, Sobol,
+custom optimisation results) and want to hand it in directly.
+
+## `resume`
+
+Re-run only the failed and never-recorded entries from an existing
+`manifest.jsonl`. Successful runs' Parquet files are reused from disk.
+
+```bash
+gmat-sweep resume ./sweep-out/manifest.jsonl \
+    --script mission.script \
+    --workers 4
+```
+
+Required positional: `MANIFEST` — the existing `manifest.jsonl`.
+
+Required flag: `--script PATH` — the same GMAT `.script` the original sweep
+loaded. Its canonical SHA-256 must equal the manifest's `script_sha256`; see
+[Resume § Script drift](resume.md#script-drift) for the full contract. Add
+`--allow-script-drift` to proceed past a hash mismatch (emits a
+`RuntimeWarning`).
+
+A missing `MANIFEST` exits with code `3`; a missing `--script` or a hash
+mismatch exits with code `2`.
+
+## `show`
+
+Print the one-line summary line for a manifest produced by any of the
+sweep-running subcommands.
+
+```bash
+gmat-sweep show ./sweep-out/manifest.jsonl
+```
+
+A missing or unparseable manifest exits with code `3`.
