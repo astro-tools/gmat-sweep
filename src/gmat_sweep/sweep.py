@@ -335,12 +335,12 @@ def _build_runs_from_parameter_spec(
 ) -> list[RunSpec]:
     """Reconstruct the run iterable a manifest's ``parameter_spec`` describes.
 
-    Dispatches on ``parameter_spec["_kind"]``: ``None`` (no key) is the
-    v0.1 grid manifest shape, kept for backwards compatibility; the four
-    explicit kinds round-trip through their matching expander. Resumed
-    Monte Carlo and Latin hypercube runs draw bit-equal values to the
-    original sweep because the expanders are deterministic in
-    ``(perturb, n, seed)``.
+    Dispatches on ``parameter_spec["_kind"]``: ``"grid"`` is the v1 tagged
+    grid manifest shape; ``None`` (no key) is the v0.1 untagged shape, kept
+    for backwards compatibility and dispatched the same way. The other three
+    kinds round-trip through their matching expander. Resumed Monte Carlo
+    and Latin hypercube runs draw bit-equal values to the original sweep
+    because the expanders are deterministic in ``(perturb, n, seed)``.
     """
     # Local imports keep gmat_sweep.sweep cycle-free at import time —
     # gmat_sweep.grids depends on gmat_sweep.distributions, which pulls in
@@ -354,9 +354,9 @@ def _build_runs_from_parameter_spec(
     )
 
     kind = parameter_spec.get("_kind")
-    if kind is None:
-        # Untagged → v0.1 grid manifest. The mapping is the materialised
-        # grid: {dotted-path: [values]}.
+    if kind is None or kind == "grid":
+        # Both v0.1 untagged and v1 tagged grid manifests carry the
+        # materialised grid as flat top-level keys: {dotted-path: [values]}.
         grid = {k: v for k, v in parameter_spec.items() if k != "_kind"}
         return expand_grid_to_run_specs(grid, script_path, output_dir)
     if kind == "explicit":
@@ -386,7 +386,8 @@ def _build_runs_from_parameter_spec(
         )
     raise SweepConfigError(
         f"unknown parameter_spec _kind: {kind!r} — "
-        f"expected one of None (grid), 'explicit', 'monte_carlo', 'latin_hypercube'"
+        f"expected one of 'grid', 'explicit', 'monte_carlo', 'latin_hypercube' "
+        f"(or None for v0.1 untagged grid manifests)"
     )
 
 

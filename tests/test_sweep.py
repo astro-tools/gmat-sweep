@@ -369,6 +369,9 @@ def _build_grid_manifest(
 
 
 def test_from_manifest_grid_rebuilds_runs(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
+    """v0.1 untagged grid manifests (no ``_kind`` key) keep loading after the
+    v1 schema freeze — ``_build_runs_from_parameter_spec`` treats a missing
+    ``_kind`` as ``"grid"`` for backwards compatibility."""
     script, output_dir = _build_grid_manifest(tmp_path, fake_gmat_run, n=4)
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
 
@@ -382,6 +385,48 @@ def test_from_manifest_grid_rebuilds_runs(tmp_path: Path, fake_gmat_run: FakeGma
 
     assert [s.run_id for s in sweep._runs] == [0, 1, 2, 3]
     assert [s.overrides for s in sweep._runs] == [{"Sat.SMA": 7000.0 + i} for i in range(4)]
+
+
+def test_from_manifest_tagged_grid_kind_rebuilds_runs(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """A v1 grid manifest written by ``sweep(grid=...)`` carries
+    ``_kind: "grid"``; ``from_manifest`` dispatches it to the same expander
+    as the v0.1 untagged shape."""
+    from gmat_sweep import sweep as sweep_api
+
+    script = _write_script(tmp_path)
+    output_dir = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
+    sweep_api(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0, 7200.0]},
+        workers=1,
+        out=output_dir,
+    )
+
+    # Sanity-check the discriminator made it onto the manifest.
+    from gmat_sweep import Manifest as _Manifest
+
+    saved = _Manifest.load(output_dir / "manifest.jsonl")
+    assert saved.parameter_spec["_kind"] == "grid"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
+    with LocalJoblibPool(workers=1) as pool:
+        rebuilt = Sweep.from_manifest(
+            output_dir / "manifest.jsonl",
+            script,
+            backend=pool,
+            progress=False,
+        )
+
+    assert [s.run_id for s in rebuilt._runs] == [0, 1, 2]
+    assert [s.overrides for s in rebuilt._runs] == [
+        {"Sat.SMA": 7000.0},
+        {"Sat.SMA": 7100.0},
+        {"Sat.SMA": 7200.0},
+    ]
 
 
 def test_from_manifest_explicit_kind_rebuilds_runs(

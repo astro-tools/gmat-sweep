@@ -33,29 +33,60 @@ report more runs than the file actually contains during and after a
 
 ```json
 {
+  "schema_version":      1,
   "script_sha256":       "<hex>",
-  "gmat_sweep_version":  "0.1.0",
-  "gmat_run_version":    "0.3.x",
+  "gmat_sweep_version":  "0.2.0",
+  "gmat_run_version":    "0.4.x",
   "gmat_install_version": "R2026a",
   "python_version":      "3.12.x",
   "os_platform":         "Linux-6.x.x-...",
   "sweep_seed":          null,
-  "parameter_spec":      { "<dotted-path>": [<value>, ...], ... },
+  "parameter_spec":      { "_kind": "grid", "<dotted-path>": [<value>, ...], ... },
   "run_count":           <int>
 }
 ```
 
 | Field                  | What it carries                                                                                  |
 |------------------------|--------------------------------------------------------------------------------------------------|
+| `schema_version`       | Manifest schema version. `1` from v0.2 onward. v0.1 manifests omit the field entirely; [`Manifest.load`][gmat_sweep.Manifest.load] treats the absence as `1` for backwards compatibility. See [Compatibility policy](#compatibility-policy). |
 | `script_sha256`        | SHA-256 of the `.script` after line-ending and trailing-newline normalisation. See below.        |
 | `gmat_sweep_version`   | `gmat_sweep.__version__` at sweep time.                                                          |
 | `gmat_run_version`     | `gmat_run.__version__`, or `"unknown"` if `gmat_run` is not importable.                          |
 | `gmat_install_version` | The discovered GMAT install's version string (e.g. `"R2026a"`), or `"unknown"`.                  |
 | `python_version`       | `platform.python_version()`.                                                                     |
 | `os_platform`          | `platform.platform()` — same string `gmat-run` records.                                          |
-| `sweep_seed`           | The seed passed to [`sweep(seed=...)`][gmat_sweep.sweep], or `null`. Reserved for v0.2 Monte Carlo runs. |
-| `parameter_spec`       | The materialised grid for grid sweeps (every iterable expanded to a list, keys preserved verbatim) or a tagged `{"_kind": "explicit", "columns": [...], "rows": [[...]]}` object for explicit-row sweeps. See [Parameter spec](parameter-spec.md#explicit-row-sweeps). |
+| `sweep_seed`           | The seed passed to [`sweep(seed=...)`][gmat_sweep.sweep], [`monte_carlo(seed=...)`][gmat_sweep.monte_carlo], or [`latin_hypercube(seed=...)`][gmat_sweep.latin_hypercube], or `null`. |
+| `parameter_spec`       | The run set the sweep expanded, tagged with a `_kind` discriminator. One of four shapes — see [`parameter_spec` shapes](#parameter_spec-shapes) below. |
 | `run_count`            | The number of runs in the sweep at launch.                                                       |
+
+### `parameter_spec` shapes
+
+The `_kind` discriminator is one of four values, each with its own
+payload shape:
+
+| `_kind`           | Payload (alongside `_kind`) | Written by |
+|-------------------|------------------------------|------------|
+| `"grid"`          | `{"<dotted-path>": [<value>, ...], ...}` — the materialised cartesian product, every iterable expanded to a list, keys preserved verbatim. | [`sweep(grid=...)`][gmat_sweep.sweep] |
+| `"explicit"`      | `{"columns": [<str>, ...], "rows": [[<value>, ...], ...]}` — the input DataFrame as column order plus row-major values. | [`sweep(samples=...)`][gmat_sweep.sweep] |
+| `"monte_carlo"`   | `{"perturb": {<dotted-path>: <serialised dist>, ...}, "n": <int>, "seed": <int> \| null}` — the distribution descriptors plus the parent seed used to derive per-parameter sub-seeds. | [`monte_carlo`][gmat_sweep.monte_carlo] |
+| `"latin_hypercube"` | Same shape as `"monte_carlo"` — the seed is forwarded to [`scipy.stats.qmc.LatinHypercube`][scipy-lh]. | [`latin_hypercube`][gmat_sweep.latin_hypercube] |
+
+[scipy-lh]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html
+
+See [Parameter spec](parameter-spec.md) for the user-facing semantics of
+each shape and how to reconstruct the run set from a manifest.
+
+#### v0.1 untagged grid headers
+
+Manifests written by `gmat_sweep` 0.1.x omit `_kind` on grid sweeps and
+present `parameter_spec` as the bare materialised grid:
+
+```json
+{ "parameter_spec": { "<dotted-path>": [<value>, ...], ... } }
+```
+
+These keep loading under v0.2+: the dispatch in [`Sweep.from_manifest`][gmat_sweep.Sweep.from_manifest]
+treats a missing `_kind` as `"grid"`. New sweeps always tag the shape.
 
 ### Canonical script hash
 
@@ -161,3 +192,40 @@ in-memory `entries` list therefore has exactly one entry per
 `run_id`, and [`find_failed`][gmat_sweep.Manifest.find_failed] reflects
 the latest status. See [Resume](resume.md) for the resume flow that
 relies on this.
+
+## Compatibility policy
+
+The on-disk shape is frozen as `schema_version=1` from `gmat_sweep` 0.2
+onward. The exposed constant
+[`gmat_sweep.MANIFEST_SCHEMA_VERSION`][gmat_sweep.MANIFEST_SCHEMA_VERSION]
+is what the running `gmat-sweep` writes and the maximum it accepts on
+load.
+
+**Read rules.**
+
+- A manifest with `schema_version <= MANIFEST_SCHEMA_VERSION` loads. A
+  missing `schema_version` is treated as `1` for v0.1 backwards
+  compatibility.
+- A manifest with `schema_version > MANIFEST_SCHEMA_VERSION` is rejected
+  with [`ManifestCorruptError`][gmat_sweep.ManifestCorruptError]: the
+  reader is older than the writer and may have lost or changed semantics
+  on fields the manifest carries.
+- Unknown extra header fields are silently dropped on load. Older
+  `gmat-sweep` versions can therefore read manifests written by newer
+  versions whenever the new fields are purely additive.
+
+**When to bump `schema_version`.**
+
+| Change | Bump required? |
+|--------|----------------|
+| Adding a new header field | No (additive — older readers ignore it). |
+| Adding a new per-entry field with a documented default | No (older readers ignore it; new readers fall back to the default when reading older manifests). |
+| Removing a header or per-entry field | Yes. |
+| Changing the semantics of an existing field, even if the JSON shape is unchanged | Yes. |
+| Changing the JSON shape of an existing field (e.g. flat to nested) | Yes. |
+| Adding a new `_kind` value to `parameter_spec` | No (additive — older readers will reject the unknown kind at dispatch time, which is the correct behavior; the manifest itself remains parseable). |
+
+A `schema_version` bump is a coordinated change: the writer side
+emits the new value and the reader side learns to interpret the new
+shape. Older `gmat-sweep` versions stop accepting bumped manifests
+on the read side, which is the point of the version field.

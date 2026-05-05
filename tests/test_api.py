@@ -68,7 +68,10 @@ def test_sweep_writes_manifest_with_grid_in_header(
     )
 
     manifest = Manifest.load(out / "manifest.jsonl")
-    assert manifest.parameter_spec == {"Sat.SMA": [7000.0, 7100.0]}
+    assert manifest.parameter_spec == {
+        "_kind": "grid",
+        "Sat.SMA": [7000.0, 7100.0],
+    }
     assert manifest.sweep_seed == 42
     assert manifest.run_count == 2
 
@@ -307,12 +310,35 @@ def test_sweep_with_samples_non_default_index_raises(
         sweep(script, samples=samples, workers=1, out=tmp_path / "out")
 
 
+def test_sweep_with_grid_writes_grid_kind_in_manifest(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Manifest tags ``parameter_spec`` with ``_kind: "grid"`` from v1
+    onward; the materialised axes ride alongside the discriminator."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    sweep(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0], "Sat.ECC": [0.001, 0.002]},
+        workers=1,
+        out=out,
+    )
+
+    manifest = Manifest.load(out / "manifest.jsonl")
+    spec = manifest.parameter_spec
+    assert spec["_kind"] == "grid"
+    assert spec["Sat.SMA"] == [7000.0, 7100.0]
+    assert spec["Sat.ECC"] == [0.001, 0.002]
+
+
 def test_sweep_with_samples_writes_explicit_kind_in_manifest(
     tmp_path: Path, fake_gmat_run: FakeGmatRun
 ) -> None:
     """Manifest tags the parameter_spec with ``_kind: "explicit"`` so a
-    later loader can distinguish a sample-based sweep from an untagged grid
-    header."""
+    later loader can distinguish a sample-based sweep from a grid sweep."""
     script = _write_script(tmp_path)
     out = tmp_path / "out"
 

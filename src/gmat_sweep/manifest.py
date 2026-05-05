@@ -13,6 +13,14 @@ the original failed entry, so the file may carry two (or more) entries for
 that ``run_id``. :meth:`Manifest.load` keeps only the *last* occurrence per
 ``run_id`` (preserving the position of the *first* occurrence), so the
 in-memory ``entries`` list is deduplicated and the resumed status wins.
+
+The on-disk shape is frozen as ``schema_version=1`` from v0.2 onward; the
+canonical reference is ``docs/manifest-schema.md``. v0.1 manifests written
+before the freeze omitted ``schema_version`` entirely; :meth:`Manifest.load`
+treats a missing field as ``1`` so they keep loading. A header carrying a
+``schema_version`` greater than :data:`MANIFEST_SCHEMA_VERSION` is rejected
+with :class:`ManifestCorruptError` — the running ``gmat-sweep`` is older
+than the manifest's writer and cannot parse it safely.
 """
 
 from __future__ import annotations
@@ -29,7 +37,23 @@ from typing import Any, cast
 from gmat_sweep.errors import ManifestCorruptError
 from gmat_sweep.spec import RunOutcome, RunStatus
 
-__all__ = ["Manifest", "ManifestEntry", "canonical_script_sha256"]
+__all__ = [
+    "MANIFEST_SCHEMA_VERSION",
+    "Manifest",
+    "ManifestEntry",
+    "canonical_script_sha256",
+]
+
+
+MANIFEST_SCHEMA_VERSION: int = 1
+"""On-disk manifest schema version this ``gmat-sweep`` writes and reads.
+
+Frozen from v0.2 onward. :meth:`Manifest.load` accepts any header whose
+``schema_version`` is ``<= MANIFEST_SCHEMA_VERSION`` (a missing field is
+treated as ``1`` for v0.1 backwards compatibility) and rejects anything
+greater. See ``docs/manifest-schema.md`` for the field-by-field contract
+and the compatibility policy that governs future bumps.
+"""
 
 
 def canonical_script_sha256(script_path: Path) -> str:
@@ -121,11 +145,13 @@ class Manifest:
     sweep_seed: int | None
     parameter_spec: dict[str, Any]
     run_count: int
+    schema_version: int = MANIFEST_SCHEMA_VERSION
     entries: list[ManifestEntry] = field(default_factory=list)
     _path: Path | None = field(default=None, init=False, repr=False, compare=False)
 
     def _header_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": self.schema_version,
             "script_sha256": self.script_sha256,
             "gmat_sweep_version": self.gmat_sweep_version,
             "gmat_run_version": self.gmat_run_version,
@@ -139,6 +165,9 @@ class Manifest:
 
     @classmethod
     def _header_from_dict(cls, data: dict[str, Any]) -> Manifest:
+        # schema_version is absent on v0.1 manifests written before the freeze;
+        # default to 1 so they keep loading. Manifest.load() guards against
+        # versions newer than this gmat-sweep supports before getting here.
         return cls(
             script_sha256=str(data["script_sha256"]),
             gmat_sweep_version=str(data["gmat_sweep_version"]),
@@ -149,6 +178,7 @@ class Manifest:
             sweep_seed=None if data["sweep_seed"] is None else int(data["sweep_seed"]),
             parameter_spec=dict(data["parameter_spec"]),
             run_count=int(data["run_count"]),
+            schema_version=int(data.get("schema_version", 1)),
             entries=[],
         )
 
@@ -201,6 +231,23 @@ class Manifest:
             header_data = json.loads(complete_lines[0])
         except json.JSONDecodeError as exc:
             raise ManifestCorruptError(f"manifest header is not valid JSON: {exc}", path) from exc
+
+        # v0.1 manifests omit schema_version; treat as 1. Anything strictly
+        # greater than the running gmat-sweep's supported version is unparseable
+        # by definition — newer schemas may have changed semantics on existing
+        # fields, and we cannot tell from here which fields are still safe.
+        try:
+            schema_version = int(header_data.get("schema_version", 1))
+        except (TypeError, ValueError) as exc:
+            raise ManifestCorruptError(
+                f"manifest schema_version is not an integer: {header_data.get('schema_version')!r}",
+                path,
+            ) from exc
+        if schema_version > MANIFEST_SCHEMA_VERSION:
+            raise ManifestCorruptError(
+                f"manifest schema_version={schema_version} is newer than this gmat-sweep supports",
+                path,
+            )
 
         try:
             manifest = cls._header_from_dict(header_data)

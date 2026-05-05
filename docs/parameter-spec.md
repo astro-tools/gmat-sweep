@@ -243,9 +243,9 @@ The DataFrame must have:
 
 ### Manifest serialisation
 
-The manifest header records `samples` under `parameter_spec` with a
-discriminator tag so a later loader can tell sample-based sweeps apart
-from untagged grid headers:
+Every parameter-spec shape carries a `_kind` discriminator on the
+manifest header so a later loader can dispatch without inferring the
+sweep kind from which keys are present. The explicit-row shape:
 
 ```json
 {
@@ -266,9 +266,24 @@ m = Manifest.load("./lhs-sweep/manifest.jsonl")
 samples = pd.DataFrame(m.parameter_spec["rows"], columns=m.parameter_spec["columns"])
 ```
 
-Grid sweeps continue to use the untagged
-`{"<dotted-path>": [values, …], …}` header shape — the discriminator only
-appears on explicit-row sweeps.
+Grid sweeps from `gmat_sweep` 0.2 onward emit `_kind: "grid"` alongside
+the materialised axes:
+
+```json
+{
+  "parameter_spec": {
+    "_kind":   "grid",
+    "Sat.SMA": [7000.0, 7100.0],
+    "Sat.ECC": [0.001, 0.002]
+  }
+}
+```
+
+Manifests written by `gmat_sweep` 0.1 omit `_kind` on grid sweeps;
+[`Manifest.load`][gmat_sweep.Manifest.load] keeps loading them by
+treating the absent discriminator as `"grid"`. See [Manifest schema
+→ `parameter_spec` shapes](manifest-schema.md#parameter_spec-shapes)
+for the full enumeration.
 
 ## CLI mini-grammar
 
