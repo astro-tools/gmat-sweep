@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from gmat_sweep.errors import ManifestCorruptError
-from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
+from gmat_sweep.manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    Manifest,
+    ManifestEntry,
+    canonical_script_sha256,
+)
 from gmat_sweep.spec import RunOutcome
 
 
@@ -559,6 +564,7 @@ def test_header_dict_carries_every_documented_field() -> None:
     m = _make_manifest()
     header: dict[str, Any] = m._header_dict()
     expected = {
+        "schema_version",
         "script_sha256",
         "gmat_sweep_version",
         "gmat_run_version",
@@ -570,3 +576,76 @@ def test_header_dict_carries_every_documented_field() -> None:
         "run_count",
     }
     assert set(header.keys()) == expected
+
+
+# ---- schema_version freeze ----------------------------------------------
+
+
+def test_save_writes_schema_version_in_header(tmp_path: Path) -> None:
+    """Headers written by this gmat-sweep carry the supported schema version."""
+    m = _make_manifest()
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+
+    header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert header["schema_version"] == MANIFEST_SCHEMA_VERSION
+
+
+def test_load_manifest_without_schema_version_loads_as_v1(tmp_path: Path) -> None:
+    """A manifest header that omits schema_version loads as schema_version=1
+    for backwards compatibility with manifests written before the field was
+    introduced."""
+    m = _make_manifest(n_entries=2)
+    header = m._header_dict()
+    del header["schema_version"]  # simulate a manifest from before the field landed
+
+    path = tmp_path / "manifest.jsonl"
+    lines = [json.dumps(header, sort_keys=True)]
+    lines.extend(json.dumps(e.to_dict(), sort_keys=True) for e in m.entries)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    reloaded = Manifest.load(path)
+    assert reloaded.schema_version == 1
+    assert reloaded.script_sha256 == m.script_sha256
+    assert [e.run_id for e in reloaded.entries] == [0, 1]
+
+
+def test_load_rejects_schema_version_newer_than_supported(tmp_path: Path) -> None:
+    """A header carrying a schema_version greater than the running gmat-sweep
+    supports raises ManifestCorruptError — the reader is older than the writer
+    and may have lost or changed semantics on existing fields."""
+    m = _make_manifest()
+    header = m._header_dict()
+    header["schema_version"] = MANIFEST_SCHEMA_VERSION + 1
+
+    path = tmp_path / "manifest.jsonl"
+    path.write_text(json.dumps(header, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest.load(path)
+    assert excinfo.value.path == path
+    assert "schema_version" in str(excinfo.value)
+    assert "newer" in str(excinfo.value)
+
+
+def test_load_rejects_non_integer_schema_version(tmp_path: Path) -> None:
+    m = _make_manifest()
+    header = m._header_dict()
+    header["schema_version"] = "not-an-int"
+
+    path = tmp_path / "manifest.jsonl"
+    path.write_text(json.dumps(header, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest.load(path)
+    assert excinfo.value.path == path
+    assert "schema_version" in str(excinfo.value)
+
+
+def test_save_and_load_round_trip_preserves_schema_version(tmp_path: Path) -> None:
+    m = _make_manifest(n_entries=2)
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    reloaded = Manifest.load(path)
+    assert reloaded.schema_version == MANIFEST_SCHEMA_VERSION
+    assert reloaded == m

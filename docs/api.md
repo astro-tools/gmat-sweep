@@ -34,6 +34,8 @@ auto-generated from docstrings via
 
 ## Manifest
 
+::: gmat_sweep.MANIFEST_SCHEMA_VERSION
+
 ::: gmat_sweep.Manifest
 
 ::: gmat_sweep.ManifestEntry

@@ -32,6 +32,7 @@ from gmat_sweep.manifest import Manifest, ManifestEntry
 
 _REQUIRED_HEADER_FIELDS: frozenset[str] = frozenset(
     {
+        "schema_version",
         "script_sha256",
         "gmat_sweep_version",
         "gmat_run_version",
@@ -139,6 +140,7 @@ def test_header_round_trips_through_jsonl_bit_equal(tmp_path: Path) -> None:
 
 def test_header_field_types_are_resume_safe() -> None:
     m = _build_manifest_with_every_status()
+    assert isinstance(m.schema_version, int)
     assert isinstance(m.script_sha256, str)
     assert isinstance(m.gmat_sweep_version, str)
     assert isinstance(m.gmat_run_version, str)

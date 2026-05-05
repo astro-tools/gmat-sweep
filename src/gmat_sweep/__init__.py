@@ -21,7 +21,12 @@ from gmat_sweep.grids import (
     full_factorial,
     latin_hypercube_samples,
 )
-from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
+from gmat_sweep.manifest import (
+    MANIFEST_SCHEMA_VERSION,
+    Manifest,
+    ManifestEntry,
+    canonical_script_sha256,
+)
 from gmat_sweep.spec import RunOutcome, RunSpec, SweepSpec
 from gmat_sweep.sweep import Sweep
 
@@ -40,6 +45,7 @@ if _logger.level == logging.NOTSET:
     _logger.setLevel(logging.WARNING)
 
 __all__ = [
+    "MANIFEST_SCHEMA_VERSION",
     "BackendError",
     "GmatSweepError",
     "Manifest",

@@ -167,7 +167,9 @@ def test_run_with_two_grid_flags_produces_cartesian_product(
     assert rc == 0
     manifest = Manifest.load(out / "manifest.jsonl")
     assert manifest.run_count == 6
-    assert sorted(manifest.parameter_spec.keys()) == ["Sat.ECC", "Sat.SMA"]
+    assert manifest.parameter_spec["_kind"] == "grid"
+    grid_axes = {k: v for k, v in manifest.parameter_spec.items() if k != "_kind"}
+    assert sorted(grid_axes.keys()) == ["Sat.ECC", "Sat.SMA"]
 
 
 def test_run_with_failing_runs_summary_shows_breakdown(

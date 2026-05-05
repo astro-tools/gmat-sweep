@@ -118,16 +118,18 @@ def sweep(
         # for the manifest header (generators don't survive json.dumps), so
         # do it up front and reuse the same object.
         materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
-        parameter_spec = materialised_grid
+        # Every parameter_spec shape carries a ``_kind`` discriminator so a
+        # downstream reader doesn't have to infer the sweep kind from the
+        # keys present. Older grid manifests omit the tag, and
+        # ``Manifest.load`` keeps loading them as if ``_kind="grid"``.
+        parameter_spec = {"_kind": "grid", **materialised_grid}
 
         def build_runs(output_dir: Path) -> list[RunSpec]:
             return expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
     else:
         assert samples is not None  # narrowed by the XOR check above
-        # Tagged shape lets Manifest.load distinguish explicit-row sweeps from
-        # untagged grid headers without breaking back-compat with v0.1 grid
-        # manifests already on disk. ``rows`` is a list-of-lists in column
-        # order so the round-trip is a one-line pd.DataFrame(...) call.
+        # ``rows`` is a list-of-lists in column order so the round-trip is a
+        # one-line pd.DataFrame(...) call.
         parameter_spec = {
             "_kind": "explicit",
             "columns": [str(c) for c in samples.columns],
