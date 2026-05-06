@@ -18,6 +18,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.Pool
 
+::: gmat_sweep.LocalJoblibPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec
