@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -12,7 +13,7 @@ import pytest
 from gmat_sweep import cli
 from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.errors import SweepConfigError
-from gmat_sweep.manifest import Manifest
+from gmat_sweep.manifest import Manifest, ManifestEntry
 from tests.conftest import FakeGmatRun, FakeResults
 
 
@@ -303,6 +304,219 @@ def test_show_on_missing_file_exits_manifest_code(
     rc = cli.main(["show", str(missing)])
     assert rc == cli.EXIT_MANIFEST
     assert "not found" in capsys.readouterr().err
+
+
+# ---- show --detail / --run / --filter -----------------------------------
+
+
+def _show_entry(
+    run_id: int,
+    status: str,
+    *,
+    duration_s: float = 1.0,
+    stderr: str | None = None,
+    log_path: Path | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> ManifestEntry:
+    return ManifestEntry(
+        run_id=run_id,
+        overrides=overrides if overrides is not None else {"Sat.SMA": 7000.0 + run_id},
+        status=status,  # type: ignore[arg-type]
+        output_paths={},
+        started_at=datetime(2026, 5, 4, 0, 0, 0, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 4, 0, 0, 1, tzinfo=timezone.utc),
+        duration_s=duration_s,
+        stderr=stderr,
+        log_path=log_path,
+    )
+
+
+def _write_show_manifest(tmp_path: Path, entries: list[ManifestEntry]) -> Path:
+    manifest = Manifest(
+        script_sha256="a" * 64,
+        gmat_sweep_version="0.2.0",
+        gmat_run_version="0.4.0",
+        gmat_install_version="R2026a",
+        python_version="3.12.3",
+        os_platform="Linux-6.6.0",
+        sweep_seed=None,
+        parameter_spec={"_kind": "grid", "Sat.SMA": [7000.0, 7100.0]},
+        run_count=len(entries),
+        entries=entries,
+    )
+    path = tmp_path / "manifest.jsonl"
+    manifest.save(path)
+    return path
+
+
+def test_truncate_stderr_summary_short_unchanged() -> None:
+    assert cli._truncate_stderr_summary("ValueError: boom") == "ValueError: boom"
+
+
+def test_truncate_stderr_summary_long_ellipsised_to_60_chars() -> None:
+    long = "x" * 100
+    out = cli._truncate_stderr_summary(long)
+    assert len(out) == 60
+    assert out.endswith("...")
+
+
+def test_truncate_stderr_summary_takes_first_line_only() -> None:
+    assert cli._truncate_stderr_summary("first line\nsecond line\n") == "first line"
+
+
+def test_truncate_stderr_summary_none_and_empty_return_empty_string() -> None:
+    assert cli._truncate_stderr_summary(None) == ""
+    assert cli._truncate_stderr_summary("") == ""
+
+
+def test_show_detail_orders_failed_before_ok_then_run_id_ascending(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entries = [
+        _show_entry(0, "ok"),
+        _show_entry(1, "failed", stderr="ValueError: out of range\n"),
+        _show_entry(2, "skipped", stderr="prerequisite missing"),
+        _show_entry(3, "ok"),
+        _show_entry(4, "failed", stderr="other"),
+    ]
+    path = _write_show_manifest(tmp_path, entries)
+
+    rc = cli.main(["show", "--detail", str(path)])
+    assert rc == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    # Header + 5 data rows + summary line.
+    assert len(out_lines) == 7
+    assert out_lines[0].startswith("run_id")
+    statuses_in_order = [line.split()[1] for line in out_lines[1:6]]
+    assert statuses_in_order == ["failed", "failed", "skipped", "ok", "ok"]
+    run_ids_in_order = [int(line.split()[0]) for line in out_lines[1:6]]
+    assert run_ids_in_order == [1, 4, 2, 0, 3]
+    assert out_lines[-1].startswith("5 runs")
+
+
+def test_show_detail_renders_dash_for_ok_stderr_and_missing_log(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write_show_manifest(tmp_path, [_show_entry(0, "ok")])
+    cli.main(["show", "--detail", str(path)])
+    out_lines = capsys.readouterr().out.splitlines()
+    # The data row should carry two em-dash cells: stderr_summary and log_path.
+    # (The summary line below also contains a dash, so we assert on the row only.)
+    data_row = out_lines[1]
+    assert data_row.count("—") == 2
+
+
+def test_show_detail_truncates_long_stderr_in_table(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    long_stderr = "ValueError: " + "x" * 200
+    entries = [_show_entry(0, "failed", stderr=long_stderr)]
+    path = _write_show_manifest(tmp_path, entries)
+
+    cli.main(["show", "--detail", str(path)])
+    out = capsys.readouterr().out
+    assert "..." in out
+    # No single line in the table should exceed header + truncated stderr column +
+    # other columns; in particular, the full 200-char stderr must not appear.
+    assert "x" * 200 not in out
+
+
+def test_show_detail_filter_failed_keeps_only_failed_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entries = [
+        _show_entry(0, "ok"),
+        _show_entry(1, "failed", stderr="boom"),
+        _show_entry(2, "skipped"),
+        _show_entry(3, "failed", stderr="bang"),
+    ]
+    path = _write_show_manifest(tmp_path, entries)
+
+    rc = cli.main(["show", "--detail", "--filter", "failed", str(path)])
+    assert rc == 0
+    out_lines = capsys.readouterr().out.splitlines()
+    # Header + 2 failed rows + summary (which still reflects all 4 runs).
+    assert len(out_lines) == 4
+    assert all(" failed " in line for line in out_lines[1:3])
+    assert out_lines[-1].startswith("4 runs")
+
+
+def test_show_filter_without_detail_exits_config_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write_show_manifest(tmp_path, [_show_entry(0, "ok")])
+    rc = cli.main(["show", "--filter", "ok", str(path)])
+    assert rc == cli.EXIT_CONFIG
+    assert "--filter requires --detail" in capsys.readouterr().err
+
+
+def test_show_detail_and_run_are_mutually_exclusive(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write_show_manifest(tmp_path, [_show_entry(0, "ok")])
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["show", "--detail", "--run", "0", str(path)])
+    assert exc_info.value.code == 2
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_show_run_prints_full_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    multiline_stderr = "ValueError: out of range\nTraceback details here"
+    entries = [
+        _show_entry(0, "ok"),
+        _show_entry(
+            7,
+            "failed",
+            stderr=multiline_stderr,
+            log_path=Path("/o/run-7/worker.log"),
+            overrides={"Sat.SMA": 8000.0, "Sat.ECC": 0.1},
+        ),
+    ]
+    path = _write_show_manifest(tmp_path, entries)
+
+    rc = cli.main(["show", "--run", "7", str(path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "run_id: 7" in out
+    assert "status" in out and "failed" in out
+    assert "/o/run-7/worker.log" in out
+    # Full unsuppressed stderr — both lines must be present.
+    assert "ValueError: out of range" in out
+    assert "Traceback details here" in out
+    # Override dict, sorted keys, repr values.
+    assert "Sat.ECC" in out
+    assert "Sat.SMA" in out
+    assert "8000.0" in out
+
+
+def test_show_run_for_ok_entry_reports_no_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write_show_manifest(tmp_path, [_show_entry(0, "ok")])
+    rc = cli.main(["show", "--run", "0", str(path)])
+    assert rc == 0
+    assert "(no stderr)" in capsys.readouterr().out
+
+
+def test_show_run_unknown_run_id_exits_manifest_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write_show_manifest(tmp_path, [_show_entry(0, "ok"), _show_entry(1, "ok")])
+    rc = cli.main(["show", "--run", "999", str(path)])
+    assert rc == cli.EXIT_MANIFEST
+    assert "run_id 999 not found in manifest" in capsys.readouterr().err
+
+
+def test_show_no_flags_byte_for_byte_matches_format_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entries = [_show_entry(0, "ok"), _show_entry(1, "failed", stderr="boom")]
+    path = _write_show_manifest(tmp_path, entries)
+
+    rc = cli.main(["show", str(path)])
+    assert rc == 0
+    expected = cli._format_summary(Manifest.load(path), path.parent)
+    assert capsys.readouterr().out == expected + "\n"
 
 
 def test_run_maps_backend_error_to_exit_code(

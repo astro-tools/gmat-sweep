@@ -212,11 +212,61 @@ mismatch exits with code `2`.
 
 ## `show`
 
-Print the one-line summary line for a manifest produced by any of the
-sweep-running subcommands.
+Inspect a manifest produced by any of the sweep-running subcommands. Three
+modes:
+
+- default — one-line summary.
+- `--detail` — per-run table sorted with `failed` first, then `skipped`, then
+  `ok`, plus the same one-line summary at the bottom.
+- `--run N` — full record for `run_id=N`: header fields, override dict, and
+  the unsuppressed `stderr`.
+
+`--detail` and `--run` are mutually exclusive.
 
 ```bash
 gmat-sweep show ./sweep-out/manifest.jsonl
 ```
 
-A missing or unparseable manifest exits with code `3`.
+```text
+5 runs (4 ok, 1 failed) in 53.41 s — output: ./sweep-out
+```
+
+### `--detail`
+
+```bash
+gmat-sweep show --detail ./sweep-out/manifest.jsonl
+```
+
+```text
+run_id  status   duration_s  stderr_summary                  log_path
+1       failed   0.21        ValueError: Sat.SMA out of...   ./sweep-out/run-1/worker.log
+0       ok       12.43       —                               ./sweep-out/run-0/worker.log
+2       ok       11.97       —                               ./sweep-out/run-2/worker.log
+3       ok       14.02       —                               ./sweep-out/run-3/worker.log
+4       ok       14.78       —                               ./sweep-out/run-4/worker.log
+5 runs (4 ok, 1 failed) in 53.41 s — output: ./sweep-out
+```
+
+`stderr_summary` is the first line of the run's captured `stderr`, truncated
+to 60 characters with a `...` ellipsis. `ok` rows show `—` (no captured
+`stderr`).
+
+`--filter STATUS` narrows the table to one of `ok`, `failed`, `skipped`. The
+trailing summary line still reflects the full manifest. `--filter` requires
+`--detail`.
+
+### `--run N`
+
+```bash
+gmat-sweep show --run 1 ./sweep-out/manifest.jsonl
+```
+
+Prints `run_id=1`'s full record (status, duration, timestamps, log path,
+override dict, full unsuppressed `stderr`). Exit code `0`. If `N` is not in
+the manifest, exits with code `3` and a `gmat-sweep: run_id N not found in
+manifest` message on stderr.
+
+### Exit codes
+
+A missing or unparseable manifest, or a `--run N` for an `N` not in the
+manifest, exits with code `3`.

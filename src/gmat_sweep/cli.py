@@ -34,7 +34,7 @@ from gmat_sweep.errors import (
     ManifestCorruptError,
     SweepConfigError,
 )
-from gmat_sweep.manifest import Manifest
+from gmat_sweep.manifest import Manifest, ManifestEntry
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -51,6 +51,11 @@ EXIT_MANIFEST = 3
 EXIT_BACKEND = 4
 
 _PERTURB_TAGS = ("normal", "uniform", "lognormal")
+
+_DETAIL_HEADERS = ("run_id", "status", "duration_s", "stderr_summary", "log_path")
+_STDERR_SUMMARY_WIDTH = 60
+_EMPTY_CELL = "—"
+_STATUS_BUCKETS: dict[str, int] = {"failed": 0, "skipped": 1, "ok": 2}
 
 
 def _parse_grid_value(token: str) -> int | float | str:
@@ -280,12 +285,121 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _truncate_stderr_summary(stderr: str | None) -> str:
+    """First line of ``stderr`` truncated to ``_STDERR_SUMMARY_WIDTH`` chars.
+
+    Returns ``""`` for ``None`` or empty input. Strings longer than the window
+    are cut so the visible result (text + ``"..."``) totals at most
+    ``_STDERR_SUMMARY_WIDTH`` characters.
+    """
+    if not stderr:
+        return ""
+    first = stderr.splitlines()[0] if stderr.splitlines() else ""
+    if len(first) <= _STDERR_SUMMARY_WIDTH:
+        return first
+    return first[: _STDERR_SUMMARY_WIDTH - 3] + "..."
+
+
+def _detail_row(entry: ManifestEntry) -> tuple[str, str, str, str, str]:
+    """Render one manifest entry as the five string cells of a detail-table row."""
+    summary = _truncate_stderr_summary(entry.stderr) or _EMPTY_CELL
+    log = _EMPTY_CELL if entry.log_path is None else str(entry.log_path)
+    return (
+        str(entry.run_id),
+        entry.status,
+        f"{entry.duration_s:.2f}",
+        summary,
+        log,
+    )
+
+
+def _format_detail_table(
+    manifest: Manifest, output_dir: Path, *, status_filter: str | None = None
+) -> str:
+    """Render the per-run detail table plus the trailing one-line summary.
+
+    Rows are sorted with ``failed`` first, then ``skipped``, then ``ok``;
+    within each bucket by ``run_id`` ascending. ``status_filter`` (if given)
+    keeps only rows of that status; the summary line still reflects the
+    full manifest.
+    """
+    entries = manifest.entries
+    if status_filter is not None:
+        entries = [e for e in entries if e.status == status_filter]
+    sorted_entries = sorted(entries, key=lambda e: (_STATUS_BUCKETS.get(e.status, 99), e.run_id))
+    rows = [_detail_row(e) for e in sorted_entries]
+
+    widths = [len(h) for h in _DETAIL_HEADERS]
+    for row in rows:
+        for i, cell in enumerate(row):
+            if len(cell) > widths[i]:
+                widths[i] = len(cell)
+
+    def _format_row(cells: tuple[str, ...] | list[str]) -> str:
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(cells)).rstrip()
+
+    lines = [_format_row(_DETAIL_HEADERS)]
+    lines.extend(_format_row(row) for row in rows)
+    lines.append(_format_summary(manifest, output_dir))
+    return "\n".join(lines)
+
+
+def _format_run_detail(entry: ManifestEntry) -> str:
+    """Render one run's full record: header fields, full stderr, override dict."""
+    header_fields = (
+        ("status", entry.status),
+        ("duration_s", f"{entry.duration_s:.2f}"),
+        ("started_at", entry.started_at.isoformat()),
+        ("ended_at", entry.ended_at.isoformat()),
+        ("log_path", _EMPTY_CELL if entry.log_path is None else str(entry.log_path)),
+    )
+    label_width = max(len(label) for label, _ in header_fields)
+    lines = [f"run_id: {entry.run_id}"]
+    lines.extend(f"{label.ljust(label_width)}  {value}" for label, value in header_fields)
+
+    lines.append("")
+    lines.append("overrides:")
+    if entry.overrides:
+        key_width = max(len(k) for k in entry.overrides)
+        for key in sorted(entry.overrides):
+            lines.append(f"  {key.ljust(key_width)}  {entry.overrides[key]!r}")
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+    lines.append("stderr:")
+    if entry.stderr:
+        lines.extend(entry.stderr.splitlines() or [entry.stderr])
+    else:
+        lines.append("(no stderr)")
+    return "\n".join(lines)
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     if not manifest_path.is_file():
         print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
         return EXIT_MANIFEST
+    if args.filter is not None and not args.detail:
+        raise SweepConfigError("--filter requires --detail")
+
     manifest = Manifest.load(manifest_path)
+
+    if args.run is not None:
+        for entry in manifest.entries:
+            if entry.run_id == args.run:
+                print(_format_run_detail(entry))
+                return EXIT_OK
+        print(
+            f"gmat-sweep: run_id {args.run} not found in manifest",
+            file=sys.stderr,
+        )
+        return EXIT_MANIFEST
+
+    if args.detail:
+        print(_format_detail_table(manifest, manifest_path.parent, status_filter=args.filter))
+        return EXIT_OK
+
     print(_format_summary(manifest, manifest_path.parent))
     return EXIT_OK
 
@@ -467,12 +581,42 @@ def _build_parser() -> argparse.ArgumentParser:
     show = subparsers.add_parser(
         "show",
         help="Print a one-line summary of a sweep manifest.",
-        description="Load a manifest.jsonl file and print a one-line summary.",
+        description=(
+            "Load a manifest.jsonl file and print either a one-line summary "
+            "(default), a per-run detail table (--detail), or one run's full "
+            "record (--run N)."
+        ),
     )
     show.add_argument(
         "manifest",
         metavar="MANIFEST",
         help="Path to a manifest.jsonl produced by 'gmat-sweep run'.",
+    )
+    show_mode = show.add_mutually_exclusive_group()
+    show_mode.add_argument(
+        "--detail",
+        action="store_true",
+        help=(
+            "Print a per-run table (run_id, status, duration_s, stderr_summary, "
+            "log_path) sorted failed → skipped → ok, then the one-line summary."
+        ),
+    )
+    show_mode.add_argument(
+        "--run",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Print run_id=N's full record: header fields, override dict, full "
+            "stderr. Exits 3 if N is not in the manifest."
+        ),
+    )
+    show.add_argument(
+        "--filter",
+        choices=("ok", "failed", "skipped"),
+        default=None,
+        metavar="STATUS",
+        help="With --detail, restrict the table to runs of one status.",
     )
     show.set_defaults(func=_cmd_show)
 
