@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
+from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -219,7 +220,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         grid[name] = values
 
     out = Path(args.out)
-    sweep(script, grid=grid, workers=args.workers, out=out)
+    with LocalJoblibPool(workers=args.workers) as pool:
+        sweep(script, grid=grid, backend=pool, out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -255,14 +257,15 @@ def _cmd_monte_carlo(args: argparse.Namespace) -> int:
 
     perturb = _collect_perturb(args.perturb)
     out = Path(args.out)
-    monte_carlo(
-        script,
-        n=args.n,
-        perturb=perturb,
-        seed=args.seed,
-        workers=args.workers,
-        out=out,
-    )
+    with LocalJoblibPool(workers=args.workers) as pool:
+        monte_carlo(
+            script,
+            n=args.n,
+            perturb=perturb,
+            seed=args.seed,
+            backend=pool,
+            out=out,
+        )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -277,14 +280,15 @@ def _cmd_latin_hypercube(args: argparse.Namespace) -> int:
 
     perturb = _collect_perturb(args.perturb)
     out = Path(args.out)
-    latin_hypercube(
-        script,
-        n=args.n,
-        perturb=perturb,
-        seed=args.seed,
-        workers=args.workers,
-        out=out,
-    )
+    with LocalJoblibPool(workers=args.workers) as pool:
+        latin_hypercube(
+            script,
+            n=args.n,
+            perturb=perturb,
+            seed=args.seed,
+            backend=pool,
+            out=out,
+        )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -299,7 +303,8 @@ def _cmd_explicit(args: argparse.Namespace) -> int:
 
     samples = _load_samples(Path(args.samples))
     out = Path(args.out)
-    sweep(script, samples=samples, workers=args.workers, out=out)
+    with LocalJoblibPool(workers=args.workers) as pool:
+        sweep(script, samples=samples, backend=pool, out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -316,9 +321,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
         return EXIT_CONFIG
 
-    # Local imports keep gmat_sweep.cli's import-time surface narrow — these
-    # are only needed by the resume path.
-    from gmat_sweep.backends.joblib import LocalJoblibPool
+    # Local import: only the resume path drives Sweep directly.
     from gmat_sweep.sweep import Sweep
 
     with LocalJoblibPool(workers=args.workers) as pool:

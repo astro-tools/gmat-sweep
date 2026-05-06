@@ -42,7 +42,8 @@ report more runs than the file actually contains during and after a
   "os_platform":         "<platform.platform()>",
   "sweep_seed":          null,
   "parameter_spec":      { "_kind": "grid", "<dotted-path>": [<value>, ...], ... },
-  "run_count":           <int>
+  "run_count":           <int>,
+  "backend":             "<Pool subclass name>"
 }
 ```
 
@@ -58,6 +59,7 @@ report more runs than the file actually contains during and after a
 | `sweep_seed`           | The seed passed to [`sweep(seed=...)`][gmat_sweep.sweep], [`monte_carlo(seed=...)`][gmat_sweep.monte_carlo], or [`latin_hypercube(seed=...)`][gmat_sweep.latin_hypercube], or `null`. |
 | `parameter_spec`       | The run set the sweep expanded, tagged with a `_kind` discriminator. One of four shapes — see [`parameter_spec` shapes](#parameter_spec-shapes) below. |
 | `run_count`            | The number of runs in the sweep at launch.                                                       |
+| `backend`              | The execution backend's class name (`pool.__class__.__name__`) — e.g. `"LocalJoblibPool"`, `"DaskPool"`, `"RayPool"`, or any third-party `Pool` subclass. Optional on load: manifests written before this field landed report `"unknown"`. |
 
 ### `parameter_spec` shapes
 

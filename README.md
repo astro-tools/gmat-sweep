@@ -80,12 +80,12 @@ pip install gmat-sweep[examples]
 ## Quick start
 
 ```python
-from gmat_sweep import sweep
+from gmat_sweep import LocalJoblibPool, sweep
 
 df = sweep(
     "mission.script",
     grid={"Sat.SMA": [7000, 7100, 7200]},
-    workers=8,
+    backend=LocalJoblibPool(workers=8),
 )
 print(df)
 ```
@@ -102,13 +102,13 @@ for [`monte_carlo`](https://astro-tools.github.io/gmat-sweep/monte-carlo/) and p
 `perturb` mapping of named distributions:
 
 ```python
-from gmat_sweep import monte_carlo
+from gmat_sweep import LocalJoblibPool, monte_carlo
 
 df = monte_carlo(
     "mission.script",
     n=1000,
     perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
-    workers=8,
+    backend=LocalJoblibPool(workers=8),
     seed=42,
 )
 ```

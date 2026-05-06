@@ -22,6 +22,7 @@ import pandas as pd
 import pytest
 
 import gmat_sweep
+from gmat_sweep.backends.joblib import LocalJoblibPool
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +38,9 @@ def four_run_sweep_df(
 ) -> pd.DataFrame:
     """Run the reference 4-run sweep once and reuse it across the module."""
     out = tmp_path_factory.mktemp("four-run-sweep")
-    return gmat_sweep.sweep(leo_basic_script, grid=_GRID, workers=2, out=out)
+    return gmat_sweep.sweep(
+        leo_basic_script, grid=_GRID, backend=LocalJoblibPool(workers=2), out=out
+    )
 
 
 def _direct_run(script: Path, overrides: dict[str, Any], working_dir: Path) -> pd.DataFrame:

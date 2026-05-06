@@ -21,6 +21,7 @@ import pytest
 
 from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides
 from gmat_sweep.api import sweep
+from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest
 from tests.conftest import FakeGmatRun, FakeMission, FakeResults
@@ -103,7 +104,7 @@ def test_4_run_sweep_aggregates_ephemeris_and_contact_into_indexed_frames(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
         progress=False,
     )
@@ -139,7 +140,7 @@ def test_failed_run_lands_as_nan_row_in_both_aggregators(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
         progress=False,
     )
@@ -173,7 +174,13 @@ def test_multi_ephemeris_with_name_none_raises_listing_available_names(
         },
     )
 
-    sweep(script, grid={"Sat.SMA": [7000.0, 7100.0]}, workers=1, out=out, progress=False)
+    sweep(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0]},
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     with pytest.raises(SweepConfigError, match=r"GroundEphem.*SatEphem"):
@@ -196,7 +203,13 @@ def test_user_ephemeris_columns_survive_round_trip_through_aggregator(
     out = tmp_path / "out"
     _install_ephem_contact_loader(fake_gmat_run)
 
-    sweep(script, grid={"Sat.SMA": [7000.0, 7100.0]}, workers=1, out=out, progress=False)
+    sweep(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0]},
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     eph_df = lazy_ephemerides(manifest, out)

@@ -402,7 +402,7 @@ def test_from_manifest_tagged_grid_kind_rebuilds_runs(
     sweep_api(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=output_dir,
     )
 
@@ -440,7 +440,7 @@ def test_from_manifest_explicit_kind_rebuilds_runs(
     samples = pd.DataFrame({"Sat.SMA": [7000.0, 7100.0, 7200.0], "Sat.ECC": [0.001, 0.002, 0.003]})
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    sweep_api(script, samples=samples, workers=1, out=output_dir)
+    sweep_api(script, samples=samples, backend=LocalJoblibPool(workers=1), out=output_dir)
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
     with LocalJoblibPool(workers=1) as pool:
@@ -474,7 +474,7 @@ def test_from_manifest_monte_carlo_rebuilds_bit_equal_overrides(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0), "Sat.INC": ("uniform", 0.0, 90.0)},
         seed=1729,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
     )
 
@@ -503,7 +503,7 @@ def test_from_manifest_latin_hypercube_rebuilds_bit_equal_overrides(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0), "Sat.INC": ("uniform", 0.0, 90.0)},
         seed=1729,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
     )
 
