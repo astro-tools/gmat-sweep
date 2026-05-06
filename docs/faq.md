@@ -23,6 +23,15 @@ is imported, before a sweep can start. Each worker subprocess imports
 `gmat_run` once on its first run and reuses that import for the rest of the
 runs that worker handles.
 
+Backends that reuse worker processes honour the contract via
+`python -m gmat_sweep._worker_entrypoint` — an internal CLI module that
+runs one [`RunSpec`][gmat_sweep.RunSpec] in a freshly-spawned interpreter
+and emits the resulting [`RunOutcome`][gmat_sweep.RunOutcome] as JSON.
+Each task body in such a backend invokes the entrypoint via
+`subprocess.run`, so even when the surrounding worker process is
+long-lived, the GMAT run itself gets a fresh interpreter. The entrypoint
+is internal infrastructure; callers go through a `Pool`.
+
 The trade-off is the bootstrap cost amortising over batches — for a sweep
 of N runs with W workers, you pay roughly W bootstraps total, not 1 and not
 N. For a small sweep that's overhead worth knowing about; for a meaningfully
