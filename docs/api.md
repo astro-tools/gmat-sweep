@@ -20,6 +20,10 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.LocalJoblibPool
 
+::: gmat_sweep.backends.DaskPool
+
+::: gmat_sweep.backends.RayPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec

@@ -137,6 +137,24 @@ ignore_missing_imports = true
 module = ["scipy", "scipy.*"]
 ignore_missing_imports = true
 
+# distributed (Dask) is an optional [dask]-extra dependency; backends/dask.py
+# treats the surface used (LocalCluster, Client, as_completed) as Any.
+# `follow_imports = "skip"` is needed alongside `ignore_missing_imports`
+# because distributed ships a `py.typed` marker — without skip, mypy --strict
+# imports the package's types and rejects calls to its (loosely typed) surface
+# under disallow_untyped_calls.
+[[tool.mypy.overrides]]
+module = ["distributed", "distributed.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# ray is an optional [ray]-extra dependency; same handling as distributed
+# above (ray also ships `py.typed`).
+[[tool.mypy.overrides]]
+module = ["ray", "ray.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
