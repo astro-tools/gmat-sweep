@@ -574,8 +574,41 @@ def test_header_dict_carries_every_documented_field() -> None:
         "sweep_seed",
         "parameter_spec",
         "run_count",
+        "backend",
     }
     assert set(header.keys()) == expected
+
+
+# ---- backend field -------------------------------------------------------
+
+
+def test_manifest_backend_round_trips(tmp_path: Path) -> None:
+    """The pool-class name on the header survives a save+load round-trip."""
+    m = _make_manifest(n_entries=1)
+    m.backend = "DaskPool"
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+
+    reloaded = Manifest.load(path)
+    assert reloaded.backend == "DaskPool"
+
+
+def test_load_manifest_without_backend_loads_as_unknown(tmp_path: Path) -> None:
+    """Manifests written before the ``backend`` field landed (v0.1/v0.2)
+    omit it; loading them must yield ``backend == "unknown"`` rather than
+    raise."""
+    m = _make_manifest(n_entries=1)
+    header = m._header_dict()
+    del header["backend"]
+
+    path = tmp_path / "manifest.jsonl"
+    body = json.dumps(header, sort_keys=True) + "\n"
+    body += json.dumps(m.entries[0].to_dict(), sort_keys=True) + "\n"
+    path.write_text(body, encoding="utf-8")
+
+    reloaded = Manifest.load(path)
+    assert reloaded.backend == "unknown"
+    assert reloaded.script_sha256 == m.script_sha256
 
 
 # ---- schema_version freeze ----------------------------------------------

@@ -319,6 +319,62 @@ A grid name may only appear once per CLI invocation; passing the same name
 twice raises [`SweepConfigError`][gmat_sweep.SweepConfigError]. There is no
 way to mix linspace and explicit notation on the same axis — pick one.
 
+## Choosing a backend
+
+By default [`sweep()`][gmat_sweep.sweep],
+[`monte_carlo()`][gmat_sweep.monte_carlo], and
+[`latin_hypercube()`][gmat_sweep.latin_hypercube] dispatch runs through a
+fresh [`LocalJoblibPool`][gmat_sweep.LocalJoblibPool] over every available
+core. Pass an explicit pool via `backend=` to:
+
+- **Cap parallelism** for a long-running sweep so the box stays responsive:
+
+    ```python
+    from gmat_sweep import LocalJoblibPool, sweep
+
+    df = sweep(
+        "mission.script",
+        grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
+        backend=LocalJoblibPool(workers=4),
+        out="./sweep",
+    )
+    ```
+
+- **Share one pool across several sweeps** — the worker bootstrap cost
+  (fresh interpreter + `gmatpy` import per worker) is paid once instead of
+  once per `sweep()` call:
+
+    ```python
+    from gmat_sweep import LocalJoblibPool, monte_carlo, sweep
+
+    with LocalJoblibPool(workers=8) as pool:
+        baseline = sweep(
+            "mission.script",
+            grid={"Sat.DryMass": [100.0, 150.0, 200.0]},
+            backend=pool,
+            out="./baseline",
+        )
+        dispersion = monte_carlo(
+            "mission.script",
+            n=200,
+            perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+            seed=42,
+            backend=pool,
+            out="./dispersion",
+        )
+    ```
+
+- **Use a different execution backend** — any [`Pool`][gmat_sweep.Pool]
+  subclass works, including third-party ones. The pool's class name is
+  recorded on the manifest header so a later loader can tell which
+  backend produced the sweep.
+
+When you supply `backend=`, you own the pool's lifecycle —
+[`sweep()`][gmat_sweep.sweep] will not call
+[`Pool.close()`][gmat_sweep.Pool.close] on it. Wrap it in a `with` block,
+or call `close()` yourself when the pool is done. The `backend=None`
+default closes the pool it built when `sweep()` returns.
+
 ## See also
 
 - [API reference: `sweep`](api.md#gmat_sweep.sweep)

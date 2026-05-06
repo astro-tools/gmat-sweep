@@ -94,7 +94,13 @@ def test_16_run_grid_with_3_failures_resumes_to_all_ok(
 
     fake_gmat_run.module.Mission = SimpleNamespace(load=_load)  # type: ignore[attr-defined]
 
-    sweep(script, grid={"Sat.SMA": grid_values}, workers=1, out=out, progress=False)
+    sweep(
+        script,
+        grid={"Sat.SMA": grid_values},
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     first_pass = Manifest.load(out / "manifest.jsonl")
     assert sorted(first_pass.find_failed()) == [3, 7, 11]
@@ -152,7 +158,15 @@ def test_monte_carlo_resume_preserves_bit_equal_draws_for_failed_runs(
 
     fake_gmat_run.module.Mission = SimpleNamespace(load=_load)  # type: ignore[attr-defined]
 
-    monte_carlo(script, n=8, perturb=perturb, seed=1729, workers=1, out=out, progress=False)
+    monte_carlo(
+        script,
+        n=8,
+        perturb=perturb,
+        seed=1729,
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     pre_resume = Manifest.load(out / "manifest.jsonl")
     assert 3 in pre_resume.find_failed()
@@ -177,7 +191,13 @@ def test_script_drift_raises_sweep_config_error(tmp_path: Path, fake_gmat_run: F
     script = _write_script(tmp_path)
     out = tmp_path / "out"
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    sweep(script, grid={"Sat.SMA": [7000.0, 7100.0]}, workers=1, out=out, progress=False)
+    sweep(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0]},
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     # Mutate the script: same path, different bytes ⇒ different canonical hash.
     script.write_text("% mission v2\nCreate Spacecraft Sat;\n", encoding="utf-8")
@@ -193,7 +213,13 @@ def test_allow_script_drift_warns_and_proceeds(tmp_path: Path, fake_gmat_run: Fa
     script = _write_script(tmp_path)
     out = tmp_path / "out"
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    sweep(script, grid={"Sat.SMA": [7000.0, 7100.0]}, workers=1, out=out, progress=False)
+    sweep(
+        script,
+        grid={"Sat.SMA": [7000.0, 7100.0]},
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
 
     script.write_text("% mission v2\nCreate Spacecraft Sat;\n", encoding="utf-8")
 
@@ -228,7 +254,7 @@ def test_resumed_dataframe_matches_unbroken_sweep_via_sma_echo(
     df_reference = sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "ref",
         progress=False,
     )
@@ -262,7 +288,7 @@ def test_resumed_dataframe_matches_unbroken_sweep_via_sma_echo(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
         progress=False,
     )

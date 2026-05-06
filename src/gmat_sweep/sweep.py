@@ -324,6 +324,7 @@ class Sweep:
             sweep_seed=self._sweep_seed,
             parameter_spec=self._parameter_spec,
             run_count=len(self._runs),
+            backend=self._backend.__class__.__name__,
         )
 
 

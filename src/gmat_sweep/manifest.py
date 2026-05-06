@@ -146,6 +146,7 @@ class Manifest:
     sweep_seed: int | None
     parameter_spec: dict[str, Any]
     run_count: int
+    backend: str = "unknown"
     schema_version: int = MANIFEST_SCHEMA_VERSION
     entries: list[ManifestEntry] = field(default_factory=list)
     _path: Path | None = field(default=None, init=False, repr=False, compare=False)
@@ -162,6 +163,7 @@ class Manifest:
             "sweep_seed": self.sweep_seed,
             "parameter_spec": dict(self.parameter_spec),
             "run_count": self.run_count,
+            "backend": self.backend,
         }
 
     @classmethod
@@ -169,7 +171,8 @@ class Manifest:
         # schema_version is absent on manifests written before the field was
         # introduced; default to 1 so they keep loading. Manifest.load() guards
         # against versions newer than this gmat-sweep supports before getting
-        # here.
+        # here. ``backend`` is additive — manifests that omit it load with
+        # ``backend == "unknown"``.
         return cls(
             script_sha256=str(data["script_sha256"]),
             gmat_sweep_version=str(data["gmat_sweep_version"]),
@@ -180,6 +183,7 @@ class Manifest:
             sweep_seed=None if data["sweep_seed"] is None else int(data["sweep_seed"]),
             parameter_spec=dict(data["parameter_spec"]),
             run_count=int(data["run_count"]),
+            backend=str(data.get("backend", "unknown")),
             schema_version=int(data.get("schema_version", 1)),
             entries=[],
         )

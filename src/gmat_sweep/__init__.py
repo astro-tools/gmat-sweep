@@ -5,7 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
-from gmat_sweep.backends import Pool
+from gmat_sweep.backends import LocalJoblibPool, Pool
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -48,6 +48,7 @@ __all__ = [
     "MANIFEST_SCHEMA_VERSION",
     "BackendError",
     "GmatSweepError",
+    "LocalJoblibPool",
     "Manifest",
     "ManifestCorruptError",
     "ManifestEntry",

@@ -40,6 +40,7 @@ import pandas as pd
 import pytest
 
 import gmat_sweep
+from gmat_sweep.backends.joblib import LocalJoblibPool
 
 pytestmark = pytest.mark.integration
 
@@ -68,7 +69,7 @@ def _frames_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
 
 def test_reference_sma_sweep_matches_golden_parquet(leo_basic_script: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    df = gmat_sweep.sweep(leo_basic_script, grid=_GRID, workers=2, out=out)
+    df = gmat_sweep.sweep(leo_basic_script, grid=_GRID, backend=LocalJoblibPool(workers=2), out=out)
 
     flat = _normalise_for_comparison(df)
 

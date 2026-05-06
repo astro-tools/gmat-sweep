@@ -22,6 +22,7 @@ from typing import Any
 import pandas as pd
 
 from gmat_sweep.api import monte_carlo
+from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.grids import expand_monte_carlo_to_run_specs
 from tests.conftest import FakeGmatRun, FakeMission, FakeResults
 
@@ -73,7 +74,7 @@ def test_two_calls_same_seed_produce_bit_equal_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-a",
         progress=False,
     )
@@ -82,7 +83,7 @@ def test_two_calls_same_seed_produce_bit_equal_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-b",
         progress=False,
     )
@@ -101,7 +102,7 @@ def test_different_seeds_produce_distinct_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-42",
         progress=False,
     )
@@ -110,7 +111,7 @@ def test_different_seeds_produce_distinct_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=43,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-43",
         progress=False,
     )
@@ -139,7 +140,7 @@ def test_adding_a_second_perturbed_parameter_preserves_first_dataframe_draws(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-one",
         progress=False,
     )
@@ -151,7 +152,7 @@ def test_adding_a_second_perturbed_parameter_preserves_first_dataframe_draws(
             "Sat.INC": ("uniform", 0.0, 90.0),
         },
         seed=42,
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=tmp_path / "out-two",
         progress=False,
     )

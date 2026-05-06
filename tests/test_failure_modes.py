@@ -47,6 +47,7 @@ import pytest
 import gmat_sweep
 from gmat_sweep.aggregate import lazy_multiindex
 from gmat_sweep.backends.base import Pool
+from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.grids import expand_grid_to_run_specs
 from gmat_sweep.manifest import Manifest
 from gmat_sweep.spec import RunOutcome, RunSpec
@@ -79,7 +80,7 @@ def test_invalid_override_yields_failed_status_and_completes_sweep(
     df = gmat_sweep.sweep(
         leo_basic_script,
         grid={"Sat.NotARealField": [1.0, 2.0]},
-        workers=1,
+        backend=LocalJoblibPool(workers=1),
         out=out,
     )
 
@@ -101,7 +102,7 @@ def test_one_invalid_override_does_not_abort_other_runs(
     df = gmat_sweep.sweep(
         leo_basic_script,
         grid={"Sat.SMA": [7000.0, 0.0, 7100.0]},
-        workers=2,
+        backend=LocalJoblibPool(workers=2),
         out=out,
     )
 

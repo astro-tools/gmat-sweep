@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import tempfile
 import weakref
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gmat_sweep.backends.base import Pool
 from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.distributions import DistSpec, _serialise_perturb
 from gmat_sweep.errors import SweepConfigError
@@ -36,7 +38,7 @@ def sweep(
     *,
     grid: Mapping[str, Iterable[Any]] | None = None,
     samples: pd.DataFrame | None = None,
-    workers: int = -1,
+    backend: Pool | None = None,
     out: Path | None = None,
     seed: int | None = None,
     progress: bool = True,
@@ -47,9 +49,10 @@ def sweep(
     full-factorial cartesian product, or ``samples=`` for an explicit
     pre-built DataFrame (one run per row, columns are dotted-path field
     names). Exactly one must be provided. The expanded run set is dispatched
-    through a fresh :class:`LocalJoblibPool`, each completion is appended to
-    a JSON Lines manifest under ``out``, and the aggregated
-    ``(run_id, time)``-MultiIndexed :class:`pandas.DataFrame` is returned.
+    through ``backend`` (defaulting to a fresh :class:`LocalJoblibPool` over
+    every available core), each completion is appended to a JSON Lines
+    manifest under ``out``, and the aggregated ``(run_id, time)``-MultiIndexed
+    :class:`pandas.DataFrame` is returned.
 
     Parameters
     ----------
@@ -66,10 +69,15 @@ def sweep(
         becomes ``run_id``; non-default indices raise. Mutually exclusive with
         ``grid``. Use this when you have already built a sample design (Latin
         hypercube, Halton/Sobol, custom) and want to hand it in directly.
-    workers:
-        Number of subprocess workers. ``-1`` (default) uses every available
-        core; positive integers cap the pool. Forwarded to
-        :class:`LocalJoblibPool`.
+    backend:
+        A constructed :class:`Pool` to dispatch runs through. ``None``
+        (default) constructs a fresh :class:`LocalJoblibPool` over every
+        available core for the duration of the call and closes it on the way
+        out. Pass an explicit pool to cap parallelism
+        (``LocalJoblibPool(workers=4)``), to use a different execution
+        backend (Dask, Ray, a custom subclass), or to share one pool across
+        several sweeps — when supplied, the caller owns the pool's lifecycle
+        and ``sweep()`` does not call :meth:`Pool.close`.
     out:
         Sweep output directory. ``None`` (default) creates a fresh
         :class:`tempfile.TemporaryDirectory` whose lifetime is tied to the
@@ -144,7 +152,7 @@ def sweep(
         build_runs=build_runs,
         parameter_spec=parameter_spec,
         sweep_seed=seed,
-        workers=workers,
+        backend=backend,
         out=out,
         progress=progress,
     )
@@ -156,7 +164,7 @@ def monte_carlo(
     n: int,
     perturb: Mapping[str, DistSpec],
     seed: int | None = None,
-    workers: int = -1,
+    backend: Pool | None = None,
     out: Path | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
@@ -185,8 +193,8 @@ def monte_carlo(
         Optional integer parent seed. ``None`` falls back to OS entropy and
         is **not** reproducible. With an integer seed two calls at the same
         ``(mission, n, perturb, seed)`` produce bit-equal DataFrames.
-    workers:
-        Number of subprocess workers; same semantics as :func:`sweep`.
+    backend:
+        Execution backend; same semantics as :func:`sweep`.
     out:
         Sweep output directory; same semantics as :func:`sweep`.
     progress:
@@ -224,7 +232,7 @@ def monte_carlo(
         build_runs=build_runs,
         parameter_spec=parameter_spec,
         sweep_seed=seed,
-        workers=workers,
+        backend=backend,
         out=out,
         progress=progress,
     )
@@ -236,7 +244,7 @@ def latin_hypercube(
     n: int,
     perturb: Mapping[str, DistSpec],
     seed: int | None = None,
-    workers: int = -1,
+    backend: Pool | None = None,
     out: Path | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
@@ -264,7 +272,7 @@ def latin_hypercube(
         entropy and is **not** reproducible. With an integer seed two calls
         at the same ``(mission, n, perturb, seed)`` produce bit-equal
         DataFrames.
-    workers:
+    backend:
         Same semantics as :func:`sweep`.
     out:
         Same semantics as :func:`sweep`.
@@ -301,10 +309,25 @@ def latin_hypercube(
         build_runs=build_runs,
         parameter_spec=parameter_spec,
         sweep_seed=seed,
-        workers=workers,
+        backend=backend,
         out=out,
         progress=progress,
     )
+
+
+@contextlib.contextmanager
+def _resolve_pool(backend: Pool | None) -> Iterator[Pool]:
+    """Yield the pool to dispatch through, owning lifecycle iff we built it.
+
+    ``backend is None`` constructs a default :class:`LocalJoblibPool` and
+    closes it on exit; a user-supplied pool is yielded as-is and the caller
+    keeps lifecycle ownership.
+    """
+    if backend is None:
+        with LocalJoblibPool() as pool:
+            yield pool
+    else:
+        yield backend
 
 
 def _run_sweep(
@@ -313,7 +336,7 @@ def _run_sweep(
     build_runs: Callable[[Path], list[RunSpec]],
     parameter_spec: dict[str, Any],
     sweep_seed: int | None,
-    workers: int,
+    backend: Pool | None,
     out: Path | None,
     progress: bool,
 ) -> pd.DataFrame:
@@ -321,9 +344,10 @@ def _run_sweep(
 
     Resolves the output directory (creating a sweep-scoped temp dir when
     ``out`` is ``None``), builds the run set against that directory, runs
-    them through a fresh :class:`LocalJoblibPool`, and returns the
-    aggregated DataFrame. When a temp dir was created its cleanup is
-    deferred to the moment the returned DataFrame is garbage-collected.
+    them through ``backend`` (or a default :class:`LocalJoblibPool` when
+    ``backend is None``), and returns the aggregated DataFrame. When a temp
+    dir was created its cleanup is deferred to the moment the returned
+    DataFrame is garbage-collected.
     """
     tempdir: tempfile.TemporaryDirectory[str] | None
     if out is None:
@@ -337,7 +361,7 @@ def _run_sweep(
     runs = build_runs(output_dir)
     manifest_path = output_dir / _MANIFEST_FILENAME
 
-    with LocalJoblibPool(workers=workers) as pool:
+    with _resolve_pool(backend) as pool:
         df = (
             Sweep(
                 runs=runs,
