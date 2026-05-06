@@ -38,6 +38,45 @@ prints a one-line summary to stdout when the sweep finishes:
 N runs (A ok[, B failed][, C skipped]) in T.TT s — output: PATH
 ```
 
+## Choosing a backend
+
+The four sweep-running subcommands and `resume` accept `--backend`. `show`
+does not — it never runs anything.
+
+| Value           | Pool                                   | Extras                           |
+|-----------------|----------------------------------------|----------------------------------|
+| `local` (default) | [`LocalJoblibPool`][gmat_sweep.LocalJoblibPool] over loky workers | none |
+| `dask`          | [`DaskPool`][gmat_sweep.backends.DaskPool] over a `LocalCluster` | `pip install gmat-sweep[dask]` |
+| `ray`           | [`RayPool`][gmat_sweep.backends.RayPool] over a local Ray runtime | `pip install gmat-sweep[ray]` |
+
+`--workers N` maps onto each backend in the natural way: `LocalJoblibPool`
+takes it as `workers`, `DaskPool` as `n_workers`, `RayPool` as `num_cpus`.
+The default `-1` means "let the pool pick" (every available core for the
+local pool, `os.cpu_count()` for Dask, Ray's own auto-detect for Ray).
+
+`--backend-arg KEY=VALUE` is an escape hatch for less-common pool
+constructor kwargs. It is repeatable, values are coerced int → float → str,
+and the parsed pairs are forwarded as `**kwargs` to the chosen pool.
+Examples:
+
+```bash
+gmat-sweep run --backend dask \
+    --backend-arg threads_per_worker=2 \
+    --grid Sat.SMA=7000:7200:3 \
+    --out ./sweep mission.script
+
+gmat-sweep run --backend ray \
+    --backend-arg address=ray://head:10001 \
+    --grid Sat.SMA=7000:7200:3 \
+    --out ./sweep mission.script
+```
+
+`--backend-arg` is rejected with `--backend local` (the local pool has no
+extra kwargs to forward). Missing extras (`[dask]` / `[ray]` not installed)
+exit with code `4` and a "pip install gmat-sweep[…]" message on stderr.
+Unknown kwargs surface the same way — they reach the pool constructor and
+are rejected there.
+
 ## Exit codes
 
 | Code | Meaning                                                                        |
