@@ -89,6 +89,8 @@ jobs:
           uv run jupyter execute 01_sma_scan.ipynb
           uv run jupyter execute 02_epoch_arrival_grid.ipynb
           uv run jupyter execute 03_killed_sweep_recovery.ipynb
+          uv run jupyter execute 04_monte_carlo_dispersion.ipynb
+          uv run jupyter execute 05_latin_hypercube.ipynb
 
   lint:
     name: lint

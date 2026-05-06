@@ -47,6 +47,8 @@ nav:
       - Single-axis SMA scan: examples/01_sma_scan.ipynb
       - Epoch × TOF grid: examples/02_epoch_arrival_grid.ipynb
       - Surviving a kill: examples/03_killed_sweep_recovery.ipynb
+      - Monte Carlo dispersion: examples/04_monte_carlo_dispersion.ipynb
+      - Latin hypercube vs Monte Carlo: examples/05_latin_hypercube.ipynb
   - FAQ: faq.md
   - API reference: api.md
 
