@@ -42,7 +42,11 @@ jobs:
           cache: true
 
       - name: Install project
-        run: uv sync --all-groups
+        # `--extra dask --extra ray` so the `@pytest.mark.integration` tests
+        # under `tests/test_backends_{dask,ray}.py` can spin up a real
+        # `distributed.LocalCluster` / `ray.init()`. The lint, typecheck, and
+        # minimal-install jobs deliberately keep their syncs narrower.
+        run: uv sync --all-groups --extra dask --extra ray
 
       - name: Run pytest
         # `-m "integration or not integration"` overrides the default
@@ -122,6 +126,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+      # mypy walks the backends/dask.py and backends/ray.py modules; their
+      # `if TYPE_CHECKING: import distributed` / `import ray` references are
+      # silenced by the ignore_missing_imports overrides, so the typecheck job
+      # does not need the runtime extras.
       - run: uv sync --all-groups
       - run: uv run mypy
 
