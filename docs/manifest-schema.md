@@ -3,8 +3,8 @@
 Every sweep writes a `manifest.jsonl` next to its per-run output
 directories. It is the durable record of *what was run*, *with what
 overrides*, *and how it turned out* — designed so a mid-sweep `Ctrl-C`
-leaves a parseable file and so a future resume flow can rebuild the
-unfinished tail of the sweep.
+leaves a parseable file and so the [resume flow](resume.md) can rebuild
+the unfinished tail of the sweep.
 
 ## On-disk format
 
