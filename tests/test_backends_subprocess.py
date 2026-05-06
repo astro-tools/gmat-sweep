@@ -1,7 +1,7 @@
 """Tests for gmat_sweep.backends._subprocess.run_spec_in_subprocess.
 
 Mocks subprocess.run so no real GMAT is involved. The integration test in
-test_worker_entrypoint_integration.py exercises the real subprocess hop.
+test_run_subprocess_integration.py exercises the real subprocess hop.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def test_invokes_python_dash_m_with_spec_and_outcome_paths(
 
     assert len(fake_subprocess_run) == 1
     argv = fake_subprocess_run[0]
-    assert argv[1:4] == ["-m", "gmat_sweep._worker_entrypoint", "--spec"]
+    assert argv[1:4] == ["-m", "gmat_sweep._run_subprocess", "--spec"]
     assert "--outcome" in argv
 
 

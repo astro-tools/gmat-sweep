@@ -1,11 +1,11 @@
-"""CLI module — ``python -m gmat_sweep._worker_entrypoint --spec PATH --outcome PATH``.
+"""CLI module — ``python -m gmat_sweep._run_subprocess --spec PATH --outcome PATH``.
 
 Runs one :class:`gmat_sweep.spec.RunSpec` (read from ``--spec`` as JSON)
 through :func:`gmat_sweep.worker.run_one` and writes the resulting
 :class:`gmat_sweep.spec.RunOutcome` (as JSON) to ``--outcome``. Internal
 infrastructure for execution backends that reuse worker processes (Dask,
 Ray): each task body spawns this module via
-``subprocess.run([sys.executable, "-m", "gmat_sweep._worker_entrypoint", ...])``
+``subprocess.run([sys.executable, "-m", "gmat_sweep._run_subprocess", ...])``
 to honour the per-run fresh-interpreter contract enforced by
 :class:`gmat_sweep.backends.base.Pool`. ``LocalJoblibPool`` does not need
 the hop — loky already gives one fresh interpreter per task.
@@ -63,7 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     status. Non-zero on transport failure per the module-level contract.
     """
     parser = argparse.ArgumentParser(
-        prog="python -m gmat_sweep._worker_entrypoint",
+        prog="python -m gmat_sweep._run_subprocess",
         description="Run one RunSpec in a fresh interpreter; emit a RunOutcome.",
     )
     parser.add_argument("--spec", required=True, help="Path to a RunSpec JSON file")
@@ -78,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         spec = RunSpec.from_dict(spec_data)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         print(
-            f"_worker_entrypoint: cannot read spec {spec_path}: {exc}",
+            f"_run_subprocess: cannot read spec {spec_path}: {exc}",
             file=sys.stderr,
         )
         return _EXIT_BAD_SPEC
@@ -89,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         outcome_path.write_text(json.dumps(outcome.to_dict()), encoding="utf-8")
     except OSError as exc:
         print(
-            f"_worker_entrypoint: cannot write outcome {outcome_path}: {exc}",
+            f"_run_subprocess: cannot write outcome {outcome_path}: {exc}",
             file=sys.stderr,
         )
         return _EXIT_BAD_OUTCOME

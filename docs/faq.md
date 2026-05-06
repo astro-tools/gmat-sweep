@@ -24,7 +24,7 @@ is imported, before a sweep can start. Each worker subprocess imports
 runs that worker handles.
 
 Backends that reuse worker processes honour the contract via
-`python -m gmat_sweep._worker_entrypoint` — an internal CLI module that
+`python -m gmat_sweep._run_subprocess` — an internal CLI module that
 runs one [`RunSpec`][gmat_sweep.RunSpec] in a freshly-spawned interpreter
 and emits the resulting [`RunOutcome`][gmat_sweep.RunOutcome] as JSON.
 Each task body in such a backend invokes the entrypoint via

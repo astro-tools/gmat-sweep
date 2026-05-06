@@ -1,6 +1,6 @@
 """Internal helper: run a RunSpec in a freshly-spawned Python interpreter.
 
-The execution-backend layer's bridge to :mod:`gmat_sweep._worker_entrypoint`.
+The execution-backend layer's bridge to :mod:`gmat_sweep._run_subprocess`.
 Backends that reuse worker processes (Dask, Ray) call
 :func:`run_spec_in_subprocess` from inside each task to honour the per-run
 fresh-interpreter contract enforced by
@@ -48,7 +48,7 @@ def run_spec_in_subprocess(
     """Run ``spec`` in a fresh Python interpreter and return its outcome.
 
     Writes ``spec.to_dict()`` to a temp file, invokes
-    ``python -m gmat_sweep._worker_entrypoint --spec <spec> --outcome <out>``
+    ``python -m gmat_sweep._run_subprocess --spec <spec> --outcome <out>``
     via :func:`subprocess.run`, reads the outcome JSON back, and returns
     the :class:`RunOutcome`.
 
@@ -75,7 +75,7 @@ def run_spec_in_subprocess(
                 [
                     interpreter,
                     "-m",
-                    "gmat_sweep._worker_entrypoint",
+                    "gmat_sweep._run_subprocess",
                     "--spec",
                     str(spec_path),
                     "--outcome",
@@ -91,7 +91,7 @@ def run_spec_in_subprocess(
             captured = exc.stderr if isinstance(exc.stderr, str) else ""
             return RunOutcome.failed(
                 run_id=spec.run_id,
-                stderr=f"_worker_entrypoint timed out after {timeout}s\n{captured}".strip(),
+                stderr=f"_run_subprocess timed out after {timeout}s\n{captured}".strip(),
                 started_at=started_at,
                 ended_at=ended_at,
             )
@@ -99,7 +99,7 @@ def run_spec_in_subprocess(
             ended_at = datetime.now(timezone.utc)
             return RunOutcome.failed(
                 run_id=spec.run_id,
-                stderr=f"_worker_entrypoint could not be spawned: {exc}",
+                stderr=f"_run_subprocess could not be spawned: {exc}",
                 started_at=started_at,
                 ended_at=ended_at,
             )
@@ -109,7 +109,7 @@ def run_spec_in_subprocess(
             return RunOutcome.failed(
                 run_id=spec.run_id,
                 stderr=(
-                    f"_worker_entrypoint exited with status {result.returncode}\n{result.stderr}"
+                    f"_run_subprocess exited with status {result.returncode}\n{result.stderr}"
                 ).rstrip(),
                 started_at=started_at,
                 ended_at=ended_at,

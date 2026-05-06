@@ -1,10 +1,10 @@
-"""Tests for gmat_sweep._worker_entrypoint — CLI parsing, JSON round-trip, exit codes.
+"""Tests for gmat_sweep._run_subprocess — CLI parsing, JSON round-trip, exit codes.
 
-The module is invoked via ``python -m gmat_sweep._worker_entrypoint``; these
+The module is invoked via ``python -m gmat_sweep._run_subprocess``; these
 unit tests call ``main(argv)`` in-process so the existing
 ``fake_gmat_run`` fixture (sys.modules monkeypatch) reaches ``run_one``.
 The real subprocess hop is exercised by the integration test in
-``test_worker_entrypoint_integration.py``.
+``test_run_subprocess_integration.py``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from gmat_sweep import _worker_entrypoint
+from gmat_sweep import _run_subprocess
 from gmat_sweep.spec import RunOutcome
 from tests.conftest import FakeGmatRun
 
@@ -43,7 +43,7 @@ def test_main_writes_outcome_and_returns_zero(tmp_path: Path, fake_gmat_run: Fak
     outcome_path = tmp_path / "outcome.json"
     _write_spec(spec_path, output_dir=tmp_path / "run-0", run_id=0)
 
-    rc = _worker_entrypoint.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
+    rc = _run_subprocess.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
 
     assert rc == 0
     outcome = RunOutcome.from_dict(json.loads(outcome_path.read_text()))
@@ -59,7 +59,7 @@ def test_main_failed_run_still_returns_zero(tmp_path: Path, fake_gmat_run: FakeG
     outcome_path = tmp_path / "outcome.json"
     _write_spec(spec_path, output_dir=tmp_path / "run-0")
 
-    rc = _worker_entrypoint.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
+    rc = _run_subprocess.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
 
     assert rc == 0
     outcome = RunOutcome.from_dict(json.loads(outcome_path.read_text()))
@@ -73,20 +73,20 @@ def test_main_failed_run_still_returns_zero(tmp_path: Path, fake_gmat_run: FakeG
 
 def test_missing_spec_argument_exits_two(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as ei:
-        _worker_entrypoint.main(["--outcome", str(tmp_path / "outcome.json")])
+        _run_subprocess.main(["--outcome", str(tmp_path / "outcome.json")])
     assert ei.value.code == 2
 
 
 def test_missing_outcome_argument_exits_two(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as ei:
-        _worker_entrypoint.main(["--spec", str(tmp_path / "spec.json")])
+        _run_subprocess.main(["--spec", str(tmp_path / "spec.json")])
     assert ei.value.code == 2
 
 
 def test_unreadable_spec_file_returns_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    rc = _worker_entrypoint.main(
+    rc = _run_subprocess.main(
         [
             "--spec",
             str(tmp_path / "missing.json"),
@@ -105,7 +105,7 @@ def test_malformed_spec_json_returns_three(tmp_path: Path) -> None:
     spec_path = tmp_path / "spec.json"
     spec_path.write_text("{not valid json")
 
-    rc = _worker_entrypoint.main(
+    rc = _run_subprocess.main(
         ["--spec", str(spec_path), "--outcome", str(tmp_path / "outcome.json")]
     )
 
@@ -116,7 +116,7 @@ def test_spec_missing_required_field_returns_three(tmp_path: Path) -> None:
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({"script_path": "/missions/m.script"}))
 
-    rc = _worker_entrypoint.main(
+    rc = _run_subprocess.main(
         ["--spec", str(spec_path), "--outcome", str(tmp_path / "outcome.json")]
     )
 
@@ -130,7 +130,7 @@ def test_spec_with_wrong_type_returns_three(tmp_path: Path) -> None:
     bad["run_id"] = "not-an-int"
     spec_path.write_text(json.dumps(bad))
 
-    rc = _worker_entrypoint.main(
+    rc = _run_subprocess.main(
         ["--spec", str(spec_path), "--outcome", str(tmp_path / "outcome.json")]
     )
 
@@ -148,7 +148,7 @@ def test_unwriteable_outcome_path_returns_four(
     outcome_path = tmp_path / "outcome.json"
     outcome_path.mkdir()
 
-    rc = _worker_entrypoint.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
+    rc = _run_subprocess.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
 
     assert rc == 4
     captured = capsys.readouterr()

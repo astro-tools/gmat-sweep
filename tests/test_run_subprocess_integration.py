@@ -1,4 +1,4 @@
-"""Integration tests for _worker_entrypoint and _subprocess against real GMAT."""
+"""Integration tests for _run_subprocess and _subprocess against real GMAT."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_entrypoint_against_stock_script_produces_ok_outcome(
         [
             sys.executable,
             "-m",
-            "gmat_sweep._worker_entrypoint",
+            "gmat_sweep._run_subprocess",
             "--spec",
             str(spec_path),
             "--outcome",
@@ -80,7 +80,7 @@ def test_entrypoint_against_broken_spec_writes_failed_outcome_with_zero_exit(
         [
             sys.executable,
             "-m",
-            "gmat_sweep._worker_entrypoint",
+            "gmat_sweep._run_subprocess",
             "--spec",
             str(spec_path),
             "--outcome",
