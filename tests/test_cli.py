@@ -462,13 +462,14 @@ def test_show_detail_and_run_are_mutually_exclusive(
 
 def test_show_run_prints_full_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     multiline_stderr = "ValueError: out of range\nTraceback details here"
+    log_path = tmp_path / "run-7" / "worker.log"
     entries = [
         _show_entry(0, "ok"),
         _show_entry(
             7,
             "failed",
             stderr=multiline_stderr,
-            log_path=Path("/o/run-7/worker.log"),
+            log_path=log_path,
             overrides={"Sat.SMA": 8000.0, "Sat.ECC": 0.1},
         ),
     ]
@@ -479,7 +480,8 @@ def test_show_run_prints_full_record(tmp_path: Path, capsys: pytest.CaptureFixtu
     out = capsys.readouterr().out
     assert "run_id: 7" in out
     assert "status" in out and "failed" in out
-    assert "/o/run-7/worker.log" in out
+    # str(Path) uses native separators (\\ on Windows, / elsewhere); compare on str.
+    assert str(log_path) in out
     # Full unsuppressed stderr — both lines must be present.
     assert "ValueError: out of range" in out
     assert "Traceback details here" in out
