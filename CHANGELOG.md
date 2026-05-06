@@ -36,8 +36,9 @@ macOS joins the CI matrix.
   hypercube resumes draw bit-equal values to the original sweep (#36).
 - `gmat_sweep.distributions` — `DistSpec` shorthand types, `to_rv_frozen`
   coercion with strict up-front validation, `derive_run_seeds` (the
-  Monte Carlo replay contract per charter §5), `derive_param_seed`,
-  and `sample` (#31, #33).
+  Monte Carlo replay contract: per-run sub-seeds via
+  `numpy.random.SeedSequence.spawn`), `derive_param_seed`, and
+  `sample` (#31, #33).
 - `lazy_ephemerides(manifest, output_dir, *, name=None)` and
   `lazy_contacts(manifest, output_dir, *, name=None)` — mirror
   `lazy_multiindex` for `EphemerisFile` and `ContactLocator` outputs
@@ -97,19 +98,19 @@ macOS joins the CI matrix.
 - `Manifest.load` folds duplicate `run_id`s last-wins, so a resume
   appends new entries for re-run rows without rewriting the file. The
   on-disk file remains append-only (#36).
-- Overall coverage gate raised from ≥ 80 % to ≥ 85 % per charter §4.
-  The four per-file 95 % gates on `grids.py`, `distributions.py`,
-  `manifest.py`, and `aggregate.py` are unchanged.
+- Overall coverage gate raised from ≥ 80 % to ≥ 85 %. The four per-file
+  95 % gates on `grids.py`, `distributions.py`, `manifest.py`, and
+  `aggregate.py` are unchanged.
 
 [0.2.0]: https://github.com/astro-tools/gmat-sweep/releases/tag/v0.2.0
 [scipy-lh]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html
 
 ## [0.1.0] — 2026-05-04
 
-Initial public release. The MVP slice of the charter: full-factorial parameter
-sweeps over a `gmat-run` mission, parallelised across subprocess workers,
-aggregated into a `(run_id, time)`-MultiIndexed `pandas.DataFrame`, and backed
-by a durable JSON Lines manifest.
+Initial public release. The MVP slice: full-factorial parameter sweeps over
+a `gmat-run` mission, parallelised across subprocess workers, aggregated
+into a `(run_id, time)`-MultiIndexed `pandas.DataFrame`, and backed by a
+durable JSON Lines manifest.
 
 ### Added
 

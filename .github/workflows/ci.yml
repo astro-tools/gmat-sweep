@@ -51,9 +51,8 @@ jobs:
         run: uv run pytest -m "integration or not integration" --cov --cov-report=term-missing
 
       # Coverage gates run on a single matrix combination — the .coverage
-      # data is identical across runners. Overall floor matches the
-      # charter §4 DoD for the active release; the four per-file gates
-      # match CONTRIBUTING.md.
+      # data is identical across runners. The four per-file gates match
+      # CONTRIBUTING.md.
 
       - name: Enforce overall coverage (>=85%)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'

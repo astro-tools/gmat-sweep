@@ -1,16 +1,18 @@
 """Distribution specs, seeded sampling, and conversion to scipy.stats.rv_frozen.
 
-Internal infrastructure for the upcoming Monte Carlo (#33) and Latin hypercube
-(#35) public APIs. None of the symbols here are re-exported from
-:mod:`gmat_sweep` — callers reach in via ``gmat_sweep.distributions.*``.
+Internal infrastructure backing the :func:`gmat_sweep.monte_carlo` and
+:func:`gmat_sweep.latin_hypercube` public APIs. None of the symbols here
+are re-exported from :mod:`gmat_sweep` — callers reach in via
+``gmat_sweep.distributions.*``.
 
-:func:`derive_run_seeds` is **the** contract Monte Carlo replays depend on
-(charter §5): spawning child :class:`numpy.random.SeedSequence` instances from
-a parent and reading the first 32-bit word of each child's ``generate_state(1)``
-yields a list of per-run integer seeds that is identical across calls in the
-same process and across fresh processes. Two callers given the same
-``parent_seed`` and ``n`` reconstruct the same per-run RNG state; this is what
-lets a Monte Carlo sweep be replayed run-by-run from its manifest alone.
+:func:`derive_run_seeds` is **the** contract Monte Carlo replays depend on:
+spawning child :class:`numpy.random.SeedSequence` instances from a parent
+and reading the first 32-bit word of each child's ``generate_state(1)``
+yields a list of per-run integer seeds that is identical across calls in
+the same process and across fresh processes. Two callers given the same
+``parent_seed`` and ``n`` reconstruct the same per-run RNG state; this is
+what lets a Monte Carlo sweep be replayed run-by-run from its manifest
+alone.
 """
 
 from __future__ import annotations

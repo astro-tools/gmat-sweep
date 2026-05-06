@@ -36,4 +36,4 @@ body:
     id: notes
     attributes:
       label: Notes
-      description: Design notes, links to charter sections, references to prior art, open questions.
+      description: Design notes, references to prior art, open questions.
