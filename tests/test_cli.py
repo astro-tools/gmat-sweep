@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pandas as pd
 import pytest
 
 from gmat_sweep import cli
+from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest
 from tests.conftest import FakeGmatRun, FakeResults
@@ -937,3 +939,368 @@ def test_resume_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]
     out = capsys.readouterr().out
     assert "--allow-script-drift" in out
     assert "--script" in out
+
+
+# ---- _parse_backend_arg -------------------------------------------------
+
+
+def test_parse_backend_arg_int_value() -> None:
+    assert cli._parse_backend_arg("threads_per_worker=2") == ("threads_per_worker", 2)
+
+
+def test_parse_backend_arg_float_value() -> None:
+    assert cli._parse_backend_arg("memory_limit=1.5") == ("memory_limit", 1.5)
+
+
+def test_parse_backend_arg_string_fallback() -> None:
+    assert cli._parse_backend_arg("address=ray://host:10001") == (
+        "address",
+        "ray://host:10001",
+    )
+
+
+def test_parse_backend_arg_rejects_missing_equals() -> None:
+    with pytest.raises(SweepConfigError, match="must be 'KEY=VALUE'"):
+        cli._parse_backend_arg("threads_per_worker")
+
+
+def test_parse_backend_arg_rejects_empty_key() -> None:
+    with pytest.raises(SweepConfigError, match="missing a key"):
+        cli._parse_backend_arg("=2")
+
+
+def test_parse_backend_arg_rejects_empty_value() -> None:
+    with pytest.raises(SweepConfigError, match="has no value"):
+        cli._parse_backend_arg("threads_per_worker=")
+
+
+# ---- _build_pool / --backend wiring -------------------------------------
+
+# A recording fake stands in for DaskPool / RayPool: subclasses LocalJoblibPool
+# so the rest of the CLI pipeline (submit / as_completed / manifest write)
+# still runs in-process via joblib(n_jobs=1), but every constructor kwarg the
+# CLI passed is captured for assertion. Tests opt into the recording behavior
+# by monkey-patching cli.DaskPool / cli.RayPool to a fresh subclass per test
+# (so .calls doesn't bleed across tests).
+
+
+def _make_recording_pool_class() -> Any:
+    """Return a fresh recording-fake Pool class. Each call yields a new class.
+
+    The returned class records every constructor kwargs dict on its
+    ``calls`` attribute and routes execution through
+    :class:`LocalJoblibPool` with ``workers=1`` so the surrounding CLI
+    pipeline (sweep → submit → as_completed → manifest write) runs
+    synchronously in the test process.
+    """
+
+    class _RecordingPool(LocalJoblibPool):
+        calls: ClassVar[list[dict[str, Any]]] = []
+
+        def __init__(self, **kwargs: Any) -> None:
+            type(self).calls.append(dict(kwargs))
+            super().__init__(workers=1)
+
+    return _RecordingPool
+
+
+def _make_missing_extra_pool_class(message: str) -> Any:
+    """Return a fake that raises :class:`BackendError` on construction."""
+    from gmat_sweep.errors import BackendError as _BackendError
+
+    class _MissingExtraPool:
+        def __init__(self, **_kwargs: Any) -> None:
+            raise _BackendError(message)
+
+    return _MissingExtraPool
+
+
+def test_build_pool_local_default_returns_local_joblib_pool() -> None:
+    args = argparse.Namespace(backend="local", workers=-1, backend_arg=[])
+    with cli._build_pool(args) as pool:
+        assert isinstance(pool, LocalJoblibPool)
+
+
+def test_build_pool_local_rejects_backend_arg() -> None:
+    args = argparse.Namespace(backend="local", workers=-1, backend_arg=["foo=1"])
+    with pytest.raises(SweepConfigError, match="not supported with --backend local"):
+        cli._build_pool(args)
+
+
+def test_build_pool_dask_constructs_dask_pool_with_workers_and_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "DaskPool", fake)
+
+    args = argparse.Namespace(
+        backend="dask",
+        workers=4,
+        backend_arg=["threads_per_worker=2"],
+    )
+    with cli._build_pool(args):
+        pass
+
+    assert fake.calls == [{"n_workers": 4, "threads_per_worker": 2}]
+
+
+def test_build_pool_dask_negative_workers_maps_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "DaskPool", fake)
+
+    args = argparse.Namespace(backend="dask", workers=-1, backend_arg=[])
+    with cli._build_pool(args):
+        pass
+
+    assert fake.calls == [{"n_workers": None}]
+
+
+def test_build_pool_ray_constructs_ray_pool_with_num_cpus_and_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "RayPool", fake)
+
+    args = argparse.Namespace(
+        backend="ray",
+        workers=8,
+        backend_arg=["address=ray://host:10001"],
+    )
+    with cli._build_pool(args):
+        pass
+
+    assert fake.calls == [{"num_cpus": 8, "address": "ray://host:10001"}]
+
+
+def test_build_pool_rejects_duplicate_backend_arg() -> None:
+    args = argparse.Namespace(
+        backend="dask",
+        workers=-1,
+        backend_arg=["threads_per_worker=2", "threads_per_worker=4"],
+    )
+    with pytest.raises(SweepConfigError, match="given more than once"):
+        cli._build_pool(args)
+
+
+@pytest.mark.parametrize(
+    "subcommand,extra_args",
+    [
+        ("run", ["--grid", "Sat.SMA=7000:8000:2"]),
+        ("monte-carlo", ["--n", "2", "--perturb", "Sat.SMA=normal:7100:50", "--seed", "0"]),
+        ("latin-hypercube", ["--n", "2", "--perturb", "Sat.SMA=normal:7100:50", "--seed", "0"]),
+    ],
+)
+@pytest.mark.parametrize(
+    "backend,fake_attr,worker_kw",
+    [
+        ("dask", "DaskPool", "n_workers"),
+        ("ray", "RayPool", "num_cpus"),
+    ],
+)
+def test_sweep_running_subcommands_route_through_selected_backend(
+    tmp_path: Path,
+    fake_gmat_run: FakeGmatRun,
+    monkeypatch: pytest.MonkeyPatch,
+    subcommand: str,
+    extra_args: list[str],
+    backend: str,
+    fake_attr: str,
+    worker_kw: str,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, fake_attr, fake)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    rc = cli.main(
+        [
+            subcommand,
+            *extra_args,
+            "--workers",
+            "1",
+            "--backend",
+            backend,
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+
+    assert rc == 0
+    assert fake.calls == [{worker_kw: 1}]
+
+
+def test_explicit_subcommand_routes_through_selected_backend(
+    tmp_path: Path,
+    fake_gmat_run: FakeGmatRun,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "DaskPool", fake)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    samples = tmp_path / "samples.csv"
+    samples.write_text("Sat.SMA\n7000\n7100\n", encoding="utf-8")
+
+    rc = cli.main(
+        [
+            "explicit",
+            "--samples",
+            str(samples),
+            "--workers",
+            "1",
+            "--backend",
+            "dask",
+            "--backend-arg",
+            "threads_per_worker=2",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+
+    assert rc == 0
+    assert fake.calls == [{"n_workers": 1, "threads_per_worker": 2}]
+
+
+def test_run_with_backend_dask_missing_extra_exits_backend_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "DaskPool",
+        _make_missing_extra_pool_class(
+            "DaskPool requires the [dask] extra: pip install gmat-sweep[dask]"
+        ),
+    )
+
+    script = _write_script(tmp_path)
+
+    rc = cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:8000:2",
+            "--backend",
+            "dask",
+            "--out",
+            str(tmp_path / "out"),
+            str(script),
+        ]
+    )
+    assert rc == cli.EXIT_BACKEND
+    err = capsys.readouterr().err
+    assert "backend error" in err
+    assert "[dask]" in err
+
+
+def test_run_with_backend_ray_missing_extra_exits_backend_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "RayPool",
+        _make_missing_extra_pool_class(
+            "RayPool requires the [ray] extra: pip install gmat-sweep[ray]"
+        ),
+    )
+
+    script = _write_script(tmp_path)
+
+    rc = cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:8000:2",
+            "--backend",
+            "ray",
+            "--out",
+            str(tmp_path / "out"),
+            str(script),
+        ]
+    )
+    assert rc == cli.EXIT_BACKEND
+    err = capsys.readouterr().err
+    assert "backend error" in err
+    assert "[ray]" in err
+
+
+def test_show_does_not_accept_backend_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["show", "--backend", "dask", "/tmp/manifest.jsonl"])
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_run_with_invalid_backend_choice_rejected_by_argparse(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "run",
+                "--grid",
+                "a=1,2",
+                "--backend",
+                "spark",
+                "--out",
+                "/tmp/out",
+                "/tmp/m.script",
+            ]
+        )
+    assert exc_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_resume_subcommand_accepts_backend_flag(
+    tmp_path: Path,
+    fake_gmat_run: FakeGmatRun,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "DaskPool", fake)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    # First, run a sweep to produce a manifest the resume can pick up.
+    rc = cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:8000:2",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    assert rc == 0
+    fake.calls.clear()  # discard any local-path noise (none expected, but be defensive)
+
+    rc = cli.main(
+        [
+            "resume",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(script),
+            "--workers",
+            "1",
+            "--backend",
+            "dask",
+        ]
+    )
+    assert rc == 0
+    assert fake.calls == [{"n_workers": 1}]

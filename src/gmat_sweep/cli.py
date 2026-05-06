@@ -25,7 +25,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
+from gmat_sweep.backends.dask import DaskPool
 from gmat_sweep.backends.joblib import LocalJoblibPool
+from gmat_sweep.backends.ray import RayPool
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -37,6 +39,7 @@ from gmat_sweep.manifest import Manifest
 if TYPE_CHECKING:
     import pandas as pd
 
+    from gmat_sweep.backends.base import Pool
     from gmat_sweep.distributions import DistSpec
 
 __all__ = ["main"]
@@ -166,6 +169,55 @@ def _parse_perturb_spec(spec: str) -> tuple[str, DistSpec]:
     return name, (tag, p1, p2)
 
 
+def _parse_backend_arg(spec: str) -> tuple[str, int | float | str]:
+    """Parse one ``--backend-arg`` token into ``(key, coerced_value)``.
+
+    Same int → float → str coercion as :func:`_parse_grid_value`.
+    """
+    if "=" not in spec:
+        raise SweepConfigError(f"--backend-arg must be 'KEY=VALUE': {spec!r}")
+    name, _, rhs = spec.partition("=")
+    name = name.strip()
+    if not name:
+        raise SweepConfigError(f"--backend-arg is missing a key: {spec!r}")
+    if not rhs:
+        raise SweepConfigError(f"--backend-arg for {name!r} has no value: {spec!r}")
+    return name, _parse_grid_value(rhs)
+
+
+def _build_pool(args: argparse.Namespace) -> Pool:
+    """Construct the backend pool selected by ``--backend`` / ``--backend-arg``.
+
+    The four sweep-running subcommands and ``resume`` route through here so
+    the backend wiring lives in one place. ``--backend local`` (default)
+    returns a :class:`LocalJoblibPool` and rejects any ``--backend-arg``;
+    ``dask`` / ``ray`` map ``--workers`` onto ``n_workers`` / ``num_cpus``
+    (with the default ``-1`` meaning "let the pool pick") and forward every
+    ``--backend-arg`` as a kwarg to the pool constructor. Unknown kwargs
+    surface as the pool's own :class:`BackendError`.
+    """
+    backend_kwargs: dict[str, Any] = {}
+    for raw in args.backend_arg:
+        key, value = _parse_backend_arg(raw)
+        if key in backend_kwargs:
+            raise SweepConfigError(f"--backend-arg for {key!r} given more than once")
+        backend_kwargs[key] = value
+
+    if args.backend == "local":
+        if backend_kwargs:
+            raise SweepConfigError(
+                "--backend-arg is not supported with --backend local; "
+                "the local pool only accepts --workers"
+            )
+        return LocalJoblibPool(workers=args.workers)
+    workers = args.workers if args.workers > 0 else None
+    if args.backend == "dask":
+        return DaskPool(n_workers=workers, **backend_kwargs)
+    if args.backend == "ray":
+        return RayPool(num_cpus=workers, **backend_kwargs)
+    raise AssertionError(f"unreachable backend: {args.backend!r}")  # pragma: no cover
+
+
 def _load_samples(path: Path) -> pd.DataFrame:
     """Load an explicit-row samples DataFrame from CSV or Parquet.
 
@@ -220,7 +272,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         grid[name] = values
 
     out = Path(args.out)
-    with LocalJoblibPool(workers=args.workers) as pool:
+    with _build_pool(args) as pool:
         sweep(script, grid=grid, backend=pool, out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -257,7 +309,7 @@ def _cmd_monte_carlo(args: argparse.Namespace) -> int:
 
     perturb = _collect_perturb(args.perturb)
     out = Path(args.out)
-    with LocalJoblibPool(workers=args.workers) as pool:
+    with _build_pool(args) as pool:
         monte_carlo(
             script,
             n=args.n,
@@ -280,7 +332,7 @@ def _cmd_latin_hypercube(args: argparse.Namespace) -> int:
 
     perturb = _collect_perturb(args.perturb)
     out = Path(args.out)
-    with LocalJoblibPool(workers=args.workers) as pool:
+    with _build_pool(args) as pool:
         latin_hypercube(
             script,
             n=args.n,
@@ -303,7 +355,7 @@ def _cmd_explicit(args: argparse.Namespace) -> int:
 
     samples = _load_samples(Path(args.samples))
     out = Path(args.out)
-    with LocalJoblibPool(workers=args.workers) as pool:
+    with _build_pool(args) as pool:
         sweep(script, samples=samples, backend=pool, out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -324,7 +376,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     # Local import: only the resume path drives Sweep directly.
     from gmat_sweep.sweep import Sweep
 
-    with LocalJoblibPool(workers=args.workers) as pool:
+    with _build_pool(args) as pool:
         sweep_obj = Sweep.from_manifest(
             manifest_path,
             script,
@@ -334,6 +386,33 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
     print(_format_summary(sweep_obj.to_manifest(), manifest_path.parent))
     return EXIT_OK
+
+
+def _add_backend_flag(subparser: argparse.ArgumentParser) -> None:
+    """Attach ``--backend`` / ``--backend-arg`` to a sweep-running subparser."""
+    subparser.add_argument(
+        "--backend",
+        choices=("local", "dask", "ray"),
+        default="local",
+        metavar="NAME",
+        help=(
+            "Execution backend. 'local' (default) runs on this machine via "
+            "joblib/loky workers. 'dask' requires the [dask] extra; 'ray' "
+            "requires the [ray] extra. Missing extras exit 4."
+        ),
+    )
+    subparser.add_argument(
+        "--backend-arg",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Extra keyword forwarded to the dask/ray pool constructor "
+            "(e.g. 'threads_per_worker=2', 'address=ray://host:port'). "
+            "Repeat for multiple kwargs. Values coerced int → float → str. "
+            "Not allowed with --backend local."
+        ),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -382,6 +461,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SCRIPT",
         help="Path to the GMAT .script file.",
     )
+    _add_backend_flag(run)
     run.set_defaults(func=_cmd_run)
 
     show = subparsers.add_parser(
@@ -449,6 +529,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SCRIPT",
         help="Path to the GMAT .script file.",
     )
+    _add_backend_flag(monte)
     monte.set_defaults(func=_cmd_monte_carlo)
 
     lhs = subparsers.add_parser(
@@ -504,6 +585,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SCRIPT",
         help="Path to the GMAT .script file.",
     )
+    _add_backend_flag(lhs)
     lhs.set_defaults(func=_cmd_latin_hypercube)
 
     explicit = subparsers.add_parser(
@@ -539,6 +621,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SCRIPT",
         help="Path to the GMAT .script file.",
     )
+    _add_backend_flag(explicit)
     explicit.set_defaults(func=_cmd_explicit)
 
     resume = subparsers.add_parser(
@@ -580,6 +663,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Emits a RuntimeWarning."
         ),
     )
+    _add_backend_flag(resume)
     resume.set_defaults(func=_cmd_resume)
 
     return parser
