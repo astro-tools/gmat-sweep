@@ -71,7 +71,7 @@ def run_one(spec: RunSpec) -> RunOutcome:
         logger.info("run_id=%d script=%s", spec.run_id, spec.script_path)
         logger.info("overrides=%s", spec.overrides)
         if spec.seed is not None:
-            logger.info("seed=%d (reserved for v0.2 Monte Carlo)", spec.seed)
+            logger.info("seed=%d", spec.seed)
 
         # Lazy import: keeps gmatpy out of the driver process. The first call
         # in any given worker subprocess pays the bootstrap cost; subsequent

@@ -45,7 +45,7 @@ you are touching the worker, pool, or aggregation paths.
 
 CI enforces coverage gates on the Ubuntu / Python 3.12 cell:
 
-- Overall coverage must be ≥ 80%.
+- Overall coverage must be ≥ 85%.
 - Each of `src/gmat_sweep/grids.py`, `src/gmat_sweep/distributions.py`,
   `src/gmat_sweep/manifest.py`, and `src/gmat_sweep/aggregate.py` must be ≥ 95%.
 
@@ -53,7 +53,7 @@ To reproduce locally:
 
 ```bash
 uv run pytest -m "integration or not integration" --cov
-uv run coverage report --fail-under=80
+uv run coverage report --fail-under=85
 uv run coverage report --include='src/gmat_sweep/grids.py' --fail-under=95
 uv run coverage report --include='src/gmat_sweep/distributions.py' --fail-under=95
 uv run coverage report --include='src/gmat_sweep/manifest.py' --fail-under=95
@@ -75,7 +75,8 @@ or comments — see the repo-level convention.
 gmat-sweep's scope is deliberately narrow: run an existing `.script` N times
 under N different overrides via `gmat-run`, in parallel, and aggregate the
 results into a multi-indexed pandas DataFrame. Before opening a feature issue,
-check the charter and the existing issues to make sure the work belongs here.
+check the existing issues and the roadmap in the README to make sure the work
+belongs here.
 
 - **Running a single mission →** [`gmat-run`](https://github.com/astro-tools/gmat-run).
 - **Building missions in Python →** [`gmatpyplus`](https://github.com/weasdown/gmatpyplus).

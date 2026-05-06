@@ -11,10 +11,23 @@ Run parameter sweeps and Monte Carlo dispersions over GMAT missions in parallel 
 ## What this is
 
 A parallel orchestrator on top of [`gmat-run`](https://github.com/astro-tools/gmat-run)'s
-single-run primitive. Point `gmat-sweep` at a working `.script`, declare a parameter grid,
-and it fans the cartesian product across subprocess workers, aggregates each run's
-`ReportFile` into a single `(run_id, time)`-MultiIndexed pandas DataFrame, and writes a
-JSON Lines manifest alongside the results so any sweep is reproducible bit-for-bit.
+single-run primitive. Point `gmat-sweep` at a working `.script` and either a parameter
+grid, an explicit run table, or a perturbation distribution, and it fans the run set
+across subprocess workers, aggregates each run's `ReportFile` (and any `EphemerisFile`
+or `ContactLocator` outputs) into multi-indexed pandas DataFrames, and writes a JSON
+Lines manifest alongside the results so any sweep is reproducible bit-for-bit. Killed
+sweeps reload from the manifest and re-run only the missing or failed runs.
+
+The four entry points cover the common shapes:
+
+- [`sweep(grid=...)`](https://astro-tools.github.io/gmat-sweep/parameter-spec/#full-factorial-expansion)
+  — full-factorial grid over one or more dotted-path fields.
+- [`sweep(samples=DataFrame)`](https://astro-tools.github.io/gmat-sweep/parameter-spec/#explicit-row-sweeps)
+  — explicit-row sweep where you pre-build the run set (Halton, Sobol, custom design).
+- [`monte_carlo(perturb=...)`](https://astro-tools.github.io/gmat-sweep/monte-carlo/)
+  — stochastic dispersion with named distributions and a deterministic seed contract.
+- [`latin_hypercube(perturb=...)`](https://astro-tools.github.io/gmat-sweep/parameter-spec/#monte-carlo-vs-latin-hypercube)
+  — stratified sampling for variance reduction at small `n`.
 
 ## What this is not
 
@@ -26,9 +39,8 @@ JSON Lines manifest alongside the results so any sweep is reproducible bit-for-b
 - **Not** an optimiser. Gradient-, Bayesian-, and population-based optimisation
   (CasADi, pagmo2, scikit-optimize) is a different problem; `gmat-sweep` may serve as the
   parallel evaluator inside one, but it ships no optimiser of its own.
-- Monte Carlo dispersion (`monte_carlo`), Latin hypercube sampling (`latin_hypercube`),
-  and programmatic resume of partial sweeps land in **v0.2** — see the roadmap below. v0.1
-  ships the full-factorial grid path and the durability contract those features build on.
+- **Not** a distributed cluster runner yet. The default `LocalJoblibPool` saturates one
+  machine; `DaskPool` and `RayPool` for multi-machine sweeps are scoped for v0.3.
 
 ## Requirements
 
@@ -85,18 +97,45 @@ the rows from every run's `ReportFile` plus a `__status` column flagging
 GMAT stderr in the manifest — never as a silent zero-row DataFrame and never as an
 unhandled exception that aborts the whole sweep.
 
+For a stochastic dispersion, swap [`sweep`](https://astro-tools.github.io/gmat-sweep/api/#gmat_sweep.sweep)
+for [`monte_carlo`](https://astro-tools.github.io/gmat-sweep/monte-carlo/) and pass a
+`perturb` mapping of named distributions:
+
+```python
+from gmat_sweep import monte_carlo
+
+df = monte_carlo(
+    "mission.script",
+    n=1000,
+    perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+    workers=8,
+    seed=42,
+)
+```
+
+Returns the same DataFrame shape as `sweep()`. Per-run sub-seeds derive from `seed` via
+`numpy.random.SeedSequence.spawn`, so the draw is bit-reproducible and a resumed sweep
+samples the same values for any given `run_id`. See the
+[Monte Carlo guide](https://astro-tools.github.io/gmat-sweep/monte-carlo/) for the full
+determinism contract and [`latin_hypercube`](https://astro-tools.github.io/gmat-sweep/parameter-spec/#monte-carlo-vs-latin-hypercube)
+for the stratified-sampling variant.
+
 By default the per-run Parquet files and the manifest land in a temporary directory
-whose lifetime is tied to the returned DataFrame. Pass `out=Path(...)` to keep them.
+whose lifetime is tied to the returned DataFrame. Pass `out=Path(...)` to keep them —
+that's also what enables [resuming a killed sweep](https://astro-tools.github.io/gmat-sweep/resume/)
+via `Sweep.from_manifest(...).resume()` or `gmat-sweep resume <manifest>`.
 
 A `gmat-sweep` console script is also installed for shell-script and CI use:
 
 ```bash
-gmat-sweep run --grid Sat.SMA=7000:7200:3 --workers 8 --out ./sweep mission.script
-gmat-sweep show ./sweep/manifest.jsonl
+gmat-sweep run         --grid Sat.SMA=7000:7200:3 --workers 8 --out ./sweep mission.script
+gmat-sweep monte-carlo --n 1000 --perturb 'Sat.SMA=normal:7100:50' --seed 42 --out ./mc mission.script
+gmat-sweep resume      --script mission.script --workers 8 ./mc/manifest.jsonl
+gmat-sweep show        ./sweep/manifest.jsonl
 ```
 
-See the [CLI reference in the docs](https://astro-tools.github.io/gmat-sweep/parameter-spec/#cli-mini-grammar)
-for the full grid grammar.
+See the [CLI reference in the docs](https://astro-tools.github.io/gmat-sweep/cli/)
+for every subcommand and the full mini-grammar.
 
 ## Outputs
 
@@ -131,15 +170,21 @@ Runnable example notebooks:
   cartesian product over `Sat.Epoch` and a script-level `Variable TOF`, contoured by
   per-run miss distance.
 - [Surviving a kill](https://astro-tools.github.io/gmat-sweep/examples/03_killed_sweep_recovery/) —
-  launch a sweep, send `SIGINT` mid-run, and walk through inspecting the partial manifest
-  with `gmat-sweep show` before reloading the partial DataFrame from disk.
+  launch a sweep, send `SIGINT` mid-run, walk through inspecting the partial manifest
+  with `gmat-sweep show`, then complete the sweep with `Sweep.from_manifest(...).resume()`.
+- [Monte Carlo dispersion](https://astro-tools.github.io/gmat-sweep/examples/04_monte_carlo_dispersion/) —
+  1000-run Monte Carlo around a nominal injection burn over a four-axis perturbation
+  cube, with arrival-miss histogram and a 3-σ covariance ellipse.
+- [Latin hypercube vs Monte Carlo](https://astro-tools.github.io/gmat-sweep/examples/05_latin_hypercube/) —
+  64-run Latin hypercube alongside a 64-run plain Monte Carlo on the same perturbation,
+  pair-plotting the unit-cube samples to make the stratification visible.
 
 ## Roadmap
 
 | Release | Scope |
 |---|---|
-| **v0.1** *(current)* | Full-factorial `sweep(grid=...)`. `LocalJoblibPool` default backend with subprocess isolation per run. Lazy `(run_id, time)` aggregation from per-run Parquet. JSON Lines manifest with append/fsync durability. `gmat-sweep run`/`show` CLI. Ubuntu + Windows CI on R2025a + R2026a × Python 3.10/3.11/3.12. |
-| **v0.2** *(next)* | `monte_carlo()` and `latin_hypercube()` plus explicit-row `samples=DataFrame` sweeps. Programmatic resume via `Sweep.from_manifest(...).resume()`. Ephemeris and contact aggregation across runs. Manifest format frozen as a stable v1 schema. Coverage gate raised to 85%. |
+| **v0.2** *(current)* | `monte_carlo()` and `latin_hypercube()` plus explicit-row `samples=DataFrame` sweeps. Programmatic resume via `Sweep.from_manifest(...).resume()`. Ephemeris and contact aggregation across runs. CLI gains `monte-carlo`, `latin-hypercube`, `explicit`, and `resume` subcommands. Manifest frozen as a stable v1 schema with a documented compatibility policy. macOS added to CI. Coverage gate raised to 85%. |
+| **v0.3** *(next)* | `DaskPool` (extra `[dask]`) and `RayPool` (extra `[ray]`) for multi-machine sweeps. Cluster-recipe pages for Slurm `srun`, Kubernetes pod-per-worker, and Ray autoscaling. Benchmark page comparing backends on a 1000-run reference sweep. Throughput regression tests. `gmat-sweep show` gains a rich detail mode for inspecting per-run timing and stderr. |
 
 Past releases live in [`CHANGELOG.md`](CHANGELOG.md).
 

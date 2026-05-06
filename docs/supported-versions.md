@@ -31,8 +31,8 @@ the only releases supported.
 #### Python
 
 3.10 is the floor (`requires-python = ">=3.10"` in `pyproject.toml`). 3.13
-is not in the v0.1 matrix; it will be added once `pyarrow` and `joblib`'s
-loky backend ship stable wheels for it.
+is not in the matrix; it will be added once `pyarrow` and `joblib`'s loky
+backend ship stable wheels for it.
 
 #### Operating system
 

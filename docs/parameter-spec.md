@@ -144,7 +144,7 @@ For `{"a": [1, 2], "b": [10, 20, 30]}` the six override dicts come out as:
 ```
 
 `run_id` values are assigned in this order starting at `0`, and that
-ordering is what the manifest and any future resume flow rely on.
+ordering is what the manifest and the [resume flow](resume.md) rely on.
 
 The expansion is byte-for-byte deterministic across processes and machines:
 two runs serialised through `json.dumps(..., sort_keys=True)` produce
