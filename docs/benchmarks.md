@@ -19,11 +19,11 @@ stock-sample support files.
 | Mission script | [`tests/data/leo_basic.script`][leo-basic] |
 | Sweep parameter | `Sat.SMA` ∈ `np.linspace(7000, 8000, 1000)` |
 | Workers per backend | 8 |
-| GMAT version | _TBD_ |
-| `gmat-sweep` version | _TBD_ |
-| CPU | _TBD_ |
-| RAM | _TBD_ |
-| OS | _TBD_ |
+| GMAT version | R2026a |
+| `gmat-sweep` version | [`110d4be`](https://github.com/astro-tools/gmat-sweep/commit/110d4be) (post-0.2.0 `main`) |
+| CPU | Intel® Core™ i7-10700 @ 2.90 GHz (8 cores / 16 threads) |
+| RAM | 16 GB |
+| OS | Linux 6.6.87 (WSL2, x86_64) |
 
 The benchmark fixture is committed at
 [`tests/data/benchmark_sweep.py`][benchmark-script]; the docs reproduce-command
@@ -39,25 +39,31 @@ Wall-clock seconds, median of three runs, min–max range in parentheses.
 
 | Backend | Median (s) | Min (s) | Max (s) |
 | --- | --- | --- | --- |
-| `LocalJoblibPool(workers=8)` | _TBD_ | _TBD_ | _TBD_ |
-| `DaskPool(n_workers=8)` (LocalCluster) | _TBD_ | _TBD_ | _TBD_ |
-| `RayPool(num_cpus=8)` (local) | _TBD_ | _TBD_ | _TBD_ |
+| `LocalJoblibPool(workers=8)` | 12.10 | 11.85 | 12.51 |
+| `DaskPool(n_workers=8)` (LocalCluster) | 14.32 | 14.22 | 14.73 |
+| `RayPool(num_cpus=8)` (local) | 14.61 | 14.52 | 14.73 |
 
 ## Throughput
 
 | Backend | Runs/sec | Per-worker runs/sec |
 | --- | --- | --- |
-| `LocalJoblibPool(workers=8)` | _TBD_ | _TBD_ |
-| `DaskPool(n_workers=8)` | _TBD_ | _TBD_ |
-| `RayPool(num_cpus=8)` | _TBD_ | _TBD_ |
+| `LocalJoblibPool(workers=8)` | 82.62 | 10.33 |
+| `DaskPool(n_workers=8)` | 69.85 | 8.73 |
+| `RayPool(num_cpus=8)` | 68.46 | 8.56 |
 
 ## Discussion
 
-_To be written once the numbers are measured. The expected shape: all three
-backends land within roughly 10 % of each other on a single machine — Dask and
-Ray pay a small dispatch-layer overhead, but per-run GMAT load time dominates.
+On this 8-worker / single-machine setup the local joblib pool turns in
+roughly 82.6 runs/sec, with Dask at 69.9 and Ray at 68.5 — about 15–17 %
+below local. Per-worker throughput tracks the same gap (10.3 vs 8.7 vs 8.6
+runs/sec). Dask and Ray are within ~2 % of each other; the gap to local is
+the dispatch-layer overhead each of them pays per task that joblib's loky
+backend avoids on a single host. Per-run GMAT load is amortised identically
+across all three backends because `reuse_gmat_context=True` keeps a single
+gmatpy import alive in each worker for the lifetime of the sweep.
+
 The picture changes once the sweep spans more than one machine; see
-[Backends](backends.md) for when each backend is worth its overhead._
+[Backends](backends.md) for when each backend is worth its overhead.
 
 ## How to reproduce
 
