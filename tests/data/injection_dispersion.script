@@ -1,0 +1,59 @@
+%  Four-axis injection-dispersion fixture for the backend equivalence suite
+%  (tests/test_backend_equivalence.py). Copied verbatim from
+%  docs/examples/injection_dispersion.script -- the example version is the
+%  authoritative one for documentation drift; this copy is pinned so the
+%  equivalence assertions are insulated from notebook-driven tweaks.
+%
+%  A short coast on a low parking orbit, an impulsive maneuver `Inj` whose
+%  delta-V is expressed in the spacecraft's VNB local frame, and a fixed
+%  post-burn propagation, with the spacecraft's final inertial position
+%  written to the ReportFile. The four perturbation axes are `CoastTime.Value`
+%  (the parking-orbit phase at burn time, equivalently a launch-time-slip
+%  proxy) and `Inj.Element1`, `Inj.Element2`, `Inj.Element3` (the delta-V
+%  components along V, N, B). Sub-second per run.
+
+Create Spacecraft Sat
+Sat.DateFormat = UTCGregorian
+Sat.Epoch = '01 Jan 2026 00:00:00.000'
+Sat.CoordinateSystem = EarthMJ2000Eq
+Sat.DisplayStateType = Keplerian
+Sat.SMA = 7000
+Sat.ECC = 0.001
+Sat.INC = 28.5
+Sat.RAAN = 0
+Sat.AOP = 0
+Sat.TA = 0
+
+Create ForceModel FM
+FM.CentralBody = Earth
+FM.PointMasses = {Earth}
+FM.Drag = None
+FM.SRP = Off
+
+Create Propagator Prop
+Prop.FM = FM
+Prop.Type = PrinceDormand78
+Prop.InitialStepSize = 60
+Prop.Accuracy = 1e-9
+
+Create ImpulsiveBurn Inj
+Inj.CoordinateSystem = Local
+Inj.Origin = Earth
+Inj.Axes = VNB
+Inj.Element1 = 1.0
+Inj.Element2 = 0.0
+Inj.Element3 = 0.0
+
+Create Variable CoastTime
+CoastTime = 600
+
+Create ReportFile RF
+RF.Filename = 'injection_dispersion_report.txt'
+RF.Precision = 16
+RF.WriteHeaders = true
+RF.Add = {Sat.UTCGregorian, Sat.X, Sat.Y, Sat.Z}
+
+BeginMissionSequence
+Propagate Prop(Sat) {Sat.ElapsedSecs = CoastTime}
+Maneuver Inj(Sat)
+Propagate Prop(Sat) {Sat.ElapsedSecs = 1200}
