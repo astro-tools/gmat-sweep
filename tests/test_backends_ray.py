@@ -292,3 +292,35 @@ def test_importing_ray_module_does_not_import_gmatpy() -> None:
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.integration
+def test_raypool_workers_can_import_ray_under_uv_run() -> None:
+    """Real-Ray regression for #76: workers must import `ray` under `uv run`.
+
+    With Ray's auto-uv runtime_env hook on (its default), ``ray.init()`` from a
+    driver launched by ``uv run`` rewrites worker startup to relaunch each
+    worker with ``uv run python ...`` from a packaged copy of the working dir.
+    uv then rebuilds the worker venv from the project's base dependencies
+    only — without the ``[ray]`` extra — and the worker's ``import ray``
+    raises ``ModuleNotFoundError``. Constructing :class:`RayPool` here is what
+    triggers gmat-sweep's env-var override of the hook (see
+    :mod:`gmat_sweep.backends`); the assertion verifies that a freshly spawned
+    Ray worker can complete an ``import ray`` + ``ray.__version__`` call.
+
+    The marker is ``integration`` because the test launches a real Ray runtime,
+    not because GMAT is involved (it is not).
+    """
+    pool = RayPool(num_cpus=1)
+    try:
+
+        def _worker_ray_version() -> str:
+            import ray as _r
+
+            return str(_r.__version__)
+
+        remote_check = pool._ray.remote(_worker_ray_version)
+        version = pool._ray.get(remote_check.remote())
+        assert isinstance(version, str) and version
+    finally:
+        pool.close()
