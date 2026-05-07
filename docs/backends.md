@@ -132,6 +132,20 @@ R2026a CI cell on every PR.
 
 ## Cluster recipes
 
-Slurm `srun` recipes for `DaskPool`, Kubernetes pod-per-worker setup, and
-Ray autoscaling cluster configuration are tracked separately and will
-land alongside the cluster-recipes documentation page.
+Worked examples for wiring `DaskPool` and `RayPool` into shared cluster
+infrastructure live under [Recipes](recipes/index.md). One page per
+orchestrator:
+
+- [Slurm with `srun`](recipes/slurm.md) — `DaskPool` over
+  `dask-jobqueue.SLURMCluster`, with the `sbatch` allocation and the
+  driver script.
+- [Kubernetes pod-per-worker](recipes/kubernetes.md) — `DaskPool` over
+  the `dask-kubernetes` operator, with a `KubeCluster` spec and
+  shared-PVC layout.
+- [Ray autoscaling](recipes/ray-autoscaling.md) — `RayPool` over
+  `ray up cluster.yaml`, with an autoscaling worker pool and the Ray
+  Client driver.
+
+If your orchestrator isn't on the list, the [`Pool`][gmat_sweep.backends.Pool]
+ABC is the escape hatch — implement it once and any `sweep()` call
+dispatches through it.

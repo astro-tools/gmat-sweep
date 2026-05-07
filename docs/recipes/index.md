@@ -1,0 +1,51 @@
+# Cluster recipes
+
+Worked examples for wiring `gmat-sweep` into shared cluster infrastructure
+— one page per orchestrator, each pairing the cluster-side configuration
+with the matching `sweep()` driver.
+
+The recipes document patterns; they don't introduce new APIs. The
+underlying [`DaskPool`][gmat_sweep.backends.DaskPool] and
+[`RayPool`][gmat_sweep.backends.RayPool] surface — and the
+[`Pool`][gmat_sweep.backends.Pool] ABC — are covered on the
+[Backends](../backends.md) page. Reach for a recipe when you've already
+decided on the orchestrator and need the wiring that makes a sweep run
+on it.
+
+## Choosing a recipe
+
+| Recipe | Pool | When to pick it |
+|---|---|---|
+| [Slurm with `srun`](slurm.md) | [`DaskPool`][gmat_sweep.backends.DaskPool] via `dask-jobqueue` | An HPC site with a Slurm scheduler; you submit one driver job and let `SLURMCluster` request worker tasks elastically. |
+| [Kubernetes pod-per-worker](kubernetes.md) | [`DaskPool`][gmat_sweep.backends.DaskPool] via `dask-kubernetes` | A Kubernetes cluster (managed or self-hosted) where each worker is a Pod. Best paired with the Dask Operator. |
+| [Ray autoscaling](ray-autoscaling.md) | [`RayPool`][gmat_sweep.backends.RayPool] via `ray up` | A Ray cluster — local, on-prem, or cloud — with autoscaling between a head node and an elastic worker pool. |
+
+Each recipe assumes you've followed [Getting started](../getting-started.md)
+locally first. The local sweep proves your script and grid are sound;
+the recipe then lifts the same call onto cluster workers without
+changing the `sweep()` invocation itself — only the `backend=` argument
+changes.
+
+## Prerequisites that apply across all three
+
+- A working GMAT install reachable on **every** worker node, not just
+  the driver. The discovery is `gmat-run`'s job; misconfigured workers
+  surface as every run failing with the same import error.
+- A shared output directory at the same path on every worker. Per-run
+  Parquet files and the manifest live there; node-local scratch only
+  works if you stage results back yourself.
+- The matching cluster-orchestrator package installed in the same env
+  the workers run from (`dask-jobqueue`, `dask-kubernetes`, or `ray`).
+  None of these are `gmat-sweep` dependencies — pick whichever your
+  infrastructure uses and install it explicitly.
+
+## When none of these fits
+
+The three orchestrators above are the ones with one-shot recipes. For
+anything else — AWS Batch, GCP Batch, custom MPI launchers, in-house
+schedulers — write a custom `Pool` against the
+[`Pool`][gmat_sweep.backends.Pool] ABC. Its contract is small: accept
+[`RunSpec`][gmat_sweep.spec.RunSpec]s, route each through the per-task
+subprocess hop, and yield [`RunOutcome`][gmat_sweep.spec.RunOutcome]s as
+they complete. The three shipped pools are exactly that pattern, three
+different ways.
