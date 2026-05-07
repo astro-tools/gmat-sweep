@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.errors import BackendError
-from gmat_sweep.spec import RunSpec
+from gmat_sweep.spec import RunOutcome, RunSpec
 from tests.conftest import FakeGmatRun
 
 
@@ -142,3 +143,60 @@ def test_close_cancels_pending_futures(tmp_path: Path) -> None:
     f = pool.submit(_make_spec(output_dir=tmp_path / "run_0"))
     pool.close()
     assert f.cancelled()
+
+
+def _ok_outcome(run_id: int) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.ok(run_id=run_id, output_paths={}, started_at=now, ended_at=now)
+
+
+def test_default_dispatches_run_one_directly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default ``reuse_gmat_context=True`` calls ``run_one`` per task — fast path."""
+    calls: list[tuple[str, int]] = []
+
+    def _fake_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    def _fake_run_spec_in_subprocess(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_spec_in_subprocess", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    monkeypatch.setattr("gmat_sweep.backends.joblib.run_one", _fake_run_one)
+    monkeypatch.setattr(
+        "gmat_sweep.backends.joblib.run_spec_in_subprocess", _fake_run_spec_in_subprocess
+    )
+
+    with LocalJoblibPool(workers=1) as pool:
+        f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+        list(pool.as_completed([f]))
+
+    assert calls == [("run_one", 0)]
+
+
+def test_reuse_gmat_context_false_dispatches_subprocess_hop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``reuse_gmat_context=False`` calls ``run_spec_in_subprocess`` per task."""
+    calls: list[tuple[str, int]] = []
+
+    def _fake_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    def _fake_run_spec_in_subprocess(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_spec_in_subprocess", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    monkeypatch.setattr("gmat_sweep.backends.joblib.run_one", _fake_run_one)
+    monkeypatch.setattr(
+        "gmat_sweep.backends.joblib.run_spec_in_subprocess", _fake_run_spec_in_subprocess
+    )
+
+    with LocalJoblibPool(workers=1, reuse_gmat_context=False) as pool:
+        f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+        list(pool.as_completed([f]))
+
+    assert calls == [("run_spec_in_subprocess", 0)]
