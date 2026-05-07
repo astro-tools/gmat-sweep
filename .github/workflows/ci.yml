@@ -49,10 +49,12 @@ jobs:
         run: uv sync --all-groups --extra dask --extra ray
 
       - name: Run pytest
-        # `-m "integration or not integration"` overrides the default
-        # marker filter in pyproject.toml so CI runs both unit and
-        # integration suites in a single invocation.
-        run: uv run pytest -m "integration or not integration" --cov --cov-report=term-missing
+        # `-m "(integration or not integration) and not slow"` overrides the
+        # default marker filter in pyproject.toml so CI runs both unit and
+        # integration suites in a single invocation, while excluding the
+        # `slow` integration tests that have their own dedicated cell
+        # (see the `backend-throughput` job below).
+        run: uv run pytest -m "(integration or not integration) and not slow" --cov --cov-report=term-missing
 
       # Coverage gates run on a single matrix combination — the .coverage
       # data is identical across runners. The four per-file gates match
@@ -147,3 +149,29 @@ jobs:
           python-version: '3.12'
       - run: pip install .
       - run: python -c "import gmat_sweep"
+
+  # Per-backend throughput regression: runs the 50-run scaled variant of the
+  # canonical reference benchmark on each of LocalJoblibPool / DaskPool /
+  # RayPool and asserts each backend's measured throughput meets the floor
+  # in `tests/data/throughput_floor.json`. One Linux cell on the latest
+  # supported GMAT release is the gate; the docs page reports the author's
+  # local 1000-run numbers separately.
+  backend-throughput:
+    name: backend throughput regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - run: uv sync --all-groups --extra dask --extra ray
+      - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow"

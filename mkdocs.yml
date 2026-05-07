@@ -43,6 +43,7 @@ nav:
   - CLI reference: cli.md
   - Manifest schema: manifest-schema.md
   - Supported versions: supported-versions.md
+  - Benchmarks: benchmarks.md
   - Examples:
       - examples/index.md
       - Single-axis SMA scan: examples/01_sma_scan.ipynb
