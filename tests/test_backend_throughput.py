@@ -49,4 +49,8 @@ def test_backend_throughput_meets_floor(backend: Backend) -> None:
 
     floor = _load_floor()[backend]
     record = run_benchmark(backend=backend, scale=_CI_SCALE, workers=_CI_WORKERS)
+    # Surface the measured record so a CI log reader can recalibrate the floor
+    # ('roughly 0.7 * first_green_run_throughput') without re-running locally.
+    # `pytest -s` in the dedicated CI cell keeps this visible on a passing run.
+    print(json.dumps(dict(record), indent=2))
     assert_meets_floor(record, floor)

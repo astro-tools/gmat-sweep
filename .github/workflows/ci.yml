@@ -174,4 +174,8 @@ jobs:
           version: R2026a
           cache: true
       - run: uv sync --all-groups --extra dask --extra ray
-      - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow"
+      # `-s` disables stdout capture so the test's per-backend BenchmarkRecord
+      # JSON appears in the job log even on a passing run — needed to
+      # recalibrate `tests/data/throughput_floor.json` from the measured
+      # numbers without re-running the sweep locally.
+      - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow" -s
