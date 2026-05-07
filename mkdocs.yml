@@ -37,6 +37,11 @@ nav:
   - Getting started: getting-started.md
   - Parameter spec: parameter-spec.md
   - Backends: backends.md
+  - Recipes:
+      - recipes/index.md
+      - Slurm with srun: recipes/slurm.md
+      - Kubernetes pod-per-worker: recipes/kubernetes.md
+      - Ray autoscaling: recipes/ray-autoscaling.md
   - Monte Carlo: monte-carlo.md
   - Aggregation: aggregation.md
   - Resume: resume.md
