@@ -179,3 +179,32 @@ jobs:
       # recalibrate `tests/data/throughput_floor.json` from the measured
       # numbers without re-running the sweep locally.
       - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow" -s
+
+  # Cross-backend equivalence gate: runs three reference sweeps (grid, Monte
+  # Carlo, Latin hypercube) on each of LocalJoblibPool / DaskPool / RayPool
+  # and asserts pairwise bit-equality on the aggregated DataFrame and the
+  # manifest's reproducibility-bearing fields. The contract is that the
+  # `Pool` abstraction is honest — `backend=` is a true execution-only knob
+  # with no observable effect on results. One Linux cell on the latest
+  # supported GMAT release is the gate; cross-platform Dask/Ray equivalence
+  # is out of scope (the 18-cell main matrix already covers LocalJoblibPool
+  # on every OS).
+  backend-equivalence:
+    name: backend equivalence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - run: uv sync --all-groups --extra dask --extra ray
+      - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"

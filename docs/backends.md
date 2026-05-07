@@ -116,6 +116,20 @@ NaN-filled row with `__status="failed"`. The
 [killed-sweep recovery example](examples/03_killed_sweep_recovery.ipynb)
 shows the resume flow end-to-end.
 
+## Backend equivalence guarantee
+
+Every backend is required to produce bit-equal DataFrames and bit-equal
+`parameter_spec` / per-`run_id` `overrides` for the same sweep — only the
+manifest's `backend` header field is allowed to differ. The contract is
+enforced by `tests/test_backend_equivalence.py`, which runs a 16-run grid
+sweep, a 32-run Monte Carlo sweep, and a 16-run Latin hypercube sweep on
+each backend and asserts every non-`LocalJoblibPool` backend matches the
+local-backend reference. The Monte Carlo sweep also pins cross-process
+determinism on `DaskPool` (a fresh driver-process Python re-runs the same
+sweep and the result must compare bit-equal). The suite is gated as
+`integration and slow` and runs on a dedicated Linux / Python 3.12 / GMAT
+R2026a CI cell on every PR.
+
 ## Cluster recipes
 
 Slurm `srun` recipes for `DaskPool`, Kubernetes pod-per-worker setup, and
