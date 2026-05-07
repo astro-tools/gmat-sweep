@@ -1,12 +1,13 @@
 """Internal helper: run a RunSpec in a freshly-spawned Python interpreter.
 
 The execution-backend layer's bridge to :mod:`gmat_sweep._run_subprocess`.
-Backends that reuse worker processes (Dask, Ray) call
-:func:`run_spec_in_subprocess` from inside each task to honour the per-run
-fresh-interpreter contract enforced by
-:class:`gmat_sweep.backends.base.Pool`. ``LocalJoblibPool`` does not — loky
-already gives one fresh interpreter per task and gains nothing from the
-extra hop.
+Every backend uses this helper when a pool is constructed with
+``reuse_gmat_context=False`` — it is the per-task fresh-bootstrap path
+described in :class:`gmat_sweep.backends.base.Pool`. ``LocalJoblibPool``,
+``DaskPool``, and ``RayPool`` each route their submission through this
+function in that mode; in the default ``reuse_gmat_context=True`` mode they
+call :func:`gmat_sweep.worker.run_one` directly inside the worker process
+and pay the gmatpy bootstrap cost only on a worker's first task.
 
 Underscore-prefixed module name keeps this internal to the backends layer;
 nothing here is re-exported from :mod:`gmat_sweep.backends`.
