@@ -12,7 +12,29 @@ time.
 from __future__ import annotations
 
 import importlib
+import os
 from typing import TYPE_CHECKING, Any
+
+# Disable Ray's auto-uv runtime_env hook before any `import ray` happens.
+#
+# When the driver runs under `uv run` (CI under `uv run pytest`, or any local
+# `uv`-based dev shell), Ray detects the parent `uv run` process and silently
+# rewrites `runtime_env` to relaunch each worker with `uv run python ...` from
+# a packaged copy of the project's working directory. uv then rebuilds a fresh
+# worker venv from the project's *base* dependencies — no extras — so the
+# worker's `import ray` raises `ModuleNotFoundError` and `ray.init()` retries
+# 5 times before raising `RaySystemError`.
+#
+# The constant Ray reads (`ray._private.ray_constants.RAY_ENABLE_UV_RUN_RUNTIME_ENV`)
+# is evaluated once at the time `ray` is imported, so the env var must be set
+# before any `import ray`. Setting it here covers both import paths to
+# :class:`gmat_sweep.backends.ray.RayPool`: the package's lazy ``__getattr__``
+# below imports ``ray`` for its install probe, and a direct
+# ``from gmat_sweep.backends.ray import RayPool`` triggers this module first.
+#
+# `setdefault` respects an explicit user opt-in — set
+# ``RAY_ENABLE_UV_RUN_RUNTIME_ENV=1`` in the shell to re-enable the hook.
+os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.backends.joblib import LocalJoblibPool
