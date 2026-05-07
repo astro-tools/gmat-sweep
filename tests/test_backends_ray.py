@@ -309,9 +309,12 @@ def test_raypool_workers_can_import_ray_under_uv_run() -> None:
     Ray worker can complete an ``import ray`` + ``ray.__version__`` call.
 
     The marker is ``integration`` because the test launches a real Ray runtime,
-    not because GMAT is involved (it is not).
+    not because GMAT is involved (it is not). ``include_dashboard=False`` keeps
+    the Ray bootstrap minimal — the dashboard subsystem adds startup cost that
+    is meaningful on slower CI runners (notably macos-latest, where the default
+    bootstrap can exceed Ray's hardcoded 30 s GCS-registration timeout).
     """
-    pool = RayPool(num_cpus=1)
+    pool = RayPool(num_cpus=1, include_dashboard=False)
     try:
 
         def _worker_ray_version() -> str:
