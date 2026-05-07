@@ -179,6 +179,12 @@ Runnable example notebooks:
 - [Latin hypercube vs Monte Carlo](https://astro-tools.github.io/gmat-sweep/examples/05_latin_hypercube/) —
   64-run Latin hypercube alongside a 64-run plain Monte Carlo on the same perturbation,
   pair-plotting the unit-cube samples to make the stratification visible.
+- [Dask cluster recipe](https://astro-tools.github.io/gmat-sweep/examples/06_dask_cluster_recipe/) —
+  100-run `Sat.SMA` grid dispatched through a `distributed.LocalCluster` with `DaskPool`,
+  same flow as a real `dask.distributed` cluster.
+- [Ray autoscaling recipe](https://astro-tools.github.io/gmat-sweep/examples/07_ray_autoscaling_recipe/) —
+  100-run Monte Carlo dispatched through `RayPool` against a local `ray.init()`, same
+  task model as a real autoscaling Ray cluster.
 
 ## Roadmap
 

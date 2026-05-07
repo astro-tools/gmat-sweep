@@ -6,7 +6,8 @@ and re-executed in CI on every push, so the rendered docs always reflect
 the current code.
 
 You can run them locally after `pip install gmat-sweep[examples]` (the extra
-pulls in matplotlib).
+pulls in matplotlib, `distributed`, and `ray` so the cluster-backend
+notebooks run on a laptop too).
 
 - [Single-axis SMA scan](01_sma_scan.ipynb) — fifty runs across
   `np.linspace(7000, 8000, 50)` of `Sat.SMA`, parallel-dispatched through the
@@ -30,3 +31,10 @@ pulls in matplotlib).
   injection perturbation. Pair plot of the unit-cube samples to make the
   stratification visible, and a side-by-side miss-distance histogram for the
   variance-reduction case.
+- [Dask cluster recipe](06_dask_cluster_recipe.ipynb) — 100-run `Sat.SMA`
+  grid sweep dispatched through a `distributed.LocalCluster` with `DaskPool`.
+  Same client API, same dashboard, same submit/await flow as a real
+  `dask.distributed` cluster.
+- [Ray autoscaling recipe](07_ray_autoscaling_recipe.ipynb) — 100-run Monte
+  Carlo against the notebook 04 fixture, dispatched through `RayPool` against
+  a local `ray.init()`. Same task model as a real autoscaling Ray cluster.
