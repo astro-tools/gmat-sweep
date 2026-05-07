@@ -163,6 +163,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config -m 'not integration'"
 markers = [
   "integration: tests that require a working GMAT install (deselect with -m 'not integration')",
+  "slow: long-running integration tests (e.g. throughput regression); selected only by the dedicated CI cell via -m 'integration and slow'",
 ]
 
 [tool.coverage.run]
