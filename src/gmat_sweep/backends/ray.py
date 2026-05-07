@@ -1,14 +1,20 @@
 """RayPool: distributed execution backend using Ray.
 
 The pool fans :class:`gmat_sweep.spec.RunSpec` work across a Ray cluster.
-Ray reuses worker processes for successive tasks, so the
-:class:`gmat_sweep.backends.base.Pool` per-run fresh-interpreter contract is
-honoured by an explicit subprocess hop inside each task: the top-level
-:func:`_ray_run_one_impl` callable (registered as a Ray remote function once
-``ray`` is importable) delegates to
-:func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess`, which spawns
-``python -m gmat_sweep._run_subprocess`` for the actual GMAT load. The Ray
-worker process itself never imports ``gmatpy``.
+Ray reuses worker processes for successive tasks; the ``reuse_gmat_context``
+flag (see :class:`gmat_sweep.backends.base.Pool`) chooses how that reuse
+interacts with GMAT bootstrap:
+
+- ``reuse_gmat_context=True`` (default) — each task runs
+  :func:`gmat_sweep.worker.run_one` directly inside the Ray worker. The
+  first task per worker bootstraps ``gmatpy``; subsequent tasks reuse it.
+  The Ray worker process holds gmatpy state across tasks.
+- ``reuse_gmat_context=False`` — each task runs the top-level
+  :func:`_ray_run_one_impl` callable (registered as a Ray remote function
+  at construction time), which delegates to
+  :func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess` and spawns
+  ``python -m gmat_sweep._run_subprocess`` for the actual GMAT load. The
+  Ray worker process itself never imports ``gmatpy``.
 
 Lifecycle
 ---------
@@ -45,6 +51,7 @@ from gmat_sweep.backends._subprocess import run_spec_in_subprocess
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.errors import BackendError
 from gmat_sweep.spec import RunOutcome, RunSpec
+from gmat_sweep.worker import run_one
 
 if TYPE_CHECKING:
     import ray as _ray_typing  # noqa: F401
@@ -75,6 +82,14 @@ class RayPool(Pool):
     num_cpus:
         Forwarded to :func:`ray.init` for the local-runtime case. Ignored
         when connecting to an existing cluster via ``address``.
+    reuse_gmat_context:
+        ``True`` (default) lets Ray workers reuse a single ``gmatpy``
+        import across tasks — fast, but only safe when every spec
+        dispatched through this pool loads the same script. ``False``
+        binds the Ray remote to :func:`_ray_run_one_impl`, which spawns a
+        fresh Python interpreter per task and bootstraps ``gmatpy`` from
+        scratch — slower, but supports cross-script sweeps. See
+        :class:`gmat_sweep.backends.base.Pool` for the contract.
     **ray_init_kwargs:
         Extra keyword arguments forwarded verbatim to :func:`ray.init`.
     """
@@ -84,6 +99,7 @@ class RayPool(Pool):
         *,
         address: str | None = None,
         num_cpus: int | None = None,
+        reuse_gmat_context: bool = True,
         **ray_init_kwargs: Any,
     ) -> None:
         try:
@@ -93,6 +109,7 @@ class RayPool(Pool):
                 "RayPool requires the [ray] extra: pip install gmat-sweep[ray]"
             ) from exc
 
+        self._reuse_gmat_context = reuse_gmat_context
         self._owns_runtime = not _ray.is_initialized()
         if self._owns_runtime:
             init_kwargs: dict[str, Any] = dict(ray_init_kwargs)
@@ -103,7 +120,8 @@ class RayPool(Pool):
             _ray.init(**init_kwargs)
 
         self._ray = _ray
-        self._remote_run_one = _ray.remote(_ray_run_one_impl)
+        impl = run_one if reuse_gmat_context else _ray_run_one_impl
+        self._remote_run_one = _ray.remote(impl)
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
 

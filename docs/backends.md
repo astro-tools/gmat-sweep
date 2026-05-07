@@ -10,11 +10,22 @@ pools ship in the box:
 | [`DaskPool`][gmat_sweep.backends.DaskPool] | `pip install gmat-sweep[dask]` | Multi-host sweeps, or a sweep that fits on one machine but needs to plug into an existing `dask.distributed` cluster (Slurm, Kubernetes, or a long-lived dev scheduler). |
 | [`RayPool`][gmat_sweep.backends.RayPool] | `pip install gmat-sweep[ray]` | Multi-host sweeps on a Ray runtime — local, autoscaling, or remote via the Ray Client. |
 
-All three honour the same per-run subprocess-isolation contract: each
-`RunSpec` runs in a freshly-spawned Python interpreter, so the `gmatpy`
-bootstrap and GMAT's process-global singletons cannot leak between runs.
-Loky gives you that for free; Dask and Ray reuse worker processes by
-default, so gmat-sweep adds an explicit subprocess hop inside each task.
+All three accept the same `reuse_gmat_context` keyword controlling how the
+GMAT bootstrap cost is amortised across the runs in a sweep:
+
+- `reuse_gmat_context=True` (the default) — a worker process imports
+  `gmat_run` once and reuses the resulting state across many tasks. Bootstrap
+  cost is paid once per worker, then amortised. **Safe only when every task
+  dispatched through the pool loads the same script** — GMAT relies on
+  process-global singletons that cannot be reused across runs that load
+  different scripts.
+- `reuse_gmat_context=False` — every task spawns a fresh Python interpreter
+  that bootstraps `gmatpy` from scratch. Slower but supports arbitrary
+  heterogeneous scripts in a single sweep.
+
+The default is right for the common case (one mission, many parameter
+combinations). Pass `reuse_gmat_context=False` when you compose a single pool
+across calls that load different `.script` files.
 
 ## `LocalJoblibPool` — the default
 

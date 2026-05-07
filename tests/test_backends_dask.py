@@ -252,6 +252,58 @@ def test_dask_run_one_delegates_to_subprocess_helper(
     assert outcome.run_id == 42
 
 
+def test_default_dispatches_run_one_directly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default ``reuse_gmat_context=True`` submits ``run_one`` to the Dask client."""
+    calls: list[tuple[str, int]] = []
+
+    def _fake_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    def _fake_dask_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("_dask_run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    _patch_distributed_with_stubs(monkeypatch)
+    monkeypatch.setattr("gmat_sweep.backends.dask.run_one", _fake_run_one)
+    monkeypatch.setattr("gmat_sweep.backends.dask._dask_run_one", _fake_dask_run_one)
+
+    pool = DaskPool()
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    list(pool.as_completed([f]))
+    pool.close()
+
+    assert calls == [("run_one", 0)]
+
+
+def test_reuse_gmat_context_false_dispatches_subprocess_hop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``reuse_gmat_context=False`` submits ``_dask_run_one`` to the Dask client."""
+    calls: list[tuple[str, int]] = []
+
+    def _fake_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    def _fake_dask_run_one(spec: RunSpec) -> RunOutcome:
+        calls.append(("_dask_run_one", spec.run_id))
+        return _ok_outcome(spec.run_id)
+
+    _patch_distributed_with_stubs(monkeypatch)
+    monkeypatch.setattr("gmat_sweep.backends.dask.run_one", _fake_run_one)
+    monkeypatch.setattr("gmat_sweep.backends.dask._dask_run_one", _fake_dask_run_one)
+
+    pool = DaskPool(reuse_gmat_context=False)
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    list(pool.as_completed([f]))
+    pool.close()
+
+    assert calls == [("_dask_run_one", 0)]
+
+
 def test_importing_dask_module_does_not_import_gmatpy() -> None:
     """Loading gmat_sweep.backends.dask in a fresh interpreter must not import gmatpy.
 

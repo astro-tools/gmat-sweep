@@ -20,6 +20,7 @@ ray = pytest.importorskip("ray")
 
 
 from gmat_sweep.backends.ray import RayPool, _ray_run_one_impl  # noqa: E402
+from gmat_sweep.worker import run_one  # noqa: E402
 
 
 def _make_spec(*, output_dir: Path, run_id: int = 0) -> RunSpec:
@@ -256,6 +257,27 @@ def test_as_completed_rejects_unknown_future(
     list(pool.as_completed([f]))
     with pytest.raises(BackendError):
         list(pool.as_completed([f]))
+    pool.close()
+
+
+def test_default_binds_run_one_as_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default ``reuse_gmat_context=True`` binds ``run_one`` as the Ray remote impl."""
+    _patch_ray_with_stubs(monkeypatch, is_initialized=False)
+    pool = RayPool()
+    # `_Remote` (the ray.remote stub) captures the impl in `_fn`; the stub's
+    # behaviour mirrors `ray.remote(fn).remote(...) -> ObjectRef(fn(...))`,
+    # so checking `_fn` is the right way to verify the binding.
+    assert pool._remote_run_one._fn is run_one
+    pool.close()
+
+
+def test_reuse_gmat_context_false_binds_subprocess_impl_as_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``reuse_gmat_context=False`` binds ``_ray_run_one_impl`` (subprocess hop) as the remote."""
+    _patch_ray_with_stubs(monkeypatch, is_initialized=False)
+    pool = RayPool(reuse_gmat_context=False)
+    assert pool._remote_run_one._fn is _ray_run_one_impl
     pool.close()
 
 

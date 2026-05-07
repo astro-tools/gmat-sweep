@@ -1,13 +1,19 @@
 """DaskPool: distributed execution backend using ``dask.distributed``.
 
 The pool fans :class:`gmat_sweep.spec.RunSpec` work across a Dask cluster.
-Dask reuses worker processes for successive tasks, so the
-:class:`gmat_sweep.backends.base.Pool` per-run fresh-interpreter contract is
-honoured by an explicit subprocess hop inside each task: the top-level
-:func:`_dask_run_one` callable delegates to
-:func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess`, which spawns
-``python -m gmat_sweep._run_subprocess`` for the actual GMAT load. The Dask
-worker process itself never imports ``gmatpy``.
+Dask reuses worker processes for successive tasks; the
+``reuse_gmat_context`` flag (see :class:`gmat_sweep.backends.base.Pool`)
+chooses how that reuse interacts with GMAT bootstrap:
+
+- ``reuse_gmat_context=True`` (default) — each task runs
+  :func:`gmat_sweep.worker.run_one` directly inside the Dask worker. The
+  first task per worker bootstraps ``gmatpy``; subsequent tasks reuse it.
+  The Dask worker process holds gmatpy state across tasks.
+- ``reuse_gmat_context=False`` — each task runs the top-level
+  :func:`_dask_run_one` callable, which delegates to
+  :func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess` and spawns
+  ``python -m gmat_sweep._run_subprocess`` for the actual GMAT load. The
+  Dask worker process itself never imports ``gmatpy``.
 
 Lifecycle
 ---------
@@ -38,6 +44,7 @@ from gmat_sweep.backends._subprocess import run_spec_in_subprocess
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.errors import BackendError
 from gmat_sweep.spec import RunOutcome, RunSpec
+from gmat_sweep.worker import run_one
 
 if TYPE_CHECKING:
     import distributed
@@ -72,6 +79,14 @@ class DaskPool(Pool):
         Threads per worker for the auto-spawned :class:`distributed.LocalCluster`.
         Ignored when ``client`` is supplied. Defaults to ``1`` so each worker
         is a single-threaded subprocess shell.
+    reuse_gmat_context:
+        ``True`` (default) lets Dask workers reuse a single ``gmatpy`` import
+        across tasks — fast, but only safe when every spec dispatched
+        through this pool loads the same script. ``False`` runs each task
+        through :func:`_dask_run_one`, which spawns a fresh Python
+        interpreter per task and bootstraps ``gmatpy`` from scratch — slower,
+        but supports cross-script sweeps. See
+        :class:`gmat_sweep.backends.base.Pool` for the contract.
     """
 
     def __init__(
@@ -80,6 +95,7 @@ class DaskPool(Pool):
         client: distributed.Client | None = None,
         n_workers: int | None = None,
         threads_per_worker: int = 1,
+        reuse_gmat_context: bool = True,
     ) -> None:
         try:
             import distributed as _distributed
@@ -88,6 +104,7 @@ class DaskPool(Pool):
                 "DaskPool requires the [dask] extra: pip install gmat-sweep[dask]"
             ) from exc
 
+        self._reuse_gmat_context = reuse_gmat_context
         self._owns_client = False
         self._owns_cluster = False
         self._cluster: Any = None
@@ -122,6 +139,7 @@ class DaskPool(Pool):
         wanted = list(futures)
         future_by_run_id: dict[int, Future[RunOutcome]] = {}
         dask_futures: list[Any] = []
+        task_fn = run_one if self._reuse_gmat_context else _dask_run_one
         for f in wanted:
             spec = self._pending.pop(f, None)
             if spec is None:
@@ -129,7 +147,7 @@ class DaskPool(Pool):
                     "Future was not submitted to this pool, or has already been drained"
                 )
             future_by_run_id[spec.run_id] = f
-            dask_futures.append(self._client.submit(_dask_run_one, spec, pure=False))
+            dask_futures.append(self._client.submit(task_fn, spec, pure=False))
 
         for dask_future in self._distributed.as_completed(dask_futures):
             outcome: RunOutcome = dask_future.result()
