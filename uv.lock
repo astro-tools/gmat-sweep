@@ -1259,7 +1259,9 @@ dask = [
     { name = "distributed" },
 ]
 examples = [
+    { name = "distributed" },
     { name = "matplotlib" },
+    { name = "ray", extra = ["default"] },
 ]
 plot = [
     { name = "matplotlib" },
@@ -1288,6 +1290,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "distributed", marker = "extra == 'dask'", specifier = ">=2024.1" },
+    { name = "distributed", marker = "extra == 'examples'", specifier = ">=2024.1" },
     { name = "gmat-run", specifier = ">=0.3" },
     { name = "joblib", specifier = ">=1.4" },
     { name = "matplotlib", marker = "extra == 'examples'", specifier = ">=3.8" },
@@ -1295,6 +1298,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pyarrow", specifier = ">=14" },
+    { name = "ray", extras = ["default"], marker = "extra == 'examples'", specifier = ">=2.10" },
     { name = "ray", extras = ["default"], marker = "extra == 'ray'", specifier = ">=2.10" },
     { name = "scipy", specifier = ">=1.11" },
     { name = "tqdm", specifier = ">=4.66" },

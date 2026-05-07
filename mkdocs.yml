@@ -56,6 +56,8 @@ nav:
       - Surviving a kill: examples/03_killed_sweep_recovery.ipynb
       - Monte Carlo dispersion: examples/04_monte_carlo_dispersion.ipynb
       - Latin hypercube vs Monte Carlo: examples/05_latin_hypercube.ipynb
+      - Dask cluster recipe: examples/06_dask_cluster_recipe.ipynb
+      - Ray autoscaling recipe: examples/07_ray_autoscaling_recipe.ipynb
   - FAQ: faq.md
   - API reference: api.md
 

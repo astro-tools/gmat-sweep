@@ -97,6 +97,8 @@ jobs:
           uv run jupyter execute 03_killed_sweep_recovery.ipynb
           uv run jupyter execute 04_monte_carlo_dispersion.ipynb
           uv run jupyter execute 05_latin_hypercube.ipynb
+          uv run jupyter execute 06_dask_cluster_recipe.ipynb
+          uv run jupyter execute 07_ray_autoscaling_recipe.ipynb
 
   lint:
     name: lint
