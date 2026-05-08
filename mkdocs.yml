@@ -37,11 +37,6 @@ nav:
   - Getting started: getting-started.md
   - Parameter spec: parameter-spec.md
   - Backends: backends.md
-  - Recipes:
-      - recipes/index.md
-      - Slurm with srun: recipes/slurm.md
-      - Kubernetes pod-per-worker: recipes/kubernetes.md
-      - Ray autoscaling: recipes/ray-autoscaling.md
   - Monte Carlo: monte-carlo.md
   - Aggregation: aggregation.md
   - Resume: resume.md
@@ -58,6 +53,11 @@ nav:
       - Latin hypercube vs Monte Carlo: examples/05_latin_hypercube.ipynb
       - Dask cluster recipe: examples/06_dask_cluster_recipe.ipynb
       - Ray autoscaling recipe: examples/07_ray_autoscaling_recipe.ipynb
+  - Recipes:
+      - recipes/index.md
+      - Slurm with srun: recipes/slurm.md
+      - Kubernetes pod-per-worker: recipes/kubernetes.md
+      - Ray autoscaling: recipes/ray-autoscaling.md
   - FAQ: faq.md
   - API reference: api.md
 
