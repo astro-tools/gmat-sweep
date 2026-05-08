@@ -5,9 +5,10 @@ Worked examples for wiring `gmat-sweep` into shared cluster infrastructure
 with the matching `sweep()` driver.
 
 The recipes document patterns; they don't introduce new APIs. The
-underlying [`DaskPool`][gmat_sweep.backends.DaskPool] and
-[`RayPool`][gmat_sweep.backends.RayPool] surface — and the
-[`Pool`][gmat_sweep.backends.Pool] ABC — are covered on the
+underlying [`DaskPool`][gmat_sweep.backends.DaskPool],
+[`RayPool`][gmat_sweep.backends.RayPool], and
+[`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] surfaces —
+and the [`Pool`][gmat_sweep.backends.Pool] ABC — are covered on the
 [Backends](../backends.md) page. Reach for a recipe when you've already
 decided on the orchestrator and need the wiring that makes a sweep run
 on it.
@@ -17,7 +18,8 @@ on it.
 | Recipe | Pool | When to pick it |
 |---|---|---|
 | [Slurm with `srun`](slurm.md) | [`DaskPool`][gmat_sweep.backends.DaskPool] via `dask-jobqueue` | An HPC site with a Slurm scheduler; you submit one driver job and let `SLURMCluster` request worker tasks elastically. |
-| [Kubernetes pod-per-worker](kubernetes.md) | [`DaskPool`][gmat_sweep.backends.DaskPool] via `dask-kubernetes` | A Kubernetes cluster (managed or self-hosted) where each worker is a Pod. Best paired with the Dask Operator. |
+| [Kubernetes pod-per-worker](kubernetes.md) | [`DaskPool`][gmat_sweep.backends.DaskPool] via `dask-kubernetes` | Kubernetes through a Dask scheduler — workers are Pods, the cluster is managed by the Dask Operator. Pick when other code in your stack already wants a Dask client. |
+| [Kubernetes Job-per-run](kubernetes-jobpool.md) | [`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] | Kubernetes without Dask — every run is one `batch/v1` Job, scheduled directly. Pick when you want native cluster scheduling and one less middleware layer. |
 | [Ray autoscaling](ray-autoscaling.md) | [`RayPool`][gmat_sweep.backends.RayPool] via `ray up` | A Ray cluster — local, on-prem, or cloud — with autoscaling between a head node and an elastic worker pool. |
 
 Each recipe assumes you've followed [Getting started](../getting-started.md)

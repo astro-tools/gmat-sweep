@@ -1,12 +1,15 @@
 """Backend equivalence validation suite — issue #62.
 
-Asserts the ``Pool`` abstraction is honest: the three execution backends
-shipped today (:class:`~gmat_sweep.LocalJoblibPool`,
-:class:`~gmat_sweep.backends.DaskPool`, :class:`~gmat_sweep.backends.RayPool`)
-must produce bit-equal aggregated DataFrames and bit-equal
-reproducibility-bearing manifest fields for every reference sweep. The only
-manifest field allowed to differ across backends is the ``backend`` header
-itself.
+Asserts the ``Pool`` abstraction is honest: every execution backend
+(:class:`~gmat_sweep.LocalJoblibPool`,
+:class:`~gmat_sweep.backends.DaskPool`,
+:class:`~gmat_sweep.backends.RayPool`,
+:class:`~gmat_sweep.backends.KubernetesJobPool`) must produce bit-equal
+aggregated DataFrames and bit-equal reproducibility-bearing manifest
+fields for every reference sweep. The only manifest field allowed to
+differ across backends is the ``backend`` header itself. The k8s row is
+auto-skipped when ``GMAT_SWEEP_K8S_IMAGE`` is unset (i.e. outside the
+dedicated kind-CI cell).
 
 Reference sweeps
 ----------------
@@ -39,7 +42,7 @@ Determinism contract
 Two consecutive Monte Carlo sweeps at the same seed on the same backend
 must produce bit-equal DataFrames — this is the v0.2 contract pinned for
 ``LocalJoblibPool`` by :mod:`tests.test_monte_carlo_determinism`,
-restated here for every backend so a Dask or Ray regression that
+restated here for every distributed backend so a regression that
 introduced scheduling-dependent draws would fail this gate.
 
 The Dask and Ray paths additionally pin **cross-process** determinism: a
@@ -48,7 +51,9 @@ sweep must produce a bit-equal DataFrame. Both backends carry their own
 worker-startup machinery (Dask spawns a `LocalCluster` and `Client`; Ray
 auto-bootstraps a runtime via ``ray.init``), and either could in
 principle introduce process-affected RNG state — the cross-process gate
-is the catch.
+is the catch. KubernetesJobPool is intrinsically cross-process (every
+Pod is a fresh interpreter), so the basic equivalence row already covers
+the same property without a dedicated cross-process variant.
 
 Wall-clock budget
 -----------------
@@ -80,13 +85,22 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 pytest.importorskip("gmat_run")
 pytest.importorskip("distributed")
 pytest.importorskip("ray")
+pytest.importorskip("kubernetes")
 
 # Import after the importorskip guards so a minimal install still collects
 # the module cleanly with the expected skips.
+import os  # noqa: E402
+
 from tests.data.benchmark_sweep import BACKENDS, Backend, build_pool  # noqa: E402
 
 REFERENCE_BACKEND: Backend = "local"
 CANDIDATE_BACKENDS: tuple[Backend, ...] = tuple(b for b in BACKENDS if b != REFERENCE_BACKEND)
+
+
+def _skip_if_k8s_unconfigured(backend_name: str) -> None:
+    if backend_name == "k8s" and not os.environ.get("GMAT_SWEEP_K8S_IMAGE"):
+        pytest.skip("k8s backend requires GMAT_SWEEP_K8S_IMAGE / _PVC env vars")
+
 
 _DATA_DIR = Path(__file__).parent / "data"
 _LEO_SCRIPT = _DATA_DIR / "leo_basic.script"
@@ -262,6 +276,7 @@ def reference_latin_hypercube(tmp_path_factory: pytest.TempPathFactory) -> _Swee
 def test_grid_sweep_matches_reference_backend(
     backend_name: Backend, reference_grid: _SweepResult, tmp_path: Path
 ) -> None:
+    _skip_if_k8s_unconfigured(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_grid(pool, tmp_path / backend_name)
@@ -274,6 +289,7 @@ def test_grid_sweep_matches_reference_backend(
 def test_monte_carlo_sweep_matches_reference_backend(
     backend_name: Backend, reference_monte_carlo: _SweepResult, tmp_path: Path
 ) -> None:
+    _skip_if_k8s_unconfigured(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_monte_carlo(pool, tmp_path / backend_name)
@@ -286,6 +302,7 @@ def test_monte_carlo_sweep_matches_reference_backend(
 def test_latin_hypercube_sweep_matches_reference_backend(
     backend_name: Backend, reference_latin_hypercube: _SweepResult, tmp_path: Path
 ) -> None:
+    _skip_if_k8s_unconfigured(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_latin_hypercube(pool, tmp_path / backend_name)
@@ -302,8 +319,9 @@ def test_monte_carlo_same_backend_repeatable(backend_name: Backend, tmp_path: Pa
     """Two MC sweeps at the same seed on the same backend → bit-equal DataFrames.
 
     Restates the v0.2 ``LocalJoblibPool`` determinism contract pinned by
-    :mod:`tests.test_monte_carlo_determinism` for the Dask and Ray paths.
+    :mod:`tests.test_monte_carlo_determinism` for every distributed backend.
     """
+    _skip_if_k8s_unconfigured(backend_name)
     pool_a = build_pool(backend_name, workers=_WORKERS)
     try:
         result_a = _run_monte_carlo(pool_a, tmp_path / "a")

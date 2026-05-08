@@ -9,6 +9,7 @@ pools ship in the box:
 | [`LocalJoblibPool`][gmat_sweep.LocalJoblibPool] | core (no extras) | Default. One machine, one Python, joblib's loky workers spawn one fresh interpreter per task. The right choice for nearly every laptop or single-box server sweep. |
 | [`DaskPool`][gmat_sweep.backends.DaskPool] | `pip install gmat-sweep[dask]` | Multi-host sweeps, or a sweep that fits on one machine but needs to plug into an existing `dask.distributed` cluster (Slurm, Kubernetes, or a long-lived dev scheduler). |
 | [`RayPool`][gmat_sweep.backends.RayPool] | `pip install gmat-sweep[ray]` | Multi-host sweeps on a Ray runtime — local, autoscaling, or remote via the Ray Client. |
+| [`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] | `pip install gmat-sweep[k8s]` | Native Kubernetes — every run becomes one `Job`, every Pod is a fresh interpreter. Pick this when you want the cluster to schedule work directly without a Dask or Ray middleware layer. |
 
 All three accept the same `reuse_gmat_context` keyword controlling how the
 GMAT bootstrap cost is amortised across the runs in a sweep:
@@ -106,6 +107,36 @@ with RayPool(address="ray://head:10001") as pool:
 `RayPool` only calls `ray.shutdown()` on `close()` if its own `__init__`
 was what initialised the runtime. If you called `ray.init()` yourself
 before constructing the pool, the pool leaves your runtime alone.
+
+## `KubernetesJobPool` — native Kubernetes Jobs
+
+```python
+from gmat_sweep import sweep
+from gmat_sweep.backends import KubernetesJobPool
+
+with KubernetesJobPool(
+    image="ghcr.io/your-org/gmat-sweep:<your-tag>",
+    pvc_name="gmat-sweep-shared",
+    parallelism=32,
+) as pool:
+    df = sweep(
+        "/sweep/missions/mission.script",
+        grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
+        backend=pool,
+        out="/sweep/sweeps/sma-scan",
+    )
+```
+
+Each run becomes one `batch/v1` Job. Pods read the spec and write the
+outcome through a shared `PersistentVolumeClaim` mounted at the same
+path on the driver and the workers. `parallelism=` caps the in-flight
+Job count so a 10000-run sweep doesn't stampede the API server. Per-run
+resource overrides are supported via the `resources=` kwarg in either
+mapping or callable form.
+
+See the [`KubernetesJobPool` recipe](recipes/kubernetes-jobpool.md) for
+the full setup: image build, PVC layout, in-cluster vs.
+out-of-cluster auth, and the `resources=` knob.
 
 ## Failed runs
 

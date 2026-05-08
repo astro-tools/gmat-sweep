@@ -1,5 +1,17 @@
 # Kubernetes pod-per-worker
 
+!!! note "Two Kubernetes paths"
+    There are two ways to run a sweep on Kubernetes. **This page** uses
+    [`DaskPool`][gmat_sweep.backends.DaskPool] over `dask-kubernetes` —
+    a Dask scheduler manages a fixed (or autoscaling) pool of worker
+    Pods. The companion page
+    [Kubernetes Job-per-run](kubernetes-jobpool.md) uses
+    [`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] —
+    every run becomes one `batch/v1` Job, no Dask layer. Pick the
+    Dask path when your stack already wants a Dask client; pick the
+    Job path when you want native cluster scheduling and one less
+    middleware layer.
+
 Wire [`DaskPool`][gmat_sweep.backends.DaskPool] into a Kubernetes
 cluster via [`dask-kubernetes`](https://kubernetes.dask.org/). Each
 Dask worker becomes one Pod, the sweep dispatches across them, and Pod

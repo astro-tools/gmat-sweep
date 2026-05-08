@@ -182,7 +182,9 @@ class KubernetesJobPool(Pool):
                 "in_cluster=True conflicts with an explicit kubeconfig path; choose one"
             )
         if parallelism is not None and parallelism < 1:
-            raise BackendError(f"parallelism must be a positive integer or None, got {parallelism!r}")
+            raise BackendError(
+                f"parallelism must be a positive integer or None, got {parallelism!r}"
+            )
         if not image:
             raise BackendError("image is required")
         if not pvc_name:
@@ -211,9 +213,7 @@ class KubernetesJobPool(Pool):
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
 
-    def _load_kube_config(
-        self, *, in_cluster: bool | None, kubeconfig: str | Path | None
-    ) -> None:
+    def _load_kube_config(self, *, in_cluster: bool | None, kubeconfig: str | Path | None) -> None:
         config = self._kubernetes.config
 
         if in_cluster is True:
@@ -223,14 +223,17 @@ class KubernetesJobPool(Pool):
             config.load_kube_config(config_file=str(kubeconfig) if kubeconfig else None)
             return
 
-        # auto-detect: prefer in-cluster when the SA token file is present
-        if Path(_INCLUSTER_TOKEN_PATH).exists():
+        if self._in_cluster_token_present():
             try:
                 config.load_incluster_config()
                 return
             except config.ConfigException:
                 pass
         config.load_kube_config(config_file=str(kubeconfig) if kubeconfig else None)
+
+    @staticmethod
+    def _in_cluster_token_present() -> bool:
+        return Path(_INCLUSTER_TOKEN_PATH).exists()
 
     def submit(self, spec: RunSpec) -> Future[RunOutcome]:
         if self._closed:
@@ -400,14 +403,13 @@ class KubernetesJobPool(Pool):
         return client.V1ResourceRequirements(requests=requests, limits=limits)
 
     def _resolve_resources(self, spec: RunSpec) -> Mapping[str, Any] | None:
+        resolved: Mapping[str, Any] | None = None
         if callable(self._resources):
-            value = self._resources(spec)
-            if value is not None:
-                return value
+            resolved = self._resources(spec)
         elif isinstance(self._resources, Mapping):
-            value = self._resources.get(spec.run_id)
-            if value is not None:
-                return value
+            resolved = self._resources.get(spec.run_id)
+        if resolved is not None:
+            return resolved
         return self._default_resources
 
     def _iter_completions(self, label_selector: str) -> Iterator[str]:
@@ -439,15 +441,11 @@ class KubernetesJobPool(Pool):
                     watch.stop()
             # Natural end of stream is a server-side timeout — reconnect.
 
-    def _read_outcome(
-        self, spec: RunSpec, job_name: str, *, started_at: datetime
-    ) -> RunOutcome:
+    def _read_outcome(self, spec: RunSpec, job_name: str, *, started_at: datetime) -> RunOutcome:
         outcome_path = self._driver_mount_path / _OUTCOME_SUBDIR / f"{spec.run_id}.json"
         if outcome_path.exists():
             try:
-                return RunOutcome.from_dict(
-                    json.loads(outcome_path.read_text(encoding="utf-8"))
-                )
+                return RunOutcome.from_dict(json.loads(outcome_path.read_text(encoding="utf-8")))
             except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 ended_at = datetime.now(timezone.utc)
                 return RunOutcome.failed(
@@ -484,10 +482,7 @@ class KubernetesJobPool(Pool):
             if not items:
                 return "(no Pod found for Job)"
             pod_name = items[0].metadata.name
-            return self._core_api.read_namespaced_pod_log(
-                name=pod_name, namespace=self._namespace
-            )
+            log = self._core_api.read_namespaced_pod_log(name=pod_name, namespace=self._namespace)
+            return str(log)
         except client.exceptions.ApiException as exc:
             return f"(could not fetch Pod logs: {exc})"
-
-

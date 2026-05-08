@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
+from typing import cast
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +31,9 @@ kubernetes = pytest.importorskip("kubernetes")
 from gmat_sweep.backends.kubernetes import KubernetesJobPool  # noqa: E402
 
 
-def _make_spec(*, output_dir: Path, run_id: int = 0, overrides: dict | None = None) -> RunSpec:
+def _make_spec(
+    *, output_dir: Path, run_id: int = 0, overrides: dict[str, Any] | None = None
+) -> RunSpec:
     return RunSpec(
         script_path=Path("/sweep/missions/m.script"),
         overrides=dict(overrides or {}),
@@ -113,44 +116,38 @@ def _make_pool(*, tmp_path: Path, **kwargs: Any) -> KubernetesJobPool:
 
 def _drive_completions(
     monkeypatch: pytest.MonkeyPatch,
-    pool: KubernetesJobPool,
+    batch: _BatchStub,
     completion_order: Iterable[int],
 ) -> None:
-    """Replace ``_iter_completions`` with a deterministic generator.
+    """Replace ``_iter_completions`` to yield Job names in completion_order.
 
-    Yields the configured run_ids' Job names in order, then ends the
-    iterator (the caller's ``while in_flight: next(..., None)`` handles
-    the natural-end case via the ``None`` sentinel branch).
+    Reads the names from ``batch.created`` (recorded when the pool calls
+    ``create_namespaced_job``) so each yield happens against the live
+    submission record without inspecting interpreter frames.
     """
 
+    order = list(completion_order)
+
     def _fake(self: KubernetesJobPool, _label_selector: str) -> Iterator[str]:
-        for rid in completion_order:
-            # Job name format must match KubernetesJobPool._job_name —
-            # but the in_flight dict is keyed on whatever we recorded at
-            # submit time, so we read it back from there.
-            for name, (spec, _started) in list(_running_in_flight(self).items()):
-                if spec.run_id == rid:
-                    yield name
-                    break
+        completed: set[str] = set()
+        for rid in order:
+            target = _find_job_name(batch, rid, exclude=completed)
+            if target is None:
+                return
+            completed.add(target)
+            yield target
 
     monkeypatch.setattr(KubernetesJobPool, "_iter_completions", _fake, raising=True)
 
 
-def _running_in_flight(_pool: KubernetesJobPool) -> dict:
-    """Walk the calling frame to find the local ``in_flight`` dict.
-
-    The pool's ``as_completed`` keeps in_flight as a local; reaching it
-    from a monkeypatched ``_iter_completions`` requires walking up the
-    call stack one frame.
-    """
-    import inspect
-
-    frame = inspect.currentframe()
-    while frame is not None:
-        if frame.f_code.co_name == "as_completed":
-            return frame.f_locals.get("in_flight", {})
-        frame = frame.f_back
-    return {}
+def _find_job_name(batch: _BatchStub, run_id: int, *, exclude: set[str]) -> str | None:
+    for _ns, body in batch.created:
+        name: str = body.metadata.name
+        if name in exclude:
+            continue
+        if body.metadata.labels.get("gmat-sweep/run-id") == str(run_id):
+            return name
+    return None
 
 
 def _write_outcome(driver_mount_path: Path, run_id: int) -> None:
@@ -212,18 +209,14 @@ def test_init_rejects_empty_pvc_name(patch_kube: _BatchStub, tmp_path: Path) -> 
         _make_pool(tmp_path=tmp_path, pvc_name="")
 
 
-def test_init_rejects_zero_or_negative_parallelism(
-    patch_kube: _BatchStub, tmp_path: Path
-) -> None:
+def test_init_rejects_zero_or_negative_parallelism(patch_kube: _BatchStub, tmp_path: Path) -> None:
     with pytest.raises(BackendError, match="parallelism"):
         _make_pool(tmp_path=tmp_path, parallelism=0)
     with pytest.raises(BackendError, match="parallelism"):
         _make_pool(tmp_path=tmp_path, parallelism=-2)
 
 
-def test_init_rejects_in_cluster_with_kubeconfig(
-    patch_kube: _BatchStub, tmp_path: Path
-) -> None:
+def test_init_rejects_in_cluster_with_kubeconfig(patch_kube: _BatchStub, tmp_path: Path) -> None:
     with pytest.raises(BackendError, match="conflicts"):
         _make_pool(tmp_path=tmp_path, in_cluster=True, kubeconfig="/etc/kube.cfg")
 
@@ -237,9 +230,7 @@ def test_in_cluster_true_calls_load_incluster_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(
-        kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube")
-    )
+    monkeypatch.setattr(kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube"))
     monkeypatch.setattr(
         kubernetes.config, "load_incluster_config", lambda: calls.append("incluster")
     )
@@ -273,15 +264,13 @@ def test_auto_detect_prefers_in_cluster_when_token_file_exists(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(
-        kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube")
-    )
+    monkeypatch.setattr(kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube"))
     monkeypatch.setattr(
         kubernetes.config, "load_incluster_config", lambda: calls.append("incluster")
     )
     monkeypatch.setattr(kubernetes.client, "BatchV1Api", lambda: _BatchStub())
     monkeypatch.setattr(kubernetes.client, "CoreV1Api", lambda: _CoreStub())
-    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(KubernetesJobPool, "_in_cluster_token_present", staticmethod(lambda: True))
 
     _make_pool(tmp_path=tmp_path, in_cluster=None)
     assert calls == ["incluster"]
@@ -291,15 +280,13 @@ def test_auto_detect_falls_back_to_kube_config_when_no_token_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(
-        kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube")
-    )
+    monkeypatch.setattr(kubernetes.config, "load_kube_config", lambda **_kw: calls.append("kube"))
     monkeypatch.setattr(
         kubernetes.config, "load_incluster_config", lambda: calls.append("incluster")
     )
     monkeypatch.setattr(kubernetes.client, "BatchV1Api", lambda: _BatchStub())
     monkeypatch.setattr(kubernetes.client, "CoreV1Api", lambda: _CoreStub())
-    monkeypatch.setattr(Path, "exists", lambda self: False)
+    monkeypatch.setattr(KubernetesJobPool, "_in_cluster_token_present", staticmethod(lambda: False))
 
     _make_pool(tmp_path=tmp_path, in_cluster=None)
     assert calls == ["kube"]
@@ -360,7 +347,7 @@ def test_job_spec_carries_required_fields(
     f = pool.submit(spec)
 
     _write_outcome(tmp_path, run_id=42)
-    _drive_completions(monkeypatch, pool, [42])
+    _drive_completions(monkeypatch, patch_kube, [42])
     list(pool.as_completed([f]))
 
     assert len(patch_kube.created) == 1
@@ -399,7 +386,7 @@ def test_spec_json_written_to_driver_mount_path(
     spec = _make_spec(output_dir=tmp_path / "run_7", run_id=7, overrides={"Sat.SMA": 7000.0})
     f = pool.submit(spec)
     _write_outcome(tmp_path, run_id=7)
-    _drive_completions(monkeypatch, pool, [7])
+    _drive_completions(monkeypatch, patch_kube, [7])
     list(pool.as_completed([f]))
 
     spec_path = tmp_path / "_specs" / "7.json"
@@ -410,7 +397,7 @@ def test_spec_json_written_to_driver_mount_path(
 
 
 # ---------------------------------------------------------------------------
-# Resource resolution (Mapping | Callable | None) × default_resources
+# Resource resolution: Mapping vs Callable vs None, against default_resources
 # ---------------------------------------------------------------------------
 
 
@@ -421,7 +408,7 @@ def test_resources_none_emits_no_requirements(
     spec = _make_spec(output_dir=tmp_path / "run_0", run_id=0)
     f = pool.submit(spec)
     _write_outcome(tmp_path, run_id=0)
-    _drive_completions(monkeypatch, pool, [0])
+    _drive_completions(monkeypatch, patch_kube, [0])
     list(pool.as_completed([f]))
 
     container = patch_kube.created[0][1].spec.template.spec.containers[0]
@@ -438,7 +425,7 @@ def test_resources_default_only_applied_to_every_run(
     spec = _make_spec(output_dir=tmp_path / "run_0", run_id=0)
     f = pool.submit(spec)
     _write_outcome(tmp_path, run_id=0)
-    _drive_completions(monkeypatch, pool, [0])
+    _drive_completions(monkeypatch, patch_kube, [0])
     list(pool.as_completed([f]))
 
     container = patch_kube.created[0][1].spec.template.spec.containers[0]
@@ -458,7 +445,7 @@ def test_resources_mapping_overrides_default_per_run_id(
     f5 = pool.submit(_make_spec(output_dir=tmp_path / "run_5", run_id=5))
     _write_outcome(tmp_path, run_id=0)
     _write_outcome(tmp_path, run_id=5)
-    _drive_completions(monkeypatch, pool, [0, 5])
+    _drive_completions(monkeypatch, patch_kube, [0, 5])
     list(pool.as_completed([f0, f5]))
 
     by_run = {
@@ -482,7 +469,7 @@ def test_resources_callable_called_per_spec(
     fs = [pool.submit(_make_spec(output_dir=tmp_path / f"run_{i}", run_id=i)) for i in range(3)]
     for i in range(3):
         _write_outcome(tmp_path, run_id=i)
-    _drive_completions(monkeypatch, pool, [0, 1, 2])
+    _drive_completions(monkeypatch, patch_kube, [0, 1, 2])
     list(pool.as_completed(fs))
 
     assert sorted(seen) == [0, 1, 2]
@@ -508,7 +495,7 @@ def test_resources_requests_and_limits_split_when_caller_specifies(
     )
     f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
     _write_outcome(tmp_path, run_id=0)
-    _drive_completions(monkeypatch, pool, [0])
+    _drive_completions(monkeypatch, patch_kube, [0])
     list(pool.as_completed([f]))
 
     container = patch_kube.created[0][1].spec.template.spec.containers[0]
@@ -531,16 +518,18 @@ def test_parallelism_cap_limits_in_flight_jobs(
         _write_outcome(tmp_path, run_id=i)
 
     high_water_mark = 0
+    completed: set[str] = set()
 
     def _fake(self: KubernetesJobPool, _label_selector: str) -> Iterator[str]:
         nonlocal high_water_mark
         for rid in range(5):
-            in_flight = _running_in_flight(self)
-            high_water_mark = max(high_water_mark, len(in_flight))
-            for name, (s, _) in list(in_flight.items()):
-                if s.run_id == rid:
-                    yield name
-                    break
+            in_flight_now = len(patch_kube.created) - len(completed)
+            high_water_mark = max(high_water_mark, in_flight_now)
+            target = _find_job_name(patch_kube, rid, exclude=completed)
+            if target is None:
+                return
+            completed.add(target)
+            yield target
 
     monkeypatch.setattr(KubernetesJobPool, "_iter_completions", _fake, raising=True)
     list(pool.as_completed(fs))
@@ -559,15 +548,17 @@ def test_parallelism_none_submits_all_up_front(
         _write_outcome(tmp_path, run_id=i)
 
     seen_at_first_completion = 0
+    completed: set[str] = set()
 
     def _fake(self: KubernetesJobPool, _label_selector: str) -> Iterator[str]:
         nonlocal seen_at_first_completion
-        seen_at_first_completion = len(_running_in_flight(self))
+        seen_at_first_completion = len(patch_kube.created)
         for rid in range(4):
-            for name, (s, _) in list(_running_in_flight(self).items()):
-                if s.run_id == rid:
-                    yield name
-                    break
+            target = _find_job_name(patch_kube, rid, exclude=completed)
+            if target is None:
+                return
+            completed.add(target)
+            yield target
 
     monkeypatch.setattr(KubernetesJobPool, "_iter_completions", _fake, raising=True)
     list(pool.as_completed(fs))
@@ -581,7 +572,7 @@ def test_outcome_json_round_trips_back_to_runoutcome(
     pool = _make_pool(tmp_path=tmp_path)
     f = pool.submit(_make_spec(output_dir=tmp_path / "run_3", run_id=3))
     _write_outcome(tmp_path, run_id=3)
-    _drive_completions(monkeypatch, pool, [3])
+    _drive_completions(monkeypatch, patch_kube, [3])
     outcomes = list(pool.as_completed([f]))
 
     assert len(outcomes) == 1
@@ -599,13 +590,14 @@ def test_missing_outcome_json_folded_into_failed_with_pod_logs(
     f = pool.submit(_make_spec(output_dir=tmp_path / "run_9", run_id=9))
     # NB: no _write_outcome — simulates OOMKill / eviction before the
     # worker could write its outcome JSON.
-    _drive_completions(monkeypatch, pool, [9])
+    _drive_completions(monkeypatch, patch_kube, [9])
     outcomes = list(pool.as_completed([f]))
 
     assert len(outcomes) == 1
     assert outcomes[0].status == "failed"
-    assert "did not produce an outcome JSON" in outcomes[0].stderr
-    assert "fake pod logs" in outcomes[0].stderr
+    stderr = outcomes[0].stderr or ""
+    assert "did not produce an outcome JSON" in stderr
+    assert "fake pod logs" in stderr
 
 
 def test_unreadable_outcome_json_folded_into_failed(
@@ -616,25 +608,21 @@ def test_unreadable_outcome_json_folded_into_failed(
     out_dir = tmp_path / "_outcomes"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "2.json").write_text("not valid json {")
-    _drive_completions(monkeypatch, pool, [2])
+    _drive_completions(monkeypatch, patch_kube, [2])
     outcomes = list(pool.as_completed([f]))
 
     assert outcomes[0].status == "failed"
-    assert "unreadable outcome JSON" in outcomes[0].stderr
+    assert "unreadable outcome JSON" in (outcomes[0].stderr or "")
 
 
-def test_as_completed_rejects_unknown_future(
-    patch_kube: _BatchStub, tmp_path: Path
-) -> None:
+def test_as_completed_rejects_unknown_future(patch_kube: _BatchStub, tmp_path: Path) -> None:
     pool = _make_pool(tmp_path=tmp_path)
     bogus: Future[RunOutcome] = Future()
     with pytest.raises(BackendError):
         list(pool.as_completed([bogus]))
 
 
-def test_as_completed_with_no_specs_is_empty(
-    patch_kube: _BatchStub, tmp_path: Path
-) -> None:
+def test_as_completed_with_no_specs_is_empty(patch_kube: _BatchStub, tmp_path: Path) -> None:
     pool = _make_pool(tmp_path=tmp_path)
     assert list(pool.as_completed([])) == []
 
@@ -645,20 +633,26 @@ def test_as_completed_with_no_specs_is_empty(
 
 
 class _WatchStub:
-    """Simulate ``kubernetes.watch.Watch`` with a scripted event sequence."""
+    """Simulate ``kubernetes.watch.Watch`` with a scripted event sequence.
+
+    The call counter is **class-level** so it persists across reconnects —
+    each call to ``Watch()`` creates a fresh instance, so per-instance
+    counters would silently reset and a scripted ``call_n=1`` branch
+    would fire forever.
+    """
 
     instances: ClassVar[list[Any]] = []
+    call_n: ClassVar[int] = 0
 
     def __init__(self) -> None:
-        self.stream_calls = 0
         self.stopped = False
         type(self).instances.append(self)
 
     def stream(self, _fn: Any, **_kw: Any) -> Iterator[dict[str, Any]]:
-        self.stream_calls += 1
-        events = type(self)._events_for_call(self.stream_calls)
-        for ev in events:
-            yield ev
+        cls = type(self)
+        cls.call_n += 1
+        events = cls._events_for_call(cls.call_n)
+        yield from events
 
     def stop(self) -> None:
         self.stopped = True
@@ -684,7 +678,7 @@ def _make_completed_event(job_name: str, *, succeeded: int = 1, failed: int = 0)
 def test_iter_completions_yields_completed_job_names(
     patch_kube: _BatchStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Watch events with succeeded>=1 or failed>=1 yield the job name; pending events are skipped."""
+    """Completed-status events yield job name; pending events are skipped."""
     Job = kubernetes.client.V1Job
     Meta = kubernetes.client.V1ObjectMeta
     Status = kubernetes.client.V1JobStatus
@@ -701,15 +695,19 @@ def test_iter_completions_yields_completed_job_names(
         def _events_for_call(cls, call_n: int) -> list[dict[str, Any]]:
             if call_n == 1:
                 return events_first_call
-            return []
+            raise AssertionError(f"unexpected Watch reconnect (call_n={call_n})")
 
     _Stub.instances = []
+    _Stub.call_n = 0
     monkeypatch.setattr(kubernetes.watch, "Watch", _Stub)
 
     pool = _make_pool(tmp_path=tmp_path)
-    gen = pool._iter_completions("gmat-sweep/sweep-id=test")
-    assert next(gen) == "job-a"
-    assert next(gen) == "job-b"
+    gen = cast(Generator[str, None, None], pool._iter_completions("gmat-sweep/sweep-id=test"))
+    try:
+        assert next(gen) == "job-a"
+        assert next(gen) == "job-b"
+    finally:
+        gen.close()
 
 
 def test_iter_completions_reconnects_after_api_exception(
@@ -724,17 +722,21 @@ def test_iter_completions_reconnects_after_api_exception(
                 raise kubernetes.client.exceptions.ApiException("boom")
             if call_n == 2:
                 return [_make_completed_event("job-x")]
-            return []
+            raise AssertionError(f"unexpected Watch reconnect (call_n={call_n})")
 
     _Stub.instances = []
+    _Stub.call_n = 0
     monkeypatch.setattr(kubernetes.watch, "Watch", _Stub)
     monkeypatch.setattr("gmat_sweep.backends.kubernetes.time.sleep", lambda _s: None)
 
     pool = _make_pool(tmp_path=tmp_path)
-    gen = pool._iter_completions("gmat-sweep/sweep-id=test")
-    assert next(gen) == "job-x"
-    # Two Watch instances — proves a reconnect happened
-    assert len(_Stub.instances) >= 2
+    gen = cast(Generator[str, None, None], pool._iter_completions("gmat-sweep/sweep-id=test"))
+    try:
+        assert next(gen) == "job-x"
+        # Two Watch instances — proves a reconnect happened
+        assert len(_Stub.instances) >= 2
+    finally:
+        gen.close()
 
 
 # ---------------------------------------------------------------------------
