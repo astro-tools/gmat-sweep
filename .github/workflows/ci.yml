@@ -282,7 +282,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      GMAT_SWEEP_K8S_IMAGE: gmat-sweep-k8s-ci:local
+      GMAT_SWEEP_K8S_IMAGE: localhost:5000/gmat-sweep-k8s-ci:local
       GMAT_SWEEP_K8S_PVC: gmat-sweep-ci
       GMAT_SWEEP_K8S_MOUNT_PATH: /sweep
       GMAT_SWEEP_K8S_DRIVER_MOUNT_PATH: /sweep
@@ -301,15 +301,29 @@ jobs:
           cache: true
       - name: Prepare shared /sweep directory
         run: sudo mkdir -p /sweep && sudo chmod 777 /sweep
+      - name: Start local registry
+        run: |
+          docker run -d --restart=always \
+            -p "127.0.0.1:5000:5000" \
+            --name kind-registry \
+            registry:2
       - name: Provision kind cluster
         uses: helm/kind-action@v1
         with:
           cluster_name: gmat-sweep
           config: tests/k8s/kind-config.yaml
-      - name: Build sweep CI image
-        run: docker build -t gmat-sweep-k8s-ci:local -f tests/k8s/Dockerfile .
-      - name: Load image into kind
-        run: kind load docker-image gmat-sweep-k8s-ci:local --name gmat-sweep
+      - name: Connect registry to kind network
+        run: docker network connect kind kind-registry
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push sweep CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tests/k8s/Dockerfile
+          push: true
+          tags: localhost:5000/gmat-sweep-k8s-ci:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Apply PV + PVC
         run: kubectl apply -f tests/k8s/sweep-pvc.yaml
       - run: uv sync --all-groups --extra k8s
