@@ -46,8 +46,8 @@ __all__ = [
     "run_benchmark",
 ]
 
-Backend = Literal["local", "dask", "ray", "k8s", "mpi"]
-BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray", "k8s", "mpi")
+Backend = Literal["local", "dask", "ray", "k8s", "mpi", "process"]
+BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray", "k8s", "mpi", "process")
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "leo_basic.script"
 
@@ -117,6 +117,14 @@ def build_pool(backend: Backend, workers: int) -> Pool:
         from gmat_sweep.backends.mpi import MPIPool
 
         return MPIPool(max_workers=workers)
+    if backend == "process":
+        # ProcessPoolExecutorPool's module raises RuntimeError at import on
+        # Python < 3.11 — callers gate the "process" row at the test level
+        # (see _skip_if_python_lt_311 in test_backend_equivalence and the
+        # equivalent in test_backend_throughput). No probe needed here.
+        from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
+
+        return ProcessPoolExecutorPool(max_workers=workers)
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
 
 

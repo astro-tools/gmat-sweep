@@ -44,9 +44,18 @@ if TYPE_CHECKING:
     from gmat_sweep.backends.dask import DaskPool
     from gmat_sweep.backends.kubernetes import KubernetesJobPool
     from gmat_sweep.backends.mpi import MPIPool
+    from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
     from gmat_sweep.backends.ray import RayPool
 
-__all__ = ["DaskPool", "KubernetesJobPool", "LocalJoblibPool", "MPIPool", "Pool", "RayPool"]
+__all__ = [
+    "DaskPool",
+    "KubernetesJobPool",
+    "LocalJoblibPool",
+    "MPIPool",
+    "Pool",
+    "ProcessPoolExecutorPool",
+    "RayPool",
+]
 
 
 _OPTIONAL_BACKENDS = {
@@ -58,6 +67,14 @@ _OPTIONAL_BACKENDS = {
 
 
 def __getattr__(name: str) -> Any:
+    if name == "ProcessPoolExecutorPool":
+        # Stdlib only — no extra to probe. The module's own import-time
+        # version gate (RuntimeError on Python < 3.11, with a message
+        # pointing at LocalJoblibPool) is the user-facing failure path;
+        # let it propagate verbatim.
+        from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
+
+        return ProcessPoolExecutorPool
     entry = _OPTIONAL_BACKENDS.get(name)
     if entry is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

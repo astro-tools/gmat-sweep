@@ -7,6 +7,7 @@ pools ship in the box:
 | Pool | Install | When to pick it |
 |---|---|---|
 | [`LocalJoblibPool`][gmat_sweep.LocalJoblibPool] | core (no extras) | Default. One machine, one Python, joblib's loky workers spawn one fresh interpreter per task. The right choice for nearly every laptop or single-box server sweep. |
+| [`ProcessPoolExecutorPool`][gmat_sweep.backends.ProcessPoolExecutorPool] | core (no extras), Python 3.11+ | Stdlib alternative to `LocalJoblibPool`. Wraps `concurrent.futures.ProcessPoolExecutor` with `max_tasks_per_child=1`, so every task runs in a fresh interpreter by construction. Pick when avoiding the `joblib` runtime dependency matters. |
 | [`DaskPool`][gmat_sweep.backends.DaskPool] | `pip install gmat-sweep[dask]` | Multi-host sweeps, or a sweep that fits on one machine but needs to plug into an existing `dask.distributed` cluster (Slurm, Kubernetes, or a long-lived dev scheduler). |
 | [`RayPool`][gmat_sweep.backends.RayPool] | `pip install gmat-sweep[ray]` | Multi-host sweeps on a Ray runtime — local, autoscaling, or remote via the Ray Client. |
 | [`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] | `pip install gmat-sweep[k8s]` | Native Kubernetes — every run becomes one `Job`, every Pod is a fresh interpreter. Pick this when you want the cluster to schedule work directly without a Dask or Ray middleware layer. |
@@ -46,6 +47,33 @@ df = sweep(
 [Choosing a backend](parameter-spec.md#choosing-a-backend) on the parameter
 spec page for the full set of LocalJoblibPool patterns (capping
 parallelism, sharing one pool across several sweeps).
+
+## `ProcessPoolExecutorPool` — stdlib opt-in
+
+```python
+from gmat_sweep import sweep
+from gmat_sweep.backends import ProcessPoolExecutorPool
+
+with ProcessPoolExecutorPool(max_workers=4) as pool:
+    df = sweep(
+        "mission.script",
+        grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
+        backend=pool,
+        out="./sweep",
+    )
+```
+
+`ProcessPoolExecutorPool` requires Python 3.11+ — `max_tasks_per_child`
+landed in `concurrent.futures.ProcessPoolExecutor` in that release.
+Importing the pool on Python 3.10 raises `RuntimeError` immediately,
+pointing at `LocalJoblibPool` as the 3.10-compatible path.
+
+Each task runs in a fresh worker interpreter by construction
+(`max_tasks_per_child=1`), so gmatpy bootstraps once per task.
+That makes this the natural choice when avoiding the `joblib` runtime
+dependency matters; for a sweep where many runs share the same script,
+`LocalJoblibPool`'s reuse path amortises the bootstrap and finishes
+faster.
 
 ## `DaskPool` — `dask.distributed`
 
