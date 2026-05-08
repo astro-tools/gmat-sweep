@@ -50,6 +50,7 @@ dependencies = [
 [project.optional-dependencies]
 dask = ["distributed>=2024.1"]
 ray = ["ray[default]>=2.10"]
+k8s = ["kubernetes>=29,<33"]
 plot = ["matplotlib>=3.8"]
 examples = ["matplotlib>=3.8", "distributed>=2024.1", "ray[default]>=2.10"]
 
@@ -152,6 +153,13 @@ follow_imports = "skip"
 # above (ray also ships `py.typed`).
 [[tool.mypy.overrides]]
 module = ["ray", "ray.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# kubernetes is an optional [k8s]-extra dependency; same handling as
+# distributed and ray above (the kubernetes client also ships `py.typed`).
+[[tool.mypy.overrides]]
+module = ["kubernetes", "kubernetes.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 

@@ -2,11 +2,12 @@
 
 The package's ``__init__`` does two things worth pinning at unit level:
 
-1. A lazy ``__getattr__`` that imports :class:`DaskPool` and :class:`RayPool`
-   only when the user asks for them. With the matching extra installed, the
-   attribute access returns the class. Without it, the access raises
-   :class:`AttributeError` whose message names the extra so a missing-extras
-   error includes a copy-paste install command.
+1. A lazy ``__getattr__`` that imports :class:`DaskPool`, :class:`RayPool`,
+   and :class:`KubernetesJobPool` only when the user asks for them. With
+   the matching extra installed, the attribute access returns the class.
+   Without it, the access raises :class:`AttributeError` whose message
+   names the extra so a missing-extras error includes a copy-paste install
+   command.
 
 2. ``RAY_ENABLE_UV_RUN_RUNTIME_ENV=0`` is set via ``os.environ.setdefault`` at
    import time so a driver started under ``uv run`` does not silently rebuild
@@ -82,6 +83,29 @@ def test_ray_pool_attribute_returns_class_when_extra_installed() -> None:
     from gmat_sweep.backends.ray import RayPool as direct_cls
 
     assert backends_pkg.RayPool is direct_cls
+
+
+def test_kubernetes_job_pool_attribute_error_when_kubernetes_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``kubernetes`` cannot be imported, ``gmat_sweep.backends.KubernetesJobPool``
+    raises :class:`AttributeError` whose message names the ``[k8s]`` extra."""
+    monkeypatch.setitem(sys.modules, "kubernetes", None)
+    with pytest.raises(AttributeError) as ei:
+        backends_pkg.KubernetesJobPool  # noqa: B018 - intentional attribute access
+    msg = str(ei.value)
+    assert "KubernetesJobPool" in msg
+    assert "[k8s]" in msg
+    assert "pip install gmat-sweep[k8s]" in msg
+
+
+def test_kubernetes_job_pool_attribute_returns_class_when_extra_installed() -> None:
+    """The happy path: with ``kubernetes`` importable, the attribute access returns
+    the :class:`KubernetesJobPool` class itself."""
+    pytest.importorskip("kubernetes")
+    from gmat_sweep.backends.kubernetes import KubernetesJobPool as direct_cls
+
+    assert backends_pkg.KubernetesJobPool is direct_cls
 
 
 def test_ray_runtime_env_var_set_to_zero_when_unset_at_import(
