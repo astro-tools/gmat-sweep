@@ -138,6 +138,63 @@ def test_sweep_manifest_header_carries_script_hash_seed_and_spec(
     assert reloaded.gmat_sweep_version == gmat_sweep.__version__
 
 
+class _NamedSpecificPool(Pool):
+    """A no-IO Pool subclass with a distinct class name.
+
+    Used by the manifest-backend-field test to confirm
+    :meth:`Sweep._build_manifest` records ``pool.__class__.__name__`` rather
+    than e.g. a hard-coded ``"LocalJoblibPool"`` literal or the abstract
+    ``"Pool"``.
+    """
+
+    def submit(self, spec: RunSpec) -> Future[RunOutcome]:
+        future: Future[RunOutcome] = Future()
+        future.spec = spec  # type: ignore[attr-defined]
+        return future
+
+    def as_completed(self, futures: Iterable[Future[RunOutcome]]) -> Iterator[RunOutcome]:
+        now = datetime.now(timezone.utc)
+        for f in futures:
+            spec: RunSpec = f.spec  # type: ignore[attr-defined]
+            outcome = RunOutcome.ok(
+                run_id=spec.run_id,
+                output_paths={},
+                started_at=now,
+                ended_at=now,
+            )
+            f.set_result(outcome)
+            yield outcome
+
+    def close(self) -> None:
+        pass
+
+
+def test_sweep_manifest_records_pool_class_name_as_backend(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """:meth:`Sweep._build_manifest` records the pool's ``__class__.__name__``
+    as the manifest's ``backend`` field. The contract every cross-backend
+    consumer (the equivalence suite, the CLI's ``show`` output) relies on.
+    """
+    script = _write_script(tmp_path)
+    output_dir = tmp_path / "out"
+    runs = _make_runs(script, output_dir, n=2)
+
+    pool = _NamedSpecificPool()
+    Sweep(
+        runs=runs,
+        backend=pool,
+        manifest_path=output_dir / "manifest.jsonl",
+        output_dir=output_dir,
+        script_path=script,
+        parameter_spec={"Sat.SMA": [7000.0, 7001.0]},
+        progress=False,
+    ).run()
+
+    reloaded = Manifest.load(output_dir / "manifest.jsonl")
+    assert reloaded.backend == "_NamedSpecificPool"
+
+
 def test_sweep_manifest_parent_directory_is_created(
     tmp_path: Path, fake_gmat_run: FakeGmatRun
 ) -> None:

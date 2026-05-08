@@ -17,25 +17,36 @@ Python process. Two reasons stack:
    crash deep inside the engine.
 
 The [`Pool`][gmat_sweep.Pool] ABC enforces this at class-definition time
-via its `subprocess_isolated` class attribute. Any `Pool` subclass that
-tries to set it to anything other than `True` is rejected when its module
-is imported, before a sweep can start. Each worker subprocess imports
-`gmat_run` once on its first run and reuses that import for the rest of the
-runs that worker handles.
+via its `subprocess_isolated` class attribute: every `Pool` subclass must
+implement both bootstrap-amortisation modes correctly, and any subclass
+that tries to opt out is rejected when its module is imported, before a
+sweep can start.
 
-Backends that reuse worker processes honour the contract via
-`python -m gmat_sweep._run_subprocess` — an internal CLI module that
-runs one [`RunSpec`][gmat_sweep.RunSpec] in a freshly-spawned interpreter
-and emits the resulting [`RunOutcome`][gmat_sweep.RunOutcome] as JSON.
-Each task body in such a backend invokes the entrypoint via
-`subprocess.run`, so even when the surrounding worker process is
-long-lived, the GMAT run itself gets a fresh interpreter. The entrypoint
-is internal infrastructure; callers go through a `Pool`.
+The two modes are exposed via the `reuse_gmat_context` keyword on every
+pool constructor:
 
-The trade-off is the bootstrap cost amortising over batches — for a sweep
-of N runs with W workers, you pay roughly W bootstraps total, not 1 and not
-N. For a small sweep that's overhead worth knowing about; for a meaningfully
-large sweep it is a rounding error.
+- **`reuse_gmat_context=True` — the default.** A worker process imports
+  `gmat_run` once and reuses the loaded state across many tasks. Bootstrap
+  cost is paid once per worker, then amortised. Safe **only when every
+  task dispatched through the pool loads the same script** — GMAT relies
+  on process-global singletons that cannot be reused across runs that
+  load different scripts. This is the right choice for the common case
+  (one mission, many parameter combinations) and is what every notebook
+  and recipe in the docs assumes.
+- **`reuse_gmat_context=False` — the isolation path.** Every task spawns
+  a fresh Python interpreter that bootstraps `gmatpy` from scratch via
+  `python -m gmat_sweep._run_subprocess` (an internal CLI module that
+  runs one [`RunSpec`][gmat_sweep.RunSpec] and emits the resulting
+  [`RunOutcome`][gmat_sweep.RunOutcome] as JSON). Slower per task but
+  supports arbitrary heterogeneous scripts on a single pool. Reach for
+  it when you compose one Dask or Ray pool across calls that load
+  different `.script` files.
+
+The contract is uniform across `LocalJoblibPool`, `DaskPool`, and
+`RayPool`. Under the default, a sweep of N runs with W workers pays
+roughly W bootstraps total, not 1 and not N — for a small sweep that's
+overhead worth knowing about; for a meaningfully large sweep it is a
+rounding error.
 
 ## Why does `gmat-sweep` depend on `gmat-run`?
 

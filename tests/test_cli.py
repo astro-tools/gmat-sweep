@@ -306,6 +306,37 @@ def test_show_on_missing_file_exits_manifest_code(
     assert "not found" in capsys.readouterr().err
 
 
+def test_show_on_zero_entry_manifest_prints_zero_ok_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A freshly-saved manifest header with no entries appended yet is the
+    edge case ``_format_summary`` falls back on. The output must remain
+    parseable — callers that grep for ``"<N> runs"`` or pipe the line into
+    a downstream tool expect a stable shape regardless of bucket counts.
+    """
+    manifest = Manifest(
+        script_sha256="a" * 64,
+        gmat_sweep_version="0.3.0",
+        gmat_run_version="0.4.0",
+        gmat_install_version="R2026a",
+        python_version="3.12.3",
+        os_platform="Linux-6.6.0",
+        sweep_seed=None,
+        parameter_spec={"_kind": "grid", "Sat.SMA": [7000.0]},
+        run_count=1,
+        entries=[],
+    )
+    path = tmp_path / "manifest.jsonl"
+    manifest.save(path)
+
+    rc = cli.main(["show", str(path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "0 runs" in out
+    assert "0 ok" in out
+    assert str(tmp_path) in out
+
+
 # ---- show --detail / --run / --filter -----------------------------------
 
 
@@ -1520,3 +1551,50 @@ def test_resume_subcommand_accepts_backend_flag(
     )
     assert rc == 0
     assert fake.calls == [{"n_workers": 1}]
+
+
+def test_resume_subcommand_forwards_backend_arg_kwargs(
+    tmp_path: Path,
+    fake_gmat_run: FakeGmatRun,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resume`` routes through ``_build_pool`` like every other sweep-running
+    subcommand — ``--backend-arg KEY=VALUE`` must reach the pool constructor."""
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "DaskPool", fake)
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+
+    rc = cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:8000:2",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    assert rc == 0
+    fake.calls.clear()
+
+    rc = cli.main(
+        [
+            "resume",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(script),
+            "--workers",
+            "1",
+            "--backend",
+            "dask",
+            "--backend-arg",
+            "threads_per_worker=2",
+        ]
+    )
+    assert rc == 0
+    assert fake.calls == [{"n_workers": 1, "threads_per_worker": 2}]

@@ -367,7 +367,11 @@ core. Pass an explicit pool via `backend=` to:
 - **Use a different execution backend** — any [`Pool`][gmat_sweep.Pool]
   subclass works, including third-party ones. The pool's class name is
   recorded on the manifest header so a later loader can tell which
-  backend produced the sweep.
+  backend produced the sweep. For multi-host sweeps, [`DaskPool`][gmat_sweep.backends.DaskPool]
+  (`pip install gmat-sweep[dask]`) and [`RayPool`][gmat_sweep.backends.RayPool]
+  (`pip install gmat-sweep[ray]`) ship in the box; see [Backends](backends.md)
+  for the full set of pool patterns and the [cluster recipes](recipes/index.md)
+  for Slurm / Kubernetes / Ray autoscaling wiring.
 
 When you supply `backend=`, you own the pool's lifecycle —
 [`sweep()`][gmat_sweep.sweep] will not call

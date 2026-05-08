@@ -171,9 +171,11 @@ driver and try to install a matching env on every worker via
 `runtime_env`. For a cluster running a pre-baked GMAT image, that's
 unwanted — the image already has the right env, and the auto-bootstrap
 re-installs `gmat-sweep` on every worker every time the cluster scales.
-`RayPool` disables this hook automatically; if you construct your own
-`runtime_env`, set `env_vars={"RAY_RUNTIME_ENV_HOOK_DISABLE_UV_RUN": "1"}`
-to opt out.
+`RayPool` disables this hook automatically by setting
+`RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` at backend-package import time;
+if you bypass `RayPool` and call `ray.init` yourself, set the same
+env var (`os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = "0"` before
+`import ray`) to opt out.
 
 ## When this isn't enough
 

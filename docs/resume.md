@@ -129,6 +129,3 @@ are not rerun.
 - **Single-machine.** `script_path` and per-run `output_dir` are
   recorded as absolute paths in the manifest, so a manifest written on
   one machine cannot be resumed on another.
-- **Python-only entry point today.** A `gmat-sweep resume` CLI
-  subcommand is planned; the Python API above is the supported way in
-  the meantime.

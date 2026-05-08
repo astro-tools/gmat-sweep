@@ -42,11 +42,13 @@ must produce bit-equal DataFrames — this is the v0.2 contract pinned for
 restated here for every backend so a Dask or Ray regression that
 introduced scheduling-dependent draws would fail this gate.
 
-The Dask path additionally pins **cross-process** determinism: a fresh
-driver-process Python interpreter that re-runs the same Monte Carlo sweep
-must produce a bit-equal DataFrame. Ray's actor lifecycle makes the same
-fixture expensive to set up, so cross-process is Dask-only per the
-issue's scope note.
+The Dask and Ray paths additionally pin **cross-process** determinism: a
+fresh driver-process Python interpreter that re-runs the same Monte Carlo
+sweep must produce a bit-equal DataFrame. Both backends carry their own
+worker-startup machinery (Dask spawns a `LocalCluster` and `Client`; Ray
+auto-bootstraps a runtime via ``ray.init``), and either could in
+principle introduce process-affected RNG state — the cross-process gate
+is the catch.
 
 Wall-clock budget
 -----------------
@@ -319,7 +321,7 @@ def test_monte_carlo_same_backend_repeatable(backend_name: Backend, tmp_path: Pa
     pd.testing.assert_frame_equal(result_a.df, result_b.df, check_exact=True)
 
 
-# ---- cross-process determinism (Dask path only) --------------------------
+# ---- cross-process determinism (Dask and Ray) ----------------------------
 
 
 # A fresh driver-process Python that runs the same Monte Carlo sweep through
@@ -417,6 +419,95 @@ def test_monte_carlo_dask_cross_process_determinism(tmp_path: Path) -> None:
     # would mean the spec-generation RNG itself drifted across processes,
     # which is a stricter signal than "the resulting numbers happened to
     # match".
+    cross_process_manifest = _load_manifest(cross_process_out)
+    in_process_overrides = {e.run_id: e.overrides for e in in_process.manifest.entries}
+    cross_process_overrides = {e.run_id: e.overrides for e in cross_process_manifest.entries}
+    assert in_process_overrides == cross_process_overrides
+
+
+# A Ray analogue of ``_CROSS_PROCESS_SCRIPT``. Same body, just RayPool. Kept
+# inline (rather than parametrised) so a future regression points at the
+# Ray-specific test without scrolling through a generic helper.
+_CROSS_PROCESS_SCRIPT_RAY = """
+from pathlib import Path
+
+import gmat_sweep
+from gmat_sweep.backends.ray import RayPool
+
+inj_script = Path({inj_script!r})
+out = Path({out!r})
+n = {n!r}
+seed = {seed!r}
+workers = {workers!r}
+perturb = {{
+    "CoastTime.Value": ("normal", 600.0, 30.0),
+    "Inj.Element1": ("normal", 1.0, 0.005),
+    "Inj.Element2": ("normal", 0.0, 0.005),
+    "Inj.Element3": ("normal", 0.0, 0.005),
+}}
+
+pool = RayPool(num_cpus=workers)
+try:
+    df = gmat_sweep.monte_carlo(
+        inj_script,
+        n=n,
+        perturb=perturb,
+        seed=seed,
+        backend=pool,
+        out=out,
+        progress=False,
+    )
+finally:
+    pool.close()
+
+df.reset_index().to_parquet(out / "result.parquet")
+"""
+
+
+def test_monte_carlo_ray_cross_process_determinism(tmp_path: Path) -> None:
+    """Driver-process restart between Ray MC sweeps must yield bit-equal DataFrames.
+
+    Ray analogue of :func:`test_monte_carlo_dask_cross_process_determinism`.
+    Catches the same regression class — process-affected RNG state, a
+    worker-startup hook that perturbs draws — on Ray's actor lifecycle.
+    Ray's auto-`uv` `runtime_env` rebuild (the bug fixed in #76) is
+    exactly the kind of cross-process trap this gate exists to surface,
+    so the contract belongs on both backends, not just Dask.
+    """
+    in_process_out = tmp_path / "in-process"
+    pool = build_pool("ray", workers=_WORKERS)
+    try:
+        in_process = _run_monte_carlo(pool, in_process_out)
+    finally:
+        pool.close()
+    _assert_sweep_actually_succeeded(in_process, "in-process Ray MC sweep")
+
+    cross_process_out = tmp_path / "cross-process"
+    code = _CROSS_PROCESS_SCRIPT_RAY.format(
+        inj_script=str(_INJ_SCRIPT),
+        out=str(cross_process_out),
+        n=_MC_N,
+        seed=_SEED,
+        workers=_WORKERS,
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, (
+        f"cross-process Ray sweep failed (rc={completed.returncode}): "
+        f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
+    )
+
+    cross_process_df = cast(
+        pd.DataFrame,
+        pd.read_parquet(cross_process_out / "result.parquet").set_index(["run_id", "time"]),
+    )
+
+    pd.testing.assert_frame_equal(in_process.df, cross_process_df, check_exact=True)
+
     cross_process_manifest = _load_manifest(cross_process_out)
     in_process_overrides = {e.run_id: e.overrides for e in in_process.manifest.entries}
     cross_process_overrides = {e.run_id: e.overrides for e in cross_process_manifest.entries}
