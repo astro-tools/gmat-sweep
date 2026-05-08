@@ -314,6 +314,13 @@ jobs:
           config: tests/k8s/kind-config.yaml
       - name: Connect registry to kind network
         run: docker network connect kind kind-registry
+      - name: Point kind nodes at the local registry
+        run: |
+          for node in $(kind get nodes --name gmat-sweep); do
+            docker exec "$node" mkdir -p /etc/containerd/certs.d/localhost:5000
+            echo '[host."http://kind-registry:5000"]' \
+              | docker exec -i "$node" tee /etc/containerd/certs.d/localhost:5000/hosts.toml >/dev/null
+          done
       - uses: docker/setup-buildx-action@v3
       - name: Build and push sweep CI image
         uses: docker/build-push-action@v6
