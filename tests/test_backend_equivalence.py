@@ -85,10 +85,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 pytest.importorskip("gmat_run")
 pytest.importorskip("distributed")
 pytest.importorskip("ray")
-# `kubernetes` is intentionally not importorskip'd here: the k8s row is
-# guarded per-test by ``_skip_if_k8s_unconfigured``, and the runtime
-# import is lazy inside ``build_pool``. Module-level skipping would take
-# every parametrize row down with it.
+# `kubernetes` and `mpi4py` are intentionally not importorskip'd here:
+# the k8s row is guarded per-test by ``_skip_if_k8s_unconfigured``, the
+# mpi row by ``_skip_if_mpi_unavailable``, and both backends' runtime
+# imports are lazy inside ``build_pool``. Module-level skipping would
+# take every parametrize row down with it.
 
 # Import after the importorskip guards so a minimal install still collects
 # the module cleanly with the expected skips.
@@ -103,6 +104,37 @@ CANDIDATE_BACKENDS: tuple[Backend, ...] = tuple(b for b in BACKENDS if b != REFE
 def _skip_if_k8s_unconfigured(backend_name: str) -> None:
     if backend_name == "k8s" and not os.environ.get("GMAT_SWEEP_K8S_IMAGE"):
         pytest.skip("k8s backend requires GMAT_SWEEP_K8S_IMAGE / _PVC env vars")
+
+
+def _skip_if_mpi_unavailable(backend_name: str) -> None:
+    """Skip the mpi row unless ``mpi4py`` is installed AND pytest was launched
+    under the ``mpi4py.futures`` launcher shim.
+
+    Outside that launcher, ``MPIPoolExecutor`` would fall back to
+    ``MPI_Comm_spawn``. On a CI runner without an MPI allocation that path
+    runs into Open MPI's slot-availability check and refuses to spawn —
+    every MPI parametrize row would block on the same error. The dedicated
+    ``backend-mpi`` CI cell launches pytest under
+    ``mpirun -n K python -m mpi4py.futures -m pytest`` so ranks 1..K-1 are
+    pre-allocated workers and rank 0 (this process) sees ``COMM_WORLD.size
+    == K``. That is the canonical signal we use here.
+    """
+    if backend_name != "mpi":
+        return
+    pytest.importorskip("mpi4py")
+    from mpi4py import MPI
+
+    if MPI.COMM_WORLD.Get_size() <= 1:
+        pytest.skip(
+            "mpi backend requires the dedicated CI cell that launches pytest "
+            "under `mpirun -n K python -m mpi4py.futures -m pytest …`"
+        )
+
+
+def _skip_optional_backend(backend_name: str) -> None:
+    """Per-row skip guard composing the k8s and mpi opt-in rules."""
+    _skip_if_k8s_unconfigured(backend_name)
+    _skip_if_mpi_unavailable(backend_name)
 
 
 _DATA_DIR = Path(__file__).parent / "data"
@@ -279,7 +311,7 @@ def reference_latin_hypercube(tmp_path_factory: pytest.TempPathFactory) -> _Swee
 def test_grid_sweep_matches_reference_backend(
     backend_name: Backend, reference_grid: _SweepResult, tmp_path: Path
 ) -> None:
-    _skip_if_k8s_unconfigured(backend_name)
+    _skip_optional_backend(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_grid(pool, tmp_path / backend_name)
@@ -292,7 +324,7 @@ def test_grid_sweep_matches_reference_backend(
 def test_monte_carlo_sweep_matches_reference_backend(
     backend_name: Backend, reference_monte_carlo: _SweepResult, tmp_path: Path
 ) -> None:
-    _skip_if_k8s_unconfigured(backend_name)
+    _skip_optional_backend(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_monte_carlo(pool, tmp_path / backend_name)
@@ -305,7 +337,7 @@ def test_monte_carlo_sweep_matches_reference_backend(
 def test_latin_hypercube_sweep_matches_reference_backend(
     backend_name: Backend, reference_latin_hypercube: _SweepResult, tmp_path: Path
 ) -> None:
-    _skip_if_k8s_unconfigured(backend_name)
+    _skip_optional_backend(backend_name)
     pool = build_pool(backend_name, workers=_WORKERS)
     try:
         candidate = _run_latin_hypercube(pool, tmp_path / backend_name)
@@ -324,7 +356,7 @@ def test_monte_carlo_same_backend_repeatable(backend_name: Backend, tmp_path: Pa
     Restates the v0.2 ``LocalJoblibPool`` determinism contract pinned by
     :mod:`tests.test_monte_carlo_determinism` for every distributed backend.
     """
-    _skip_if_k8s_unconfigured(backend_name)
+    _skip_optional_backend(backend_name)
     pool_a = build_pool(backend_name, workers=_WORKERS)
     try:
         result_a = _run_monte_carlo(pool_a, tmp_path / "a")

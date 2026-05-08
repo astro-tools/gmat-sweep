@@ -50,6 +50,15 @@ def test_backend_throughput_meets_floor(backend: Backend) -> None:
         pytest.importorskip("kubernetes")
         if not __import__("os").environ.get("GMAT_SWEEP_K8S_IMAGE"):
             pytest.skip("k8s backend requires GMAT_SWEEP_K8S_IMAGE / _PVC env vars")
+    if backend == "mpi":
+        pytest.importorskip("mpi4py")
+        from mpi4py import MPI
+
+        if MPI.COMM_WORLD.Get_size() <= 1:
+            pytest.skip(
+                "mpi backend requires the dedicated CI cell that launches pytest "
+                "under `mpirun -n K python -m mpi4py.futures -m pytest …`"
+            )
 
     floor = _load_floor()[backend]
     record = run_benchmark(backend=backend, scale=_CI_SCALE, workers=_CI_WORKERS)

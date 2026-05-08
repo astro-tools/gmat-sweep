@@ -1321,6 +1321,43 @@ def test_build_pool_ray_constructs_ray_pool_with_num_cpus_and_kwargs(
     assert fake.calls == [{"num_cpus": 8, "address": "ray://host:10001"}]
 
 
+def test_build_pool_mpi_forwards_kwargs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--backend mpi`` ignores ``--workers`` and forwards every ``--backend-arg``.
+
+    Rank count is set externally — by ``mpirun -n K`` under the pre-allocated
+    launch mode, or by ``--backend-arg max_workers=N`` under dynamic-spawn.
+    The CLI does not synthesise a ``max_workers`` from ``--workers``.
+    """
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "MPIPool", fake)
+
+    args = argparse.Namespace(
+        backend="mpi",
+        workers=8,
+        backend_arg=["max_workers=4"],
+    )
+    with cli._build_pool(args):
+        pass
+
+    assert fake.calls == [{"max_workers": 4}]
+
+
+def test_build_pool_mpi_no_backend_arg_constructs_with_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--backend mpi`` with no ``--backend-arg`` constructs ``MPIPool()``."""
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "MPIPool", fake)
+
+    args = argparse.Namespace(backend="mpi", workers=-1, backend_arg=[])
+    with cli._build_pool(args):
+        pass
+
+    assert fake.calls == [{}]
+
+
 def test_build_pool_rejects_duplicate_backend_arg() -> None:
     args = argparse.Namespace(
         backend="dask",

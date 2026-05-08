@@ -51,6 +51,7 @@ dependencies = [
 dask = ["distributed>=2024.1"]
 ray = ["ray[default]>=2.10"]
 k8s = ["kubernetes>=29,<33"]
+mpi = ["mpi4py>=3.1"]
 plot = ["matplotlib>=3.8"]
 examples = ["matplotlib>=3.8", "distributed>=2024.1", "ray[default]>=2.10"]
 
@@ -160,6 +161,16 @@ follow_imports = "skip"
 # distributed and ray above (the kubernetes client also ships `py.typed`).
 [[tool.mypy.overrides]]
 module = ["kubernetes", "kubernetes.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# mpi4py is an optional [mpi]-extra dependency; backends/mpi.py treats the
+# surface used (mpi4py.futures.MPIPoolExecutor) as Any. mpi4py ships a
+# `py.typed` marker, so `follow_imports = "skip"` is needed to avoid
+# strict-mode rejection of upstream's typed surface, matching the
+# distributed / ray / kubernetes overrides above.
+[[tool.mypy.overrides]]
+module = ["mpi4py", "mpi4py.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 

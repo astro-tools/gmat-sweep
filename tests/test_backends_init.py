@@ -108,6 +108,29 @@ def test_kubernetes_job_pool_attribute_returns_class_when_extra_installed() -> N
     assert backends_pkg.KubernetesJobPool is direct_cls
 
 
+def test_mpi_pool_attribute_error_when_mpi4py_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``mpi4py`` cannot be imported, ``gmat_sweep.backends.MPIPool`` raises
+    :class:`AttributeError` whose message names the ``[mpi]`` extra."""
+    monkeypatch.setitem(sys.modules, "mpi4py", None)
+    with pytest.raises(AttributeError) as ei:
+        backends_pkg.MPIPool  # noqa: B018 - intentional attribute access
+    msg = str(ei.value)
+    assert "MPIPool" in msg
+    assert "[mpi]" in msg
+    assert "pip install gmat-sweep[mpi]" in msg
+
+
+def test_mpi_pool_attribute_returns_class_when_extra_installed() -> None:
+    """The happy path: with ``mpi4py`` importable, the attribute access returns
+    the :class:`MPIPool` class itself."""
+    pytest.importorskip("mpi4py")
+    from gmat_sweep.backends.mpi import MPIPool as direct_cls
+
+    assert backends_pkg.MPIPool is direct_cls
+
+
 def test_ray_runtime_env_var_set_to_zero_when_unset_at_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

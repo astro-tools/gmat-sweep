@@ -157,7 +157,10 @@ jobs:
   # RayPool and asserts each backend's measured throughput meets the floor
   # in `tests/data/throughput_floor.json`. One Linux cell on the latest
   # supported GMAT release is the gate; the docs page reports the author's
-  # local 1000-run numbers separately.
+  # local 1000-run numbers separately. The MPI row runs in its own
+  # `backend-mpi` cell below — it requires launching pytest under the
+  # `mpi4py.futures` shim, which is incompatible with the rest of the
+  # parametrize.
   backend-throughput:
     name: backend throughput regression
     runs-on: ubuntu-latest
@@ -190,7 +193,7 @@ jobs:
   # with no observable effect on results. One Linux cell on the latest
   # supported GMAT release is the gate; cross-platform Dask/Ray equivalence
   # is out of scope (the 18-cell main matrix already covers LocalJoblibPool
-  # on every OS).
+  # on every OS). The MPI row runs in its own `backend-mpi` cell below.
   backend-equivalence:
     name: backend equivalence
     runs-on: ubuntu-latest
@@ -210,6 +213,55 @@ jobs:
           cache: true
       - run: uv sync --all-groups --extra dask --extra ray
       - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"
+
+  # MPIPool integration cell: launches pytest under the `mpi4py.futures`
+  # shim so ranks 1..K-1 are pre-allocated workers and rank 0 runs the
+  # test driver. Avoids `MPI_Comm_spawn` (which on the Open MPI 4 build
+  # shipped by Ubuntu requires more host slots than a free-tier runner
+  # exposes, and refuses to spawn without `--oversubscribe`). Filters the
+  # parametrize to the mpi rows only — the dask / ray / local rows live
+  # in `backend-equivalence` and `backend-throughput` above.
+  backend-mpi:
+    name: backend mpi (mpi4py.futures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      # mpi4py compiles against the system MPI at install time, so the
+      # libopenmpi-dev headers and the openmpi-bin runtime must be present
+      # before `uv sync --extra mpi`.
+      - name: Install Open MPI for the [mpi] extra
+        run: sudo apt-get update && sudo apt-get install -y openmpi-bin libopenmpi-dev
+      # `--extra dask --extra ray` is needed even though we only run the
+      # mpi rows here: the equivalence test module has top-level
+      # `pytest.importorskip("distributed")` / `("ray")` (so the dask/ray
+      # cross-process-determinism tests in the same module are honest in
+      # the equivalence cell). Without those packages the module would
+      # skip entirely and the mpi rows would never be collected.
+      - run: uv sync --all-groups --extra dask --extra ray --extra mpi
+      # `mpirun -n 4 --oversubscribe python -m mpi4py.futures -m pytest …` —
+      # the shim makes ranks 1..3 enter the worker loop; rank 0 runs pytest.
+      # `--oversubscribe` is required because the runner has fewer cores
+      # than ranks. `-k mpi` filters the parametrize so only the MPI rows
+      # of the equivalence and throughput suites run here. `-s` matches the
+      # throughput cell so the BenchmarkRecord JSON appears in the log even
+      # on a passing run.
+      - run: |
+          mpirun -n 4 --oversubscribe \
+            uv run python -m mpi4py.futures -m pytest \
+              tests/test_backend_equivalence.py tests/test_backend_throughput.py \
+              -m "integration and slow" -k mpi -s
 
   # KubernetesJobPool integration cell: spins up a kind cluster, builds a
   # from-source sweep image (`FROM ghcr.io/astro-tools/gmat:R2026a +
