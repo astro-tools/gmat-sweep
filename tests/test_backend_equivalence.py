@@ -87,9 +87,9 @@ pytest.importorskip("distributed")
 pytest.importorskip("ray")
 # `kubernetes` and `mpi4py` are intentionally not importorskip'd here:
 # the k8s row is guarded per-test by ``_skip_if_k8s_unconfigured``, the
-# mpi row by ``_skip_if_mpi_missing``, and both backends' runtime imports
-# are lazy inside ``build_pool``. Module-level skipping would take every
-# parametrize row down with it.
+# mpi row by ``_skip_if_mpi_unavailable``, and both backends' runtime
+# imports are lazy inside ``build_pool``. Module-level skipping would
+# take every parametrize row down with it.
 
 # Import after the importorskip guards so a minimal install still collects
 # the module cleanly with the expected skips.
@@ -106,15 +106,35 @@ def _skip_if_k8s_unconfigured(backend_name: str) -> None:
         pytest.skip("k8s backend requires GMAT_SWEEP_K8S_IMAGE / _PVC env vars")
 
 
-def _skip_if_mpi_missing(backend_name: str) -> None:
-    if backend_name == "mpi":
-        pytest.importorskip("mpi4py")
+def _skip_if_mpi_unavailable(backend_name: str) -> None:
+    """Skip the mpi row unless ``mpi4py`` is installed AND pytest was launched
+    under the ``mpi4py.futures`` launcher shim.
+
+    Outside that launcher, ``MPIPoolExecutor`` would fall back to
+    ``MPI_Comm_spawn``. On a CI runner without an MPI allocation that path
+    runs into Open MPI's slot-availability check and refuses to spawn —
+    every MPI parametrize row would block on the same error. The dedicated
+    ``backend-mpi`` CI cell launches pytest under
+    ``mpirun -n K python -m mpi4py.futures -m pytest`` so ranks 1..K-1 are
+    pre-allocated workers and rank 0 (this process) sees ``COMM_WORLD.size
+    == K``. That is the canonical signal we use here.
+    """
+    if backend_name != "mpi":
+        return
+    pytest.importorskip("mpi4py")
+    from mpi4py import MPI
+
+    if MPI.COMM_WORLD.Get_size() <= 1:
+        pytest.skip(
+            "mpi backend requires the dedicated CI cell that launches pytest "
+            "under `mpirun -n K python -m mpi4py.futures -m pytest …`"
+        )
 
 
 def _skip_optional_backend(backend_name: str) -> None:
     """Per-row skip guard composing the k8s and mpi opt-in rules."""
     _skip_if_k8s_unconfigured(backend_name)
-    _skip_if_mpi_missing(backend_name)
+    _skip_if_mpi_unavailable(backend_name)
 
 
 _DATA_DIR = Path(__file__).parent / "data"
