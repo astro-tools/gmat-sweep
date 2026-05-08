@@ -42,6 +42,7 @@ from gmat_sweep.backends.joblib import LocalJoblibPool
 
 if TYPE_CHECKING:
     from gmat_sweep.backends.dask import DaskPool
+    from gmat_sweep.backends.debug import DebugPool
     from gmat_sweep.backends.kubernetes import KubernetesJobPool
     from gmat_sweep.backends.mpi import MPIPool
     from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DaskPool",
+    "DebugPool",
     "KubernetesJobPool",
     "LocalJoblibPool",
     "MPIPool",
@@ -75,6 +77,13 @@ def __getattr__(name: str) -> Any:
         from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
 
         return ProcessPoolExecutorPool
+    if name == "DebugPool":
+        # Stdlib only — in-process single-run debug backend. Lazy so a
+        # plain ``from gmat_sweep.backends import LocalJoblibPool`` doesn't
+        # carry the debug module's name into the importing namespace.
+        from gmat_sweep.backends.debug import DebugPool
+
+        return DebugPool
     entry = _OPTIONAL_BACKENDS.get(name)
     if entry is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

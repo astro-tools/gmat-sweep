@@ -227,6 +227,56 @@ existing behaviour where `--workers` is forwarded to a backend's
 canonical kwarg name (`n_workers` for Dask, `num_cpus` for Ray) and
 otherwise has no effect.
 
+## `DebugPool` — in-process, single-run, debugger-friendly
+
+`DebugPool` is the off-spec backend. Every spec runs on the driver process
+— no subprocess, no parallelism — so a `breakpoint()` placed in user code,
+override application, or `gmat_run` itself drops directly into the driver's
+debugger and IDE step-through Just Works. **Production sweeps must not use
+it**: GMAT's process-global singletons get dirtied by the run, so the pool
+accepts exactly one spec and refuses any sweep that submits more.
+
+The isolation violation is the feature, but it is gated behind two
+opt-ins: `DebugPool(allow_unisolated_pool=True)` to construct, and
+`Sweep(..., allow_unisolated_pool=True)` to dispatch through. Either flag
+missing raises `BackendError`. The high-level `sweep()` / `monte_carlo()`
+/ `latin_hypercube()` entry points do not surface the flag — drive
+`DebugPool` through the `Sweep` class directly.
+
+```python
+from pathlib import Path
+
+from gmat_sweep import RunSpec, Sweep
+from gmat_sweep.backends.debug import DebugPool
+
+out = Path("./debug-run")
+out.mkdir(exist_ok=True)
+spec = RunSpec(
+    script_path=Path("mission.script"),
+    overrides={"Sat.SMA": 7100.0},
+    output_dir=out / "run_0",
+    run_id=0,
+    seed=None,
+    run_options={},
+)
+
+with DebugPool(allow_unisolated_pool=True) as pool:
+    Sweep(
+        runs=[spec],
+        backend=pool,
+        manifest_path=out / "manifest.jsonl",
+        output_dir=out,
+        script_path=spec.script_path,
+        parameter_spec={"_kind": "explicit", "columns": ["Sat.SMA"], "rows": [[7100.0]]},
+        allow_unisolated_pool=True,
+    ).run()
+```
+
+Drop a `breakpoint()` anywhere downstream of `Sweep.run()` — for example
+inside the `.script`-driven mission, or in a `gmat_run` plugin — and the
+driver's debugger catches it. Switch back to `LocalJoblibPool` (or any
+other isolated pool) the moment you want N > 1 runs.
+
 ## Failed runs
 
 A single failed run never aborts the sweep, regardless of backend. The
