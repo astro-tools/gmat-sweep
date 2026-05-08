@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from tqdm.auto import tqdm
 
 from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
-from gmat_sweep.errors import SweepConfigError
+from gmat_sweep.errors import BackendError, SweepConfigError
 from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 
 if TYPE_CHECKING:
@@ -72,6 +72,15 @@ class Sweep:
     progress:
         ``True`` (default) wraps the drain loop in a :mod:`tqdm` bar.
         Set to ``False`` for non-interactive use (tests, CI logs).
+    allow_unisolated_pool:
+        Acknowledgement flag for backends whose ``subprocess_isolated`` is
+        not :data:`True` (today: only
+        :class:`gmat_sweep.backends.debug.DebugPool` with the ``"debug"``
+        sentinel). Defaults to :data:`False`, in which case constructing a
+        :class:`Sweep` over an unisolated backend raises
+        :class:`gmat_sweep.errors.BackendError`. Pass :data:`True` together
+        with the matching flag on the pool to opt in to in-process,
+        single-run debug dispatch.
     """
 
     def __init__(
@@ -85,7 +94,15 @@ class Sweep:
         parameter_spec: Mapping[str, Any],
         sweep_seed: int | None = None,
         progress: bool = True,
+        allow_unisolated_pool: bool = False,
     ) -> None:
+        if backend.subprocess_isolated is not True and not allow_unisolated_pool:
+            raise BackendError(
+                f"backend {type(backend).__name__} declares "
+                f"subprocess_isolated={backend.subprocess_isolated!r} (not True); "
+                "pass allow_unisolated_pool=True to acknowledge in-process or "
+                "otherwise unisolated dispatch."
+            )
         self._runs: list[RunSpec] = list(runs)
         self._backend = backend
         self._manifest_path = Path(manifest_path)
@@ -112,6 +129,7 @@ class Sweep:
         :exc:`KeyboardInterrupt` is not caught; it propagates so the caller's
         ``with``-managed pool exits and cancels still-pending futures.
         """
+        self._enforce_debug_pool_single_spec(self._runs)
         manifest = self._build_manifest()
         manifest.save(self._manifest_path)
         self._manifest = manifest
@@ -251,6 +269,7 @@ class Sweep:
         )
         specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in self._runs}
         runs_to_submit: list[RunSpec] = [specs_by_run_id[rid] for rid in sorted(to_retry)]
+        self._enforce_debug_pool_single_spec(runs_to_submit)
 
         futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in runs_to_submit]
 
@@ -307,6 +326,18 @@ class Sweep:
         See :func:`gmat_sweep.aggregate.lazy_contacts` for the contract.
         """
         return lazy_contacts(self.to_manifest(), self._output_dir, name=name)
+
+    def _enforce_debug_pool_single_spec(self, runs: Sequence[RunSpec]) -> None:
+        # DebugPool runs every spec on the driver process and dirties GMAT's
+        # process-global singletons after the first load; re-isolation
+        # in-process is not implemented, so the pool refuses anything other
+        # than exactly one spec. Other unisolated pools (none today) would
+        # need their own enforcement once they appear.
+        if self._backend.subprocess_isolated == "debug" and len(runs) != 1:
+            raise BackendError(
+                f"DebugPool dispatches a single spec in-process; got {len(runs)}. "
+                "Use LocalJoblibPool or ProcessPoolExecutorPool for multi-spec sweeps."
+            )
 
     def _build_manifest(self) -> Manifest:
         # Local import: gmat_sweep.__init__ sets __version__ as part of module

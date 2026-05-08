@@ -38,7 +38,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
 from concurrent.futures import Future
 from types import TracebackType
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from gmat_sweep.errors import BackendError
 from gmat_sweep.spec import RunOutcome, RunSpec
@@ -57,6 +57,13 @@ class Pool(ABC):
     the error fires when the bad backend's module is imported, not at sweep
     time.
 
+    The single recognised opt-out is the literal string ``"debug"``, used by
+    :class:`gmat_sweep.backends.debug.DebugPool` to declare in-process,
+    single-run dispatch for ``breakpoint()``-driven debugging. Sweeps refuse
+    to dispatch through any pool whose ``subprocess_isolated`` is not
+    :data:`True` unless the caller acknowledges the violation via
+    ``Sweep(..., allow_unisolated_pool=True)``.
+
     Subclasses accept ``reuse_gmat_context: bool = True`` as a keyword-only
     parameter on ``__init__`` and store it; concrete dispatch in
     :meth:`as_completed` reads ``self._reuse_gmat_context`` to choose between
@@ -66,15 +73,16 @@ class Pool(ABC):
     path).
     """
 
-    subprocess_isolated: ClassVar[bool] = True
+    subprocess_isolated: ClassVar[bool | Literal["debug"]] = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        if cls.subprocess_isolated is not True:
+        if cls.subprocess_isolated is not True and cls.subprocess_isolated != "debug":
             raise BackendError(
                 f"{cls.__name__}.subprocess_isolated is "
                 f"{cls.subprocess_isolated!r}; Pool subclasses must implement "
-                "both reuse and isolation modes (set to True or omit)."
+                "both reuse and isolation modes (set to True or omit), or "
+                'declare in-process debug dispatch via the "debug" sentinel.'
             )
 
     @abstractmethod

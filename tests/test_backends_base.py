@@ -93,6 +93,42 @@ def test_subclass_setting_subprocess_isolated_none_raises() -> None:
                 pass
 
 
+def test_subclass_setting_subprocess_isolated_to_debug_string_is_accepted() -> None:
+    # The "debug" sentinel is the one recognised opt-out — DebugPool uses it
+    # to declare in-process single-run dispatch.
+    class _Debug(Pool):
+        subprocess_isolated: ClassVar[str] = "debug"  # type: ignore[assignment]
+
+        def submit(self, spec: RunSpec) -> Future[RunOutcome]:
+            return Future()
+
+        def as_completed(self, futures: Iterable[Future[RunOutcome]]) -> Iterator[RunOutcome]:
+            return iter([])
+
+        def close(self) -> None:
+            pass
+
+    assert _Debug.subprocess_isolated == "debug"
+
+
+def test_subclass_setting_subprocess_isolated_to_unknown_string_raises() -> None:
+    # Only the literal "debug" string is accepted; any other string still
+    # raises so the contract has exactly one named opt-out.
+    with pytest.raises(BackendError):
+
+        class _Bad(Pool):
+            subprocess_isolated: ClassVar[str] = "fast"  # type: ignore[assignment]
+
+            def submit(self, spec: RunSpec) -> Future[RunOutcome]:
+                return Future()
+
+            def as_completed(self, futures: Iterable[Future[RunOutcome]]) -> Iterator[RunOutcome]:
+                return iter([])
+
+            def close(self) -> None:
+                pass
+
+
 def test_pool_works_as_context_manager() -> None:
     pool = _MinimalPool()
     with pool as p:
