@@ -1,12 +1,12 @@
 """Execution backends behind a single Pool abstraction.
 
 :class:`gmat_sweep.backends.joblib.LocalJoblibPool` is the always-available
-default. :class:`DaskPool` and :class:`RayPool` live behind the optional
-``[dask]`` and ``[ray]`` extras and are exposed lazily through this
-package's :func:`__getattr__` — accessing them when the underlying extra
-is not installed raises :class:`AttributeError` with an install hint, so a
-minimal install never imports ``distributed`` or ``ray`` at package-import
-time.
+default. :class:`DaskPool`, :class:`RayPool`, and :class:`KubernetesJobPool`
+live behind the optional ``[dask]``, ``[ray]``, and ``[k8s]`` extras and
+are exposed lazily through this package's :func:`__getattr__` — accessing
+them when the underlying extra is not installed raises
+:class:`AttributeError` with an install hint, so a minimal install never
+imports ``distributed``, ``ray``, or ``kubernetes`` at package-import time.
 """
 
 from __future__ import annotations
@@ -41,13 +41,15 @@ from gmat_sweep.backends.joblib import LocalJoblibPool
 
 if TYPE_CHECKING:
     from gmat_sweep.backends.dask import DaskPool
+    from gmat_sweep.backends.kubernetes import KubernetesJobPool
     from gmat_sweep.backends.ray import RayPool
 
-__all__ = ["DaskPool", "LocalJoblibPool", "Pool", "RayPool"]
+__all__ = ["DaskPool", "KubernetesJobPool", "LocalJoblibPool", "Pool", "RayPool"]
 
 
 _OPTIONAL_BACKENDS = {
     "DaskPool": ("distributed", "gmat_sweep.backends.dask", "dask"),
+    "KubernetesJobPool": ("kubernetes", "gmat_sweep.backends.kubernetes", "k8s"),
     "RayPool": ("ray", "gmat_sweep.backends.ray", "ray"),
 }
 

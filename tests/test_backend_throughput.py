@@ -46,6 +46,10 @@ def test_backend_throughput_meets_floor(backend: Backend) -> None:
         pytest.importorskip("distributed")
     if backend == "ray":
         pytest.importorskip("ray")
+    if backend == "k8s":
+        pytest.importorskip("kubernetes")
+        if not __import__("os").environ.get("GMAT_SWEEP_K8S_IMAGE"):
+            pytest.skip("k8s backend requires GMAT_SWEEP_K8S_IMAGE / _PVC env vars")
 
     floor = _load_floor()[backend]
     record = run_benchmark(backend=backend, scale=_CI_SCALE, workers=_CI_WORKERS)

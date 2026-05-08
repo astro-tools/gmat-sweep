@@ -57,6 +57,7 @@ nav:
       - recipes/index.md
       - Slurm with srun: recipes/slurm.md
       - Kubernetes pod-per-worker: recipes/kubernetes.md
+      - Kubernetes Job-per-run: recipes/kubernetes-jobpool.md
       - Ray autoscaling: recipes/ray-autoscaling.md
   - FAQ: faq.md
   - API reference: api.md

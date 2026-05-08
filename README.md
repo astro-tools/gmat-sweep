@@ -213,7 +213,7 @@ Runnable example notebooks:
 | Release | Scope |
 |---|---|
 | **v0.3** *(current)* | `DaskPool` (extra `[dask]`) and `RayPool` (extra `[ray]`) join `LocalJoblibPool` behind a single `Pool` ABC. CLI `--backend {local,dask,ray}` flag and rich `gmat-sweep show --detail` / `--run` modes. Three cluster-recipe pages (Slurm with `srun`, Kubernetes pod-per-worker, Ray autoscaling). Benchmark page comparing backends on a 1000-run reference sweep, with a per-backend throughput floor enforced in CI. Manifest header gains a `backend` field; `reuse_gmat_context` exposes the bootstrap-amortisation choice on every pool. |
-| **v0.4** *(next)* | Notebook-friendly `__repr_html__` for `Sweep` / `RunOutcome`. Optional plotting helpers (`sweep_corner`, `sweep_heatmap`) behind a `[plot]` extra pulling matplotlib. A docs cookbook page on integrating sweep outputs into downstream consumers. Smoke-canary cell against the canonical `ghcr.io/astro-tools/gmat` image. |
+| **v0.4** *(next)* | `KubernetesJobPool` (extra `[k8s]`) — every run becomes one `batch/v1` Job, no Dask or Ray middleware. Notebook-friendly `__repr_html__` for `Sweep` / `RunOutcome`. Optional plotting helpers (`sweep_corner`, `sweep_heatmap`) behind a `[plot]` extra pulling matplotlib. A docs cookbook page on integrating sweep outputs into downstream consumers. Smoke-canary cell against the canonical `ghcr.io/astro-tools/gmat` image. |
 
 Past releases live in [`CHANGELOG.md`](CHANGELOG.md).
 

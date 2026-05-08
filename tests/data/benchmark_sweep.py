@@ -11,12 +11,18 @@ Importable as a module — :func:`build_grid`, :func:`build_pool`,
 :func:`run_benchmark`, and :func:`assert_meets_floor` are the public surface —
 and runnable as ``python -m tests.data.benchmark_sweep`` to print a JSON timing
 record on stdout.
+
+The ``k8s`` backend reads two environment variables — ``GMAT_SWEEP_K8S_IMAGE``
+and ``GMAT_SWEEP_K8S_PVC`` — set by the CI cell that provisions a kind cluster
+and a from-source-built sweep image. Outside that cell those env vars are
+unset and ``build_pool("k8s", ...)`` raises a clear error.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections.abc import Mapping
@@ -40,8 +46,8 @@ __all__ = [
     "run_benchmark",
 ]
 
-Backend = Literal["local", "dask", "ray"]
-BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray")
+Backend = Literal["local", "dask", "ray", "k8s"]
+BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray", "k8s")
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "leo_basic.script"
 
@@ -71,10 +77,12 @@ def build_grid(scale: int) -> dict[str, list[float]]:
 def build_pool(backend: Backend, workers: int) -> Pool:
     """Construct the requested backend pool with ``workers`` worker processes.
 
-    :class:`~gmat_sweep.backends.dask.DaskPool` and
-    :class:`~gmat_sweep.backends.ray.RayPool` are imported lazily so a minimal
-    install (no ``[dask]`` / ``[ray]`` extras) can still import this module to
-    read :func:`build_grid` or run the local-backend benchmark.
+    :class:`~gmat_sweep.backends.dask.DaskPool`,
+    :class:`~gmat_sweep.backends.ray.RayPool`, and
+    :class:`~gmat_sweep.backends.kubernetes.KubernetesJobPool` are imported
+    lazily so a minimal install (no ``[dask]`` / ``[ray]`` / ``[k8s]``
+    extras) can still import this module to read :func:`build_grid` or run
+    the local-backend benchmark.
     """
     if backend == "local":
         return LocalJoblibPool(workers=workers)
@@ -86,6 +94,25 @@ def build_pool(backend: Backend, workers: int) -> Pool:
         from gmat_sweep.backends.ray import RayPool
 
         return RayPool(num_cpus=workers)
+    if backend == "k8s":
+        from gmat_sweep.backends.kubernetes import KubernetesJobPool
+
+        image = os.environ.get("GMAT_SWEEP_K8S_IMAGE")
+        pvc_name = os.environ.get("GMAT_SWEEP_K8S_PVC")
+        mount_path = os.environ.get("GMAT_SWEEP_K8S_MOUNT_PATH", "/sweep")
+        driver_mount = os.environ.get("GMAT_SWEEP_K8S_DRIVER_MOUNT_PATH", mount_path)
+        if not image or not pvc_name:
+            raise RuntimeError(
+                "k8s backend requires GMAT_SWEEP_K8S_IMAGE and GMAT_SWEEP_K8S_PVC; "
+                "the kind-CI cell sets both."
+            )
+        return KubernetesJobPool(
+            image=image,
+            pvc_name=pvc_name,
+            pvc_mount_path=mount_path,
+            driver_mount_path=driver_mount,
+            parallelism=workers,
+        )
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
 
 

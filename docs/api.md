@@ -24,6 +24,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.backends.RayPool
 
+::: gmat_sweep.backends.KubernetesJobPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec

@@ -210,3 +210,55 @@ jobs:
           cache: true
       - run: uv sync --all-groups --extra dask --extra ray
       - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"
+
+  # KubernetesJobPool integration cell: spins up a kind cluster, builds a
+  # from-source sweep image (`FROM ghcr.io/astro-tools/gmat:R2026a +
+  # pip install -e .[k8s]`), loads it into the kind node, mounts a PVC,
+  # and runs the equivalence and throughput suites with the k8s row
+  # active. The non-k8s parametrize rows auto-skip here because the dask
+  # and ray extras are not synced — keeping the kind provisioning blast
+  # radius limited to its own job.
+  #
+  # Driver/Pod path discipline: kind's `extraMounts` bind-mounts the
+  # runner's `/sweep` into the kind node at `/sweep`; a hostPath PV on the
+  # node points at the same path; Pods mount the PVC at `/sweep`. Net
+  # effect: the driver-side `/sweep` and Pod-side `/sweep` are the same
+  # directory, so paths inside RunSpec resolve identically on both sides
+  # without translation.
+  backend-k8s:
+    name: backend k8s (kind)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GMAT_SWEEP_K8S_IMAGE: gmat-sweep-k8s-ci:local
+      GMAT_SWEEP_K8S_PVC: gmat-sweep-ci
+      GMAT_SWEEP_K8S_MOUNT_PATH: /sweep
+      GMAT_SWEEP_K8S_DRIVER_MOUNT_PATH: /sweep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - name: Prepare shared /sweep directory
+        run: sudo mkdir -p /sweep && sudo chmod 777 /sweep
+      - name: Provision kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: gmat-sweep
+          config: tests/k8s/kind-config.yaml
+      - name: Build sweep CI image
+        run: docker build -t gmat-sweep-k8s-ci:local -f tests/k8s/Dockerfile .
+      - name: Load image into kind
+        run: kind load docker-image gmat-sweep-k8s-ci:local --name gmat-sweep
+      - name: Apply PV + PVC
+        run: kubectl apply -f tests/k8s/sweep-pvc.yaml
+      - run: uv sync --all-groups --extra k8s
+      - run: uv run pytest tests/test_backend_equivalence.py tests/test_backend_throughput.py -m "integration and slow" -k "k8s" -s
