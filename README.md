@@ -39,8 +39,9 @@ The four entry points cover the common shapes:
 - **Not** an optimiser. Gradient-, Bayesian-, and population-based optimisation
   (CasADi, pagmo2, scikit-optimize) is a different problem; `gmat-sweep` may serve as the
   parallel evaluator inside one, but it ships no optimiser of its own.
-- **Not** a distributed cluster runner yet. The default `LocalJoblibPool` saturates one
-  machine; `DaskPool` and `RayPool` for multi-machine sweeps are scoped for v0.3.
+- **Not** a workflow engine. `gmat-sweep` runs homogeneous parametric sweeps of
+  one mission; Snakemake / Nextflow / Hamilton manage DAGs of heterogeneous tasks.
+  A workflow engine can schedule a `gmat-sweep` step; the converse is not interesting.
 
 ## Requirements
 
@@ -125,6 +126,27 @@ whose lifetime is tied to the returned DataFrame. Pass `out=Path(...)` to keep t
 that's also what enables [resuming a killed sweep](https://astro-tools.github.io/gmat-sweep/resume/)
 via `Sweep.from_manifest(...).resume()` or `gmat-sweep resume <manifest>`.
 
+For multi-host sweeps, swap the local pool for `DaskPool` or `RayPool` — same
+`sweep()` / `monte_carlo()` / `latin_hypercube()` call shape, different `backend=`:
+
+```python
+from gmat_sweep import sweep
+from gmat_sweep.backends import DaskPool
+
+with DaskPool(n_workers=8) as pool:
+    df = sweep(
+        "mission.script",
+        grid={"Sat.SMA": [7000, 7100, 7200]},
+        backend=pool,
+    )
+```
+
+`DaskPool` and `RayPool` ship behind `pip install gmat-sweep[dask]` /
+`gmat-sweep[ray]`. See the [backends page](https://astro-tools.github.io/gmat-sweep/backends/)
+for the full set of pool patterns and the
+[cluster recipes](https://astro-tools.github.io/gmat-sweep/recipes/) for
+Slurm / Kubernetes / Ray autoscaling wiring.
+
 A `gmat-sweep` console script is also installed for shell-script and CI use:
 
 ```bash
@@ -190,8 +212,8 @@ Runnable example notebooks:
 
 | Release | Scope |
 |---|---|
-| **v0.2** *(current)* | `monte_carlo()` and `latin_hypercube()` plus explicit-row `samples=DataFrame` sweeps. Programmatic resume via `Sweep.from_manifest(...).resume()`. Ephemeris and contact aggregation across runs. CLI gains `monte-carlo`, `latin-hypercube`, `explicit`, and `resume` subcommands. Manifest frozen as a stable v1 schema with a documented compatibility policy. macOS added to CI. Coverage gate raised to 85%. |
-| **v0.3** *(next)* | `DaskPool` (extra `[dask]`) and `RayPool` (extra `[ray]`) for multi-machine sweeps. Cluster-recipe pages for Slurm `srun`, Kubernetes pod-per-worker, and Ray autoscaling. Benchmark page comparing backends on a 1000-run reference sweep. Throughput regression tests. `gmat-sweep show` gains a rich detail mode for inspecting per-run timing and stderr. |
+| **v0.3** *(current)* | `DaskPool` (extra `[dask]`) and `RayPool` (extra `[ray]`) join `LocalJoblibPool` behind a single `Pool` ABC. CLI `--backend {local,dask,ray}` flag and rich `gmat-sweep show --detail` / `--run` modes. Three cluster-recipe pages (Slurm with `srun`, Kubernetes pod-per-worker, Ray autoscaling). Benchmark page comparing backends on a 1000-run reference sweep, with a per-backend throughput floor enforced in CI. Manifest header gains a `backend` field; `reuse_gmat_context` exposes the bootstrap-amortisation choice on every pool. |
+| **v0.4** *(next)* | Notebook-friendly `__repr_html__` for `Sweep` / `RunOutcome`. Optional plotting helpers (`sweep_corner`, `sweep_heatmap`) behind a `[plot]` extra pulling matplotlib. A docs cookbook page on integrating sweep outputs into downstream consumers. Smoke-canary cell against the canonical `ghcr.io/astro-tools/gmat` image. |
 
 Past releases live in [`CHANGELOG.md`](CHANGELOG.md).
 

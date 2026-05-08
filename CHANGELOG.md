@@ -5,6 +5,121 @@ All notable changes to gmat-sweep are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-07
+
+The cluster-backends release: `DaskPool` and `RayPool` join the
+`Pool` ABC behind opt-in extras, the CLI gains a `--backend` flag
+and a rich `show --detail` / `show --run` mode, three cluster-recipe
+pages and two example notebooks document the multi-host story
+end-to-end, and a 1000-run benchmark sweep with a per-backend
+throughput floor lands in CI. Trove classifier moves from
+`Development Status :: 3 - Alpha` to `4 - Beta`.
+
+### Added
+
+- `DaskPool` (`gmat-sweep[dask]`) — distributed pool over
+  `dask.distributed`. Spawns a `LocalCluster` by default; `client=`
+  accepts an existing `distributed.Client` so a sweep plugs into an
+  already-running cluster (Slurm, Kubernetes, a long-lived dev
+  scheduler). Imported lazily — a minimal install never imports
+  `distributed` (#57).
+- `RayPool` (`gmat-sweep[ray]`) — distributed pool over Ray. Calls
+  `ray.init` for you by default; `address=` connects to a pre-existing
+  cluster (`"auto"`, `"ray://host:port"`, or a raw GCS address).
+  Owns the runtime only when its own `__init__` initialised it; an
+  externally-initialised runtime is left alone on `close()` (#58).
+- `backend=` keyword on [`sweep`][gmat_sweep.sweep],
+  [`monte_carlo`][gmat_sweep.monte_carlo], and
+  [`latin_hypercube`][gmat_sweep.latin_hypercube]. Replaces the
+  former `workers=` shorthand: pass any constructed `Pool` to
+  control execution. The `backend=None` default still constructs
+  a fresh `LocalJoblibPool` over every available core (#56).
+- `reuse_gmat_context: bool = True` keyword on every `Pool`
+  constructor. `True` (the default) lets a worker process import
+  `gmat_run` once and reuse the bootstrap across many tasks —
+  paid once per worker. `False` spawns a fresh Python interpreter
+  per task via `python -m gmat_sweep._run_subprocess`. Same flag,
+  same semantics on `LocalJoblibPool`, `DaskPool`, and `RayPool` (#78).
+- Manifest header carries a new `backend` field — the pool's
+  `__class__.__name__` (e.g. `"LocalJoblibPool"`, `"DaskPool"`,
+  `"RayPool"`). Additive within `schema_version=1`: manifests
+  written before this field landed load with `backend == "unknown"`.
+- `_run_subprocess` module — `python -m gmat_sweep._run_subprocess
+  <spec.json> <outcome.json>` runs one `RunSpec` in the calling
+  interpreter and writes the resulting `RunOutcome` back. Internal
+  surface; the subprocess hop the `reuse_gmat_context=False` path
+  uses on every backend (#55).
+- CLI `--backend {local,dask,ray}` flag and repeatable
+  `--backend-arg KEY=VALUE` escape hatch on every sweep-running
+  subcommand (`run`, `monte-carlo`, `latin-hypercube`, `explicit`)
+  and on `resume`. `--workers N` maps onto each backend in the
+  natural way (`workers` / `n_workers` / `num_cpus`). Missing
+  extras exit with code `4` and a `pip install gmat-sweep[…]`
+  message on stderr (#59).
+- `gmat-sweep show --detail` — per-run table sorted with `failed`
+  first, then `skipped`, then `ok`, plus the existing one-line
+  summary trailer. `gmat-sweep show --run N` prints `run_id=N`'s
+  full record: header fields, override dict, full unsuppressed
+  `stderr`. `--filter STATUS` narrows the table to a single
+  bucket. `--detail` and `--run` are mutually exclusive (#60).
+- New documentation pages: [`docs/backends.md`](docs/backends.md)
+  (the three pools, the `reuse_gmat_context` contract, and the
+  backend-equivalence guarantee), three cluster-recipe pages —
+  [`recipes/slurm.md`](docs/recipes/slurm.md),
+  [`recipes/kubernetes.md`](docs/recipes/kubernetes.md),
+  [`recipes/ray-autoscaling.md`](docs/recipes/ray-autoscaling.md) —
+  and [`docs/benchmarks.md`](docs/benchmarks.md) (1000-run
+  reference sweep numbers per backend with reproduce commands)
+  (#63, #61).
+- New runnable example notebooks rendered into the docs site:
+  `06_dask_cluster_recipe.ipynb` (100-run grid through a
+  `distributed.LocalCluster` with `DaskPool`) and
+  `07_ray_autoscaling_recipe.ipynb` (100-run Monte Carlo through
+  `RayPool` against a local `ray.init()`) (#64).
+- Backend-equivalence validation suite — `tests/test_backend_equivalence.py`
+  runs a 16-run grid sweep, a 32-run Monte Carlo sweep, and a 16-run
+  Latin hypercube sweep on each of `LocalJoblibPool` / `DaskPool` /
+  `RayPool` and asserts pairwise bit-equality on the aggregated
+  DataFrame and the manifest's reproducibility-bearing fields. Cross-
+  process determinism on `DaskPool` is pinned in the same suite.
+  Gated as `integration and slow`; runs on a dedicated CI cell on
+  every PR (#62).
+- Per-backend throughput regression — `tests/test_backend_throughput.py`
+  runs a 50-run benchmark on each of the three backends and asserts
+  measured throughput meets the floor in
+  `tests/data/throughput_floor.json`. The 1000-run docs numbers and
+  the 50-run CI gate share a single sweep-fixture definition
+  (`tests/data/benchmark_sweep.py`) so the two cannot drift (#61).
+- `RAY_ENABLE_UV_RUN_RUNTIME_ENV=0` set at backend-package import
+  time (`gmat_sweep.backends.__init__`). Disables Ray's auto-`uv`
+  `runtime_env` hook before any `import ray`, which would otherwise
+  rebuild the worker venv from the project's *base* dependencies
+  under `uv run` and fail worker startup with `ModuleNotFoundError:
+  No module named 'ray'`. `setdefault` respects an explicit user
+  opt-in (#76).
+
+### Changed
+
+- The `workers=N` keyword on [`sweep`][gmat_sweep.sweep],
+  [`monte_carlo`][gmat_sweep.monte_carlo], and
+  [`latin_hypercube`][gmat_sweep.latin_hypercube] is replaced by
+  `backend=`. **Breaking:** a v0.2 caller passing `workers=8` must
+  now pass `backend=LocalJoblibPool(workers=8)`. The migration is
+  one line at every call site (#56).
+- `DaskPool` and `RayPool` default to `reuse_gmat_context=True` —
+  a worker process imports `gmat_run` once and reuses the bootstrap
+  across many tasks. Safe only when every spec dispatched through
+  the pool loads the same script (the common case). Callers that
+  compose a single Dask or Ray pool across calls that load different
+  scripts must pass `reuse_gmat_context=False` (#78).
+- Coverage gate held at ≥ 85 % (the v0.2 number); the four per-file
+  95 % gates on `grids.py`, `distributions.py`, `manifest.py`, and
+  `aggregate.py` are unchanged. A bump toward the v1.0 ≥ 90 %
+  charter target is deferred to a follow-up so the cut PR stayed
+  focused on release mechanics.
+
+[0.3.0]: https://github.com/astro-tools/gmat-sweep/releases/tag/v0.3.0
+
 ## [0.2.0] — 2026-05-05
 
 The stochastic-sweep release: `monte_carlo()` and `latin_hypercube()`
