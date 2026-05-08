@@ -28,6 +28,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.backends.MPIPool
 
+::: gmat_sweep.backends.ProcessPoolExecutorPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec
