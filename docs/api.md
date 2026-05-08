@@ -26,6 +26,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.backends.KubernetesJobPool
 
+::: gmat_sweep.backends.MPIPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec
