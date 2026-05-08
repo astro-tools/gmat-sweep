@@ -19,6 +19,7 @@ GitHub-Actions free tier.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -59,6 +60,8 @@ def test_backend_throughput_meets_floor(backend: Backend) -> None:
                 "mpi backend requires the dedicated CI cell that launches pytest "
                 "under `mpirun -n K python -m mpi4py.futures -m pytest …`"
             )
+    if backend == "process" and sys.version_info < (3, 11):
+        pytest.skip("ProcessPoolExecutorPool requires Python 3.11+")
 
     floor = _load_floor()[backend]
     record = run_benchmark(backend=backend, scale=_CI_SCALE, workers=_CI_WORKERS)

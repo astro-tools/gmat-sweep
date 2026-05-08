@@ -131,10 +131,23 @@ def _skip_if_mpi_unavailable(backend_name: str) -> None:
         )
 
 
+def _skip_if_python_lt_311(backend_name: str) -> None:
+    """Skip the process-pool row on Python 3.10 — the pool is 3.11+ only.
+
+    Mirrors the import-time gate in
+    :mod:`gmat_sweep.backends.process_pool`; without this skip the row
+    would fail at ``build_pool("process", ...)`` with the gate's
+    ``RuntimeError`` instead of a clean pytest skip.
+    """
+    if backend_name == "process" and sys.version_info < (3, 11):
+        pytest.skip("ProcessPoolExecutorPool requires Python 3.11+")
+
+
 def _skip_optional_backend(backend_name: str) -> None:
-    """Per-row skip guard composing the k8s and mpi opt-in rules."""
+    """Per-row skip guard composing the k8s, mpi, and process-pool opt-in rules."""
     _skip_if_k8s_unconfigured(backend_name)
     _skip_if_mpi_unavailable(backend_name)
+    _skip_if_python_lt_311(backend_name)
 
 
 _DATA_DIR = Path(__file__).parent / "data"

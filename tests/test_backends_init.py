@@ -131,6 +131,35 @@ def test_mpi_pool_attribute_returns_class_when_extra_installed() -> None:
     assert backends_pkg.MPIPool is direct_cls
 
 
+def test_process_pool_attribute_returns_class_when_python_311_plus() -> None:
+    """On Python 3.11+, ``gmat_sweep.backends.ProcessPoolExecutorPool`` returns
+    the class itself — no extra to probe (stdlib only)."""
+    if sys.version_info < (3, 11):
+        pytest.skip("ProcessPoolExecutorPool requires Python 3.11+")
+    from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool as direct_cls
+
+    assert backends_pkg.ProcessPoolExecutorPool is direct_cls
+
+
+def test_process_pool_attribute_propagates_runtime_error_on_python_pre_311(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accessing ``ProcessPoolExecutorPool`` on Python < 3.11 raises ``RuntimeError``
+    pointing at ``LocalJoblibPool`` — the lazy ``__getattr__`` lets the gate's
+    error propagate verbatim, *not* the ``AttributeError`` an unknown extra
+    would yield."""
+    # Pretend we're on 3.10 and drop the cached module so its top-level gate
+    # re-runs against the patched ``sys.version_info``.
+    monkeypatch.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+    monkeypatch.delitem(sys.modules, "gmat_sweep.backends.process_pool", raising=False)
+
+    with pytest.raises(RuntimeError) as ei:
+        backends_pkg.ProcessPoolExecutorPool  # noqa: B018 - intentional attribute access
+    msg = str(ei.value)
+    assert "Python 3.11" in msg
+    assert "LocalJoblibPool" in msg
+
+
 def test_ray_runtime_env_var_set_to_zero_when_unset_at_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
