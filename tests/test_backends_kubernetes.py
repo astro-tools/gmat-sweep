@@ -14,11 +14,10 @@ import json
 import subprocess
 import sys
 from collections.abc import Generator, Iterable, Iterator
-from typing import cast
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import pytest
 

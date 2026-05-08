@@ -85,7 +85,10 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 pytest.importorskip("gmat_run")
 pytest.importorskip("distributed")
 pytest.importorskip("ray")
-pytest.importorskip("kubernetes")
+# `kubernetes` is intentionally not importorskip'd here: the k8s row is
+# guarded per-test by ``_skip_if_k8s_unconfigured``, and the runtime
+# import is lazy inside ``build_pool``. Module-level skipping would take
+# every parametrize row down with it.
 
 # Import after the importorskip guards so a minimal install still collects
 # the module cleanly with the expected skips.
