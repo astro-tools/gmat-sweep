@@ -27,6 +27,7 @@ import numpy as np
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
 from gmat_sweep.backends.dask import DaskPool
 from gmat_sweep.backends.joblib import LocalJoblibPool
+from gmat_sweep.backends.mpi import MPIPool
 from gmat_sweep.backends.ray import RayPool
 from gmat_sweep.errors import (
     BackendError,
@@ -198,8 +199,11 @@ def _build_pool(args: argparse.Namespace) -> Pool:
     returns a :class:`LocalJoblibPool` and rejects any ``--backend-arg``;
     ``dask`` / ``ray`` map ``--workers`` onto ``n_workers`` / ``num_cpus``
     (with the default ``-1`` meaning "let the pool pick") and forward every
-    ``--backend-arg`` as a kwarg to the pool constructor. Unknown kwargs
-    surface as the pool's own :class:`BackendError`.
+    ``--backend-arg`` as a kwarg to the pool constructor. ``mpi`` ignores
+    ``--workers`` (rank count is set by the launcher or by
+    ``--backend-arg max_workers=N``) and forwards every ``--backend-arg``
+    to :class:`MPIPool`. Unknown kwargs surface as the pool's own
+    :class:`BackendError`.
     """
     backend_kwargs: dict[str, Any] = {}
     for raw in args.backend_arg:
@@ -220,6 +224,8 @@ def _build_pool(args: argparse.Namespace) -> Pool:
         return DaskPool(n_workers=workers, **backend_kwargs)
     if args.backend == "ray":
         return RayPool(num_cpus=workers, **backend_kwargs)
+    if args.backend == "mpi":
+        return MPIPool(**backend_kwargs)
     raise AssertionError(f"unreachable backend: {args.backend!r}")  # pragma: no cover
 
 
@@ -506,13 +512,14 @@ def _add_backend_flag(subparser: argparse.ArgumentParser) -> None:
     """Attach ``--backend`` / ``--backend-arg`` to a sweep-running subparser."""
     subparser.add_argument(
         "--backend",
-        choices=("local", "dask", "ray"),
+        choices=("local", "dask", "ray", "mpi"),
         default="local",
         metavar="NAME",
         help=(
             "Execution backend. 'local' (default) runs on this machine via "
             "joblib/loky workers. 'dask' requires the [dask] extra; 'ray' "
-            "requires the [ray] extra. Missing extras exit 4."
+            "requires the [ray] extra; 'mpi' requires the [mpi] extra. "
+            "Missing extras exit 4."
         ),
     )
     subparser.add_argument(

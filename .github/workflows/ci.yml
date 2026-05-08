@@ -154,10 +154,10 @@ jobs:
 
   # Per-backend throughput regression: runs the 50-run scaled variant of the
   # canonical reference benchmark on each of LocalJoblibPool / DaskPool /
-  # RayPool and asserts each backend's measured throughput meets the floor
-  # in `tests/data/throughput_floor.json`. One Linux cell on the latest
-  # supported GMAT release is the gate; the docs page reports the author's
-  # local 1000-run numbers separately.
+  # RayPool / MPIPool and asserts each backend's measured throughput meets
+  # the floor in `tests/data/throughput_floor.json`. One Linux cell on the
+  # latest supported GMAT release is the gate; the docs page reports the
+  # author's local 1000-run numbers separately.
   backend-throughput:
     name: backend throughput regression
     runs-on: ubuntu-latest
@@ -175,7 +175,12 @@ jobs:
         with:
           version: R2026a
           cache: true
-      - run: uv sync --all-groups --extra dask --extra ray
+      # mpi4py compiles against the system MPI at install time, so the
+      # libopenmpi-dev headers and the openmpi-bin runtime must be present
+      # before `uv sync --extra mpi`.
+      - name: Install Open MPI for the [mpi] extra
+        run: sudo apt-get update && sudo apt-get install -y openmpi-bin libopenmpi-dev
+      - run: uv sync --all-groups --extra dask --extra ray --extra mpi
       # `-s` disables stdout capture so the test's per-backend BenchmarkRecord
       # JSON appears in the job log even on a passing run — needed to
       # recalibrate `tests/data/throughput_floor.json` from the measured
@@ -183,11 +188,11 @@ jobs:
       - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow" -s
 
   # Cross-backend equivalence gate: runs three reference sweeps (grid, Monte
-  # Carlo, Latin hypercube) on each of LocalJoblibPool / DaskPool / RayPool
-  # and asserts pairwise bit-equality on the aggregated DataFrame and the
-  # manifest's reproducibility-bearing fields. The contract is that the
-  # `Pool` abstraction is honest — `backend=` is a true execution-only knob
-  # with no observable effect on results. One Linux cell on the latest
+  # Carlo, Latin hypercube) on each of LocalJoblibPool / DaskPool / RayPool /
+  # MPIPool and asserts pairwise bit-equality on the aggregated DataFrame
+  # and the manifest's reproducibility-bearing fields. The contract is that
+  # the `Pool` abstraction is honest — `backend=` is a true execution-only
+  # knob with no observable effect on results. One Linux cell on the latest
   # supported GMAT release is the gate; cross-platform Dask/Ray equivalence
   # is out of scope (the 18-cell main matrix already covers LocalJoblibPool
   # on every OS).
@@ -208,7 +213,9 @@ jobs:
         with:
           version: R2026a
           cache: true
-      - run: uv sync --all-groups --extra dask --extra ray
+      - name: Install Open MPI for the [mpi] extra
+        run: sudo apt-get update && sudo apt-get install -y openmpi-bin libopenmpi-dev
+      - run: uv sync --all-groups --extra dask --extra ray --extra mpi
       - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"
 
   # KubernetesJobPool integration cell: spins up a kind cluster, builds a

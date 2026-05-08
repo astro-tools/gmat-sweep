@@ -46,8 +46,8 @@ __all__ = [
     "run_benchmark",
 ]
 
-Backend = Literal["local", "dask", "ray", "k8s"]
-BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray", "k8s")
+Backend = Literal["local", "dask", "ray", "k8s", "mpi"]
+BACKENDS: tuple[Backend, ...] = ("local", "dask", "ray", "k8s", "mpi")
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "leo_basic.script"
 
@@ -113,6 +113,10 @@ def build_pool(backend: Backend, workers: int) -> Pool:
             driver_mount_path=driver_mount,
             parallelism=workers,
         )
+    if backend == "mpi":
+        from gmat_sweep.backends.mpi import MPIPool
+
+        return MPIPool(max_workers=workers)
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
 
 

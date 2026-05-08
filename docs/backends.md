@@ -1,7 +1,7 @@
 # Backends
 
 Every gmat-sweep run is dispatched through a `Pool` — the abstraction that
-takes a `RunSpec`, runs it, and returns a `RunOutcome`. Three concrete
+takes a `RunSpec`, runs it, and returns a `RunOutcome`. Five concrete
 pools ship in the box:
 
 | Pool | Install | When to pick it |
@@ -10,8 +10,9 @@ pools ship in the box:
 | [`DaskPool`][gmat_sweep.backends.DaskPool] | `pip install gmat-sweep[dask]` | Multi-host sweeps, or a sweep that fits on one machine but needs to plug into an existing `dask.distributed` cluster (Slurm, Kubernetes, or a long-lived dev scheduler). |
 | [`RayPool`][gmat_sweep.backends.RayPool] | `pip install gmat-sweep[ray]` | Multi-host sweeps on a Ray runtime — local, autoscaling, or remote via the Ray Client. |
 | [`KubernetesJobPool`][gmat_sweep.backends.KubernetesJobPool] | `pip install gmat-sweep[k8s]` | Native Kubernetes — every run becomes one `Job`, every Pod is a fresh interpreter. Pick this when you want the cluster to schedule work directly without a Dask or Ray middleware layer. |
+| [`MPIPool`][gmat_sweep.backends.MPIPool] | `pip install gmat-sweep[mpi]` (plus a system MPI install) | HPC clusters that already speak MPI — Slurm allocations, mvapich2 / Intel MPI / Open MPI runtimes. Wraps `mpi4py.futures.MPIPoolExecutor`; works with both dynamic-spawn and pre-allocated-rank launches. |
 
-All three accept the same `reuse_gmat_context` keyword controlling how the
+All five accept the same `reuse_gmat_context` keyword controlling how the
 GMAT bootstrap cost is amortised across the runs in a sweep:
 
 - `reuse_gmat_context=True` (the default) — a worker process imports
@@ -137,6 +138,66 @@ mapping or callable form.
 See the [`KubernetesJobPool` recipe](recipes/kubernetes-jobpool.md) for
 the full setup: image build, PVC layout, in-cluster vs.
 out-of-cluster auth, and the `resources=` knob.
+
+## `MPIPool` — `mpi4py.futures`
+
+`MPIPool` wraps [`mpi4py.futures.MPIPoolExecutor`][mpi4py-futures]. The
+`[mpi]` extra pulls in the `mpi4py` Python bindings; the **system MPI
+runtime** (Open MPI / Intel MPI / mvapich2) must already be installed
+and on `PATH` — `pip install gmat-sweep[mpi]` does **not** install
+`mpirun` itself.
+
+[mpi4py-futures]: https://mpi4py.readthedocs.io/en/stable/mpi4py.futures.html
+
+`MPIPoolExecutor` supports two launch modes natively, and `MPIPool` does
+not second-guess upstream's mode detection. Both work without any
+configuration on this side.
+
+### Dynamic spawn — laptop / CI / dev runs
+
+```python
+from gmat_sweep import sweep
+from gmat_sweep.backends import MPIPool
+
+with MPIPool(max_workers=4) as pool:
+    df = sweep(
+        "mission.script",
+        grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
+        backend=pool,
+        out="./sweep",
+    )
+```
+
+```bash
+gmat-sweep run --backend mpi --backend-arg max_workers=4 \
+    --grid "Sat.SMA=7000:8000:5" --out ./sweep mission.script
+```
+
+In this mode the executor calls `MPI_Comm_spawn` to launch
+`max_workers` worker ranks on demand. No `mpirun` wrapping the driver
+is required, but the MPI runtime must be installed locally.
+
+### Pre-allocated ranks — SLURM / HPC
+
+```bash
+mpirun -n 8 python -m mpi4py.futures -m gmat_sweep run \
+    --backend mpi --grid "Sat.SMA=7000:8000:5" \
+    --out ./sweep mission.script
+```
+
+Under the `python -m mpi4py.futures` launcher shim, ranks 1..K-1 enter
+`mpi4py.futures`'s worker loop *inside the shim*; rank 0 runs
+`gmat_sweep` exactly once with no awareness that MPI is involved.
+`max_workers` is then optional — it defaults to K-1.
+
+### `--workers` and MPI
+
+`--workers N` is **silently ignored** under `--backend mpi` — rank
+count is set either by `mpirun -n K` (pre-allocated mode) or by
+`--backend-arg max_workers=N` (dynamic-spawn mode). This matches the
+existing behaviour where `--workers` is forwarded to a backend's
+canonical kwarg name (`n_workers` for Dask, `num_cpus` for Ray) and
+otherwise has no effect.
 
 ## Failed runs
 
