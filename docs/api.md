@@ -62,6 +62,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.lazy_contacts
 
+::: gmat_sweep.lazy_fused_reports
+
 ## Exceptions
 
 ::: gmat_sweep.GmatSweepError

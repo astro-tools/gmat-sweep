@@ -91,14 +91,14 @@ When a sweep produces several `ReportFile` outputs and you want them
 side-by-side on a shared timeline,
 [`lazy_fused_reports`][gmat_sweep.lazy_fused_reports] (and
 `Sweep.to_fused_reports`) reshape them into one wide DataFrame with a
-column-level [`MultiIndex`][pandas.MultiIndex] keyed by
-`(report_name, column)`. The first name in `names` is the merge anchor;
-subsequent reports are joined onto it per `run_id`.
+column-level `pandas.MultiIndex` keyed by `(report_name, column)`. The
+first name in `names` is the merge anchor; subsequent reports are
+joined onto it per `run_id`.
 
 | `tolerance` | Merge per run | When it fits |
 |-------------|---------------|--------------|
 | `"exact"` (literal) | inner join on `time` | every report shares the same step setting and you only want rows present in all of them |
-| `pd.Timedelta(...)` | [`pd.merge_asof`][pandas.merge_asof] (`backward` direction, default) | reports use different cadences and a "nearest within window" match per anchor row is what you want |
+| `pd.Timedelta(...)` | `pd.merge_asof` (`backward` direction, default) | reports use different cadences and a "nearest within window" match per anchor row is what you want |
 
 ```python
 from pathlib import Path
@@ -142,9 +142,10 @@ report's individual state for that run, but the other reports' data is
 not merged in — anchor-failure shadows the rest of the row. Pick the
 report most likely to be present as the first entry of `names`.
 
-`tolerance` is required (no default). For `pd.merge_asof`, see the
-[pandas reference][pandas.merge_asof] for direction (`backward` is the
-default), allow_exact_matches, and accepted `tolerance` types.
+`tolerance` is required (no default). See the
+[`pandas.merge_asof` reference](https://pandas.pydata.org/docs/reference/api/pandas.merge_asof.html)
+for the `direction` (`backward` by default), `allow_exact_matches`, and
+accepted `tolerance` types.
 
 ## Memory: streaming vs. eager reads
 
