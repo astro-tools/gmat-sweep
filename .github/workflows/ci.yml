@@ -347,15 +347,23 @@ jobs:
       # step below; the explicit `__status=="failed"` check fails the cell
       # on any captured run failure (the API itself never raises on a single
       # failed run — it lands as a `failed` row).
+      # `out=` is passed straight through to gmat-run as `working_dir`, which
+      # the GMAT API resolves against the image's baked-in `OUTPUT_PATH`
+      # (`/opt/gmat/output/` in `gmat_startup_file.txt`). A relative path here
+      # would land at `/opt/gmat/output/<rel>/sat.report` — a directory that
+      # doesn't exist and isn't writable. Resolving to an absolute path
+      # under `$PWD` sidesteps that without touching the image config.
       - name: Vision-snippet grid sweep
         run: |
           python - <<'PY'
+          from pathlib import Path
+
           from gmat_sweep import sweep
 
           df = sweep(
               "tests/data/leo_basic.script",
               grid={"Sat.SMA": [7000, 7100, 7200]},
-              out="./grid-out",
+              out=Path("./grid-out").resolve(),
           )
           print(df)
           if (df["__status"] == "failed").any():
@@ -364,6 +372,8 @@ jobs:
       - name: 4-run monte_carlo
         run: |
           python - <<'PY'
+          from pathlib import Path
+
           from gmat_sweep import monte_carlo
 
           df = monte_carlo(
@@ -371,7 +381,7 @@ jobs:
               n=4,
               perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
               seed=42,
-              out="./mc-out",
+              out=Path("./mc-out").resolve(),
           )
           print(df)
           if (df["__status"] == "failed").any():
