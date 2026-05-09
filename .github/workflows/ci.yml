@@ -316,3 +316,68 @@ jobs:
         run: kubectl apply -f tests/k8s/sweep-pvc.yaml
       - run: uv sync --all-groups --extra k8s
       - run: uv run pytest tests/test_backend_equivalence.py tests/test_backend_throughput.py -m "integration and slow" -k "k8s" -s
+
+  # Smoke-canary against the canonical `ghcr.io/astro-tools/gmat:Rxxxxa` image.
+  # The image carries a verbatim GMAT install with gmatpy importable in pyenv-
+  # managed Python 3.10/3.11/3.12; running the four-line vision snippet plus a
+  # short Monte Carlo inside it is the cheapest signal that the in-tree
+  # `gmat-sweep` and the published image are still ABI/runtime-compatible.
+  # Each GMAT tag gets its own cell. The image is consumed verbatim — no
+  # apt installs, no startup-file edits, no plugin strips.
+  smoke-canary-image:
+    name: smoke canary (${{ matrix.gmat-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        gmat-version: [R2025a, R2026a]
+    container:
+      image: ghcr.io/astro-tools/gmat:${{ matrix.gmat-version }}
+    steps:
+      - uses: actions/checkout@v4
+      # Editable install against the image's default Python (3.12, first in
+      # the image's `pyenv global` list). `[dask,ray]` matches the extras
+      # combination the matrix `test:` cell uses, so the canary exercises
+      # the same import surface a real user would land on.
+      - name: Install gmat-sweep with dask + ray extras
+        run: pip install -e ".[dask,ray]"
+      # Mirrors `docs/getting-started.md` "four-line vision snippet" against
+      # the in-tree LEO fixture. `out=...` keeps the manifest for the show
+      # step below; the explicit `__status=="failed"` check fails the cell
+      # on any captured run failure (the API itself never raises on a single
+      # failed run — it lands as a `failed` row).
+      - name: Vision-snippet grid sweep
+        run: |
+          python - <<'PY'
+          from gmat_sweep import sweep
+
+          df = sweep(
+              "tests/data/leo_basic.script",
+              grid={"Sat.SMA": [7000, 7100, 7200]},
+              out="./grid-out",
+          )
+          print(df)
+          if (df["__status"] == "failed").any():
+              raise SystemExit("smoke-canary: grid sweep produced failed runs")
+          PY
+      - name: 4-run monte_carlo
+        run: |
+          python - <<'PY'
+          from gmat_sweep import monte_carlo
+
+          df = monte_carlo(
+              "tests/data/leo_basic.script",
+              n=4,
+              perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+              seed=42,
+              out="./mc-out",
+          )
+          print(df)
+          if (df["__status"] == "failed").any():
+              raise SystemExit("smoke-canary: monte_carlo produced failed runs")
+          PY
+      - name: gmat-sweep show
+        run: |
+          gmat-sweep show ./grid-out/manifest.jsonl
+          gmat-sweep show ./mc-out/manifest.jsonl
