@@ -417,6 +417,100 @@ input summary, derived plots) before handing the bundle off. The
 verifier a way to check that the script in the bundle is the script
 the manifest was actually written against.
 
+## Pattern 4 — Archival deposit (Zenodo / JOSS)
+
+Pattern 3 builds a hand-rolled wrapper around the on-disk bundle. When
+the consumer is an *archival* deposit — a Zenodo record, JOSS
+supplementary material, or an internal handoff that needs to survive
+filesystem churn — `gmat-sweep` ships a packager that produces a single
+self-describing `.zip` directly:
+[`Sweep.archive`][gmat_sweep.Sweep.archive] and the matching
+`gmat-sweep archive` CLI subcommand.
+
+The bundle layout is:
+
+```
+bundle.zip
+├── README.md            generated reproduce recipe + manifest summary
+├── script/<name>        copy of the .script the manifest references
+├── manifest.jsonl       paths rewritten to be bundle-relative
+├── MANIFEST.hash        sha256sum-c compatible (every other member)
+└── runs/run-<id>/...    per-run Parquet outputs (and worker.log if requested)
+```
+
+Two things are worth calling out about this layout, because they're what
+make the bundle re-runnable on a fresh machine:
+
+1. **Manifest paths are rewritten on the way in.** The on-disk manifest
+   stores absolute `output_paths` pointing at the sweep's per-run
+   directories. The bundled manifest carries `runs/run-<id>/<basename>`
+   relative paths instead, which the aggregator resolves against the
+   unzip directory without further plumbing.
+2. **The bundle is byte-deterministic.** Two archives of the same
+   manifest are identical at the byte level — fixed `ZipInfo` timestamps,
+   sorted entries, stable hashes. Re-uploading to Zenodo from a
+   different machine produces the same record.
+
+### From a finished sweep
+
+```python
+from pathlib import Path
+
+from gmat_sweep import Sweep
+from gmat_sweep.backends import LocalJoblibPool
+
+with LocalJoblibPool() as pool:
+    sweep = Sweep.from_manifest(
+        Path("./out/manifest.jsonl"),
+        Path("./mission.script"),
+        backend=pool,
+    )
+bundle = sweep.archive(Path("./sma-scan-2026q2.zip"))
+```
+
+`Sweep.archive` returns the resolved path to the `.zip`. By default it
+drops every per-run `worker.log` (and sets the manifest's `log_path`
+field to `null`) so the archive stays small. Pass `include_logs=True`
+when you want them — useful for failure-analysis deposits where the
+worker traces are part of the record.
+
+### From the CLI
+
+```bash
+gmat-sweep archive ./out/manifest.jsonl \
+    --script ./mission.script \
+    --out ./sma-scan-2026q2.zip
+```
+
+Exits 2 if the script's canonical SHA-256 disagrees with the manifest's
+recorded hash; pass `--allow-script-drift` to proceed anyway (the
+bundle still records the manifest's original hash, so a downstream
+verifier can spot the drift).
+
+### Reproducing the sweep from a bundle
+
+The generated `README.md` documents this for whoever downloads the
+deposit, but the steps boil down to:
+
+```bash
+unzip sma-scan-2026q2.zip -d sma-scan-2026q2/
+cd sma-scan-2026q2/
+
+# Verify integrity:
+sha256sum -c MANIFEST.hash
+
+# One-line summary:
+gmat-sweep show manifest.jsonl
+
+# Re-run only the runs that failed or are missing on disk:
+gmat-sweep resume manifest.jsonl --script script/mission.script
+```
+
+For an all-`ok` bundle, `gmat-sweep resume` is a no-op on the run side —
+nothing failed, nothing's missing — and the aggregator reads the
+existing per-run Parquets. The resulting DataFrame is bit-equal to the
+one the original sweep produced.
+
 ## Where to from here
 
 - The full set of fields and shapes the manifest carries is documented

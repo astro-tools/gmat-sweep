@@ -1188,6 +1188,208 @@ def test_resume_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]
     assert "--script" in out
 
 
+# ---- archive subcommand -------------------------------------------------
+
+
+def test_archive_writes_zip_and_matches_api(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI archive output must be byte-equal to the Sweep.archive output —
+    proves the CLI is a thin wrapper and that bundles are deterministic."""
+    import zipfile
+
+    from gmat_sweep.sweep import Sweep
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+    rc = cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:8000:3",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    cli_bundle = tmp_path / "cli.zip"
+    rc = cli.main(
+        [
+            "archive",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(script),
+            "--out",
+            str(cli_bundle),
+        ]
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "3 runs" in captured.out
+    assert str(cli_bundle) in captured.out
+    assert cli_bundle.is_file()
+
+    with zipfile.ZipFile(cli_bundle) as zf:
+        names = sorted(zf.namelist())
+    assert "manifest.jsonl" in names
+    assert "MANIFEST.hash" in names
+    assert "script/mission.script" in names
+
+    # API and CLI produce byte-equal bundles for the same manifest.
+    with LocalJoblibPool(workers=1) as pool:
+        api_sweep = Sweep.from_manifest(
+            out / "manifest.jsonl", script, backend=pool, progress=False
+        )
+    api_bundle = api_sweep.archive(tmp_path / "api.zip")
+    assert cli_bundle.read_bytes() == api_bundle.read_bytes()
+
+
+def test_archive_include_logs_bundles_logs(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import zipfile
+
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+    cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000,7100",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    capsys.readouterr()
+
+    bundle = tmp_path / "with-logs.zip"
+    rc = cli.main(
+        [
+            "archive",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(script),
+            "--out",
+            str(bundle),
+            "--include-logs",
+        ]
+    )
+    assert rc == 0
+    with zipfile.ZipFile(bundle) as zf:
+        names = zf.namelist()
+    assert any(name.endswith("/worker.log") for name in names)
+
+
+def test_archive_on_missing_manifest_exits_manifest_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _write_script(tmp_path)
+    rc = cli.main(
+        [
+            "archive",
+            str(tmp_path / "no-such-manifest.jsonl"),
+            "--script",
+            str(script),
+            "--out",
+            str(tmp_path / "bundle.zip"),
+        ]
+    )
+    assert rc == cli.EXIT_MANIFEST
+    assert "not found" in capsys.readouterr().err
+
+
+def test_archive_on_missing_script_exits_config_code(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+    cli.main(
+        [
+            "run",
+            "--grid",
+            "a=1,2",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    capsys.readouterr()
+
+    rc = cli.main(
+        [
+            "archive",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(tmp_path / "does-not-exist.script"),
+            "--out",
+            str(tmp_path / "bundle.zip"),
+        ]
+    )
+    assert rc == cli.EXIT_CONFIG
+    assert "script not found" in capsys.readouterr().err
+
+
+def test_archive_rejects_script_drift(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+    cli.main(
+        [
+            "run",
+            "--grid",
+            "a=1,2",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    capsys.readouterr()
+
+    script.write_text(
+        "% GMAT mission\nCreate Spacecraft Sat;\nCreate ForceModel FM;\n", encoding="utf-8"
+    )
+
+    rc = cli.main(
+        [
+            "archive",
+            str(out / "manifest.jsonl"),
+            "--script",
+            str(script),
+            "--out",
+            str(tmp_path / "bundle.zip"),
+        ]
+    )
+    assert rc == cli.EXIT_CONFIG
+    assert "script hash mismatch" in capsys.readouterr().err
+
+
+def test_archive_help_lists_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["archive", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--include-logs" in out
+    assert "--allow-script-drift" in out
+    assert "--out" in out
+
+
 # ---- _parse_backend_arg -------------------------------------------------
 
 

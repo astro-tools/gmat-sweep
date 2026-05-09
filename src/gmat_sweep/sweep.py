@@ -308,6 +308,47 @@ class Sweep:
             raise RuntimeError("Sweep.to_manifest requires Sweep.run() to have been called")
         return self._manifest
 
+    def archive(
+        self,
+        out: str | Path,
+        *,
+        include_logs: bool = False,
+    ) -> Path:
+        """Pack the sweep — script, manifest, per-run Parquets — into a ``.zip``.
+
+        The bundle is suitable for archival deposit (Zenodo, JOSS supplementary
+        material) or internal handoff. Layout, path-rewrite rules, and the
+        accompanying ``MANIFEST.hash`` are documented in
+        :mod:`gmat_sweep.archive`.
+
+        Parameters
+        ----------
+        out:
+            Destination ``.zip`` path. Parent directories are created on demand.
+        include_logs:
+            When ``True``, every per-run ``worker.log`` is bundled and the
+            manifest's ``log_path`` field continues to point at it (rewritten
+            to bundle-relative form). The default ``False`` drops the logs and
+            sets ``log_path`` to ``None`` in the bundled manifest, keeping the
+            archive small.
+
+        Returns
+        -------
+        Path
+            The resolved path to the produced ``.zip``.
+        """
+        from gmat_sweep import __version__ as sweep_version
+        from gmat_sweep.archive import _archive_sweep
+
+        return _archive_sweep(
+            manifest=self.to_manifest(),
+            output_dir=self._output_dir,
+            script_path=self._script_path,
+            out=Path(out),
+            include_logs=include_logs,
+            sweep_version=sweep_version,
+        )
+
     def to_dataframe(self, name: str | None = None) -> pd.DataFrame:
         """Aggregate the sweep's ``ReportFile`` outputs into one DataFrame.
 
