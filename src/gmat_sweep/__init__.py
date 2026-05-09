@@ -3,7 +3,12 @@
 import logging
 from importlib.metadata import PackageNotFoundError, version
 
-from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
+from gmat_sweep.aggregate import (
+    lazy_contacts,
+    lazy_ephemerides,
+    lazy_fused_reports,
+    lazy_multiindex,
+)
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
 from gmat_sweep.backends import LocalJoblibPool, Pool
 from gmat_sweep.errors import (
@@ -70,6 +75,7 @@ __all__ = [
     "latin_hypercube_samples",
     "lazy_contacts",
     "lazy_ephemerides",
+    "lazy_fused_reports",
     "lazy_multiindex",
     "monte_carlo",
     "sweep",
