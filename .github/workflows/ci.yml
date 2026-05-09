@@ -46,9 +46,14 @@ jobs:
         # under `tests/test_backends_{dask,ray}.py` can spin up a real
         # `distributed.LocalCluster` / `ray.init()`. `--extra plot` so the
         # plotting-helper tests under `tests/test_plotting.py` can import
-        # matplotlib. The lint, typecheck, and minimal-install jobs
-        # deliberately keep their syncs narrower.
-        run: uv sync --all-groups --extra dask --extra ray --extra plot
+        # matplotlib. `--extra k8s` so the mock-based unit tests in
+        # `tests/test_backends_kubernetes.py` (which `pytest.importorskip`
+        # the kubernetes client) can run here and contribute to the
+        # coverage gate — the real-cluster k8s integration tests still
+        # live in the dedicated `backend-k8s` job below. The lint,
+        # typecheck, and minimal-install jobs deliberately keep their
+        # syncs narrower.
+        run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s
 
       - name: Run pytest
         # `-m "(integration or not integration) and not slow"` overrides the
@@ -62,9 +67,9 @@ jobs:
       # data is identical across runners. The four per-file gates match
       # CONTRIBUTING.md.
 
-      - name: Enforce overall coverage (>=85%)
+      - name: Enforce overall coverage (>=90%)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
-        run: uv run coverage report --fail-under=85
+        run: uv run coverage report --fail-under=90
 
       - name: Enforce grids.py coverage (>=95%)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && matrix.gmat-version == 'R2026a'
