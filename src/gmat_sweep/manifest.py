@@ -132,6 +132,33 @@ class ManifestEntry:
             log_path=log_path,
         )
 
+    def _repr_html_(self) -> str:
+        import html as _html
+
+        from gmat_sweep._repr_html import (
+            build_kv_table,
+            format_overrides_html,
+            format_paths_html,
+            summarise_stderr_html,
+        )
+
+        if self.log_path is None:
+            log = "(none)"
+        else:
+            log = f"<code>{_html.escape(str(self.log_path))}</code>"
+        rows: list[tuple[str, str]] = [
+            ("run_id", str(self.run_id)),
+            ("status", self.status),
+            ("duration", f"{self.duration_s:.2f} s"),
+            ("started_at", self.started_at.isoformat()),
+            ("ended_at", self.ended_at.isoformat()),
+            ("log_path", log),
+            ("output_paths", format_paths_html(self.output_paths)),
+            ("overrides", format_overrides_html(self.overrides)),
+            ("stderr", summarise_stderr_html(self.stderr)),
+        ]
+        return build_kv_table(f"ManifestEntry run_id={self.run_id}", rows)
+
 
 @dataclass(slots=True)
 class Manifest:

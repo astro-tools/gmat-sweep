@@ -349,6 +349,39 @@ class Sweep:
             self.to_manifest(), self._output_dir, names, tolerance=tolerance, spool=spool
         )
 
+    def _repr_html_(self) -> str:
+        import html as _html
+
+        from gmat_sweep._repr_html import build_kv_table, short_sha
+
+        kind = self._parameter_spec.get("_kind", "grid")
+        try:
+            sha = canonical_script_sha256(self._script_path)
+            sha_cell = f"<code>{short_sha(sha)}</code>"
+        except OSError:
+            sha_cell = "(script not readable)"
+
+        rows: list[tuple[str, str]] = [
+            ("script", f"<code>{_html.escape(str(self._script_path))}</code>"),
+            ("script_sha256", sha_cell),
+            ("run_count", str(len(self._runs))),
+            ("parameter_spec._kind", _html.escape(str(kind))),
+            ("backend", _html.escape(type(self._backend).__name__)),
+        ]
+        if self._sweep_seed is not None:
+            rows.append(("sweep_seed", str(self._sweep_seed)))
+
+        if self._manifest is None:
+            rows.append(("status", "<em>not yet executed</em>"))
+        else:
+            counts = {"ok": 0, "failed": 0, "skipped": 0}
+            for entry in self._manifest.entries:
+                counts[entry.status] += 1
+            tally = ", ".join(f"{counts[k]} {k}" for k in ("ok", "failed", "skipped"))
+            rows.append(("outcomes", _html.escape(tally)))
+
+        return build_kv_table("Sweep", rows)
+
     def _enforce_debug_pool_single_spec(self, runs: Sequence[RunSpec]) -> None:
         # DebugPool runs every spec on the driver process and dirties GMAT's
         # process-global singletons after the first load; re-isolation
