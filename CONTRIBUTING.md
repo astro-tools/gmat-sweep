@@ -45,15 +45,18 @@ you are touching the worker, pool, or aggregation paths.
 
 CI enforces coverage gates on the Ubuntu / Python 3.12 cell:
 
-- Overall coverage must be ≥ 85%.
+- Overall coverage must be ≥ 90%.
 - Each of `src/gmat_sweep/grids.py`, `src/gmat_sweep/distributions.py`,
   `src/gmat_sweep/manifest.py`, and `src/gmat_sweep/aggregate.py` must be ≥ 95%.
 
-To reproduce locally:
+To reproduce locally, sync the same extras the gate cell installs (`--extra
+k8s` is needed alongside `dask`/`ray`/`plot` so the mock-based kubernetes
+backend tests run instead of skipping at `pytest.importorskip`):
 
 ```bash
+uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s
 uv run pytest -m "integration or not integration" --cov
-uv run coverage report --fail-under=85
+uv run coverage report --fail-under=90
 uv run coverage report --include='src/gmat_sweep/grids.py' --fail-under=95
 uv run coverage report --include='src/gmat_sweep/distributions.py' --fail-under=95
 uv run coverage report --include='src/gmat_sweep/manifest.py' --fail-under=95
