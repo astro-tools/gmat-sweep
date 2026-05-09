@@ -44,9 +44,11 @@ jobs:
       - name: Install project
         # `--extra dask --extra ray` so the `@pytest.mark.integration` tests
         # under `tests/test_backends_{dask,ray}.py` can spin up a real
-        # `distributed.LocalCluster` / `ray.init()`. The lint, typecheck, and
-        # minimal-install jobs deliberately keep their syncs narrower.
-        run: uv sync --all-groups --extra dask --extra ray
+        # `distributed.LocalCluster` / `ray.init()`. `--extra plot` so the
+        # plotting-helper tests under `tests/test_plotting.py` can import
+        # matplotlib. The lint, typecheck, and minimal-install jobs
+        # deliberately keep their syncs narrower.
+        run: uv sync --all-groups --extra dask --extra ray --extra plot
 
       - name: Run pytest
         # `-m "(integration or not integration) and not slow"` overrides the
