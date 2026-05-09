@@ -66,6 +66,9 @@ order-independence contracts.
 - **[Supported versions](supported-versions.md)** — GMAT × Python × OS matrix.
 - **[Benchmarks](benchmarks.md)** — wall-clock and throughput numbers for the
   three backends on a 1000-run reference sweep.
+- **[Cookbook](cookbook.md)** — patterns for turning a sweep's outputs into
+  the inputs downstream consumers need: visualisation export (CCSDS-OEM,
+  CZML), cross-tool validation, and external-tool wrapping.
 - **[Cluster recipes](recipes/index.md)** — Slurm with `srun`, Kubernetes
   pod-per-worker, and Ray autoscaling — wiring `DaskPool` and `RayPool`
   into shared infrastructure.

@@ -1,4 +1,4 @@
-"""Syntax check for the Python code blocks in docs/recipes/*.md.
+"""Syntax check for the Python code blocks in docs/recipes/*.md and docs/cookbook.md.
 
 `py_compile` parses each ```python``` block without executing it, so missing
 runtime dependencies (`dask_jobqueue`, `dask_kubernetes`, `ray`) don't fail
@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-RECIPES_DIR = Path(__file__).resolve().parent.parent / "docs" / "recipes"
+DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
+RECIPES_DIR = DOCS_DIR / "recipes"
+COOKBOOK_PATH = DOCS_DIR / "cookbook.md"
 
 _FENCE = re.compile(r"^```python\s*$\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 
@@ -28,7 +30,10 @@ def _python_blocks(md_path: Path) -> list[tuple[int, str]]:
 
 def _all_blocks() -> list[tuple[Path, int, str]]:
     out: list[tuple[Path, int, str]] = []
-    for md in sorted(RECIPES_DIR.glob("*.md")):
+    sources: list[Path] = sorted(RECIPES_DIR.glob("*.md"))
+    if COOKBOOK_PATH.exists():
+        sources.append(COOKBOOK_PATH)
+    for md in sources:
         for idx, src in _python_blocks(md):
             out.append((md, idx, src))
     return out
