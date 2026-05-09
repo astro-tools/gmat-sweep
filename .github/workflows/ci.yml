@@ -381,3 +381,20 @@ jobs:
         run: |
           gmat-sweep show ./grid-out/manifest.jsonl
           gmat-sweep show ./mc-out/manifest.jsonl
+      # Always-run diagnostic: on a failed cell, dump the per-run details
+      # (`--detail` orders failed rows first) plus the raw manifest so the
+      # captured GMAT stderr is visible in the job log without needing to
+      # download artefacts. No-op on a green cell beyond extra log lines.
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          for d in grid-out mc-out; do
+            echo "===== $d ====="
+            if [ -f "./$d/manifest.jsonl" ]; then
+              gmat-sweep show --detail "./$d/manifest.jsonl" || true
+              echo "----- raw $d/manifest.jsonl -----"
+              cat "./$d/manifest.jsonl"
+            else
+              echo "no manifest at ./$d/manifest.jsonl"
+            fi
+          done
