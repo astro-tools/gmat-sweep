@@ -8,7 +8,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
+from gmat_sweep.aggregate import (
+    lazy_contacts,
+    lazy_ephemerides,
+    lazy_fused_reports,
+    lazy_multiindex,
+)
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest, ManifestEntry
 
@@ -392,6 +397,215 @@ def test_lazy_contacts_failed_run_materialises_as_nan_row_with_na_interval(
     assert (failed_rows["__status"] == "failed").all()
     # Failed-row interval_id is pd.NA in the nullable Int64 level.
     assert bool(pd.isna(failed_rows.index[0]))
+
+
+def _write_timed_parquet(
+    output_dir: Path,
+    run_id: int,
+    basename: str,
+    timestamps: list[str],
+    *,
+    value_offset: int = 0,
+) -> Path:
+    """Helper: write a per-run report parquet with caller-controlled timestamps."""
+    path = output_dir / f"run-{run_id}" / f"{basename}.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(
+        {
+            "time": pd.to_datetime(timestamps),
+            "x": [value_offset + i for i in range(len(timestamps))],
+        }
+    )
+    df.to_parquet(path)
+    return path
+
+
+def _ok_two_reports_entry(
+    run_id: int,
+    path_a: Path,
+    path_b: Path,
+) -> ManifestEntry:
+    return _ok_entry(run_id, path_a, key="report__A", extra_paths={"report__B": path_b})
+
+
+# ---- fused multi-report aggregation --------------------------------------
+
+
+def test_lazy_fused_reports_exact_tolerance_inner_join(tmp_path: Path) -> None:
+    times = [f"2026-05-04T00:00:0{i}" for i in range(3)]
+    entries: list[ManifestEntry] = []
+    for run_id in range(2):
+        pa = _write_timed_parquet(tmp_path, run_id, "report__A", times, value_offset=run_id * 100)
+        pb = _write_timed_parquet(tmp_path, run_id, "report__B", times, value_offset=run_id * 200)
+        entries.append(_ok_two_reports_entry(run_id, pa, pb))
+
+    df = lazy_fused_reports(_make_manifest(entries), tmp_path, ["A", "B"], tolerance="exact")
+
+    assert df.index.names == ["run_id", "time"]
+    assert isinstance(df.columns, pd.MultiIndex)
+    assert df.columns.names == ["report", "field"]
+    assert {("A", "x"), ("B", "x"), ("A", "__status"), ("B", "__status"), ("__status", "")} <= set(
+        df.columns
+    )
+    assert len(df) == 2 * 3
+    assert (df[("A", "__status")] == "ok").all()
+    assert (df[("B", "__status")] == "ok").all()
+    assert (df[("__status", "")] == "ok").all()
+
+
+def test_lazy_fused_reports_numeric_tolerance_matches_within_window(tmp_path: Path) -> None:
+    # Anchor (A) at 1-Hz over :00..:04. B at every 10s starting :00. With
+    # tolerance=2s and merge_asof's default backward direction, only A times
+    # within 2s after the most recent B time get a B match. A=:00..:02 match
+    # B=:00; A=:03..:04 are >2s past B=:00 and B=:10 is in the future, so they
+    # land NaN on the B side.
+    a_times = [f"2026-05-04T00:00:0{i}" for i in range(5)]
+    b_times = ["2026-05-04T00:00:00", "2026-05-04T00:00:10"]
+    pa = _write_timed_parquet(tmp_path, 0, "report__A", a_times)
+    pb = _write_timed_parquet(tmp_path, 0, "report__B", b_times, value_offset=99)
+    entry = _ok_two_reports_entry(0, pa, pb)
+
+    df = lazy_fused_reports(
+        _make_manifest([entry]), tmp_path, ["A", "B"], tolerance=pd.Timedelta(seconds=2)
+    )
+
+    assert len(df) == 5
+    # First three anchor rows hit B=:00 (value_offset=99 so x=99 there).
+    matched = df[("B", "x")].notna()
+    assert matched.tolist() == [True, True, True, False, False]
+    assert (df.loc[matched, ("B", "x")] == 99).all()
+
+
+def test_lazy_fused_reports_no_overlap_within_tolerance(tmp_path: Path) -> None:
+    # A times: :00, :01, :02. B time: :30. tolerance=1s → no rows match B.
+    a_times = [f"2026-05-04T00:00:0{i}" for i in range(3)]
+    b_times = ["2026-05-04T00:00:30"]
+    pa = _write_timed_parquet(tmp_path, 0, "report__A", a_times)
+    pb = _write_timed_parquet(tmp_path, 0, "report__B", b_times, value_offset=42)
+    entry = _ok_two_reports_entry(0, pa, pb)
+
+    df = lazy_fused_reports(
+        _make_manifest([entry]), tmp_path, ["A", "B"], tolerance=pd.Timedelta(seconds=1)
+    )
+
+    assert len(df) == 3
+    assert df[("A", "x")].notna().all()
+    assert df[("B", "x")].isna().all()
+
+
+def test_lazy_fused_reports_anchor_failed_lands_as_one_nat_row(tmp_path: Path) -> None:
+    # Run 0 has both A and B; run 1 is ok but only produced B (anchor missing).
+    times = ["2026-05-04T00:00:00", "2026-05-04T00:00:01"]
+    pa0 = _write_timed_parquet(tmp_path, 0, "report__A", times)
+    pb0 = _write_timed_parquet(tmp_path, 0, "report__B", times, value_offset=10)
+    pb1 = _write_timed_parquet(tmp_path, 1, "report__B", times, value_offset=100)
+    entries = [
+        _ok_two_reports_entry(0, pa0, pb0),
+        ManifestEntry(
+            run_id=1,
+            overrides={},
+            status="ok",
+            output_paths={"report__B": pb1},
+            started_at=_utc(2026, 5, 4),
+            ended_at=_utc(2026, 5, 4, 0, 0, 1),
+            duration_s=1.0,
+            stderr=None,
+            log_path=None,
+        ),
+    ]
+
+    df = lazy_fused_reports(_make_manifest(entries), tmp_path, ["A", "B"], tolerance="exact")
+
+    run_1 = df.xs(1, level="run_id")
+    assert len(run_1) == 1
+    assert bool(pd.isna(run_1.index[0]))
+    assert run_1[("A", "x")].isna().all()
+    assert run_1[("B", "x")].isna().all()
+    # Per-report status mirrors lazy_multiindex's per-report contract:
+    # both A and B report "ok" because the run itself was ok.
+    assert (run_1[("A", "__status")] == "ok").all()
+    assert (run_1[("B", "__status")] == "ok").all()
+    assert (run_1[("__status", "")] == "ok").all()
+
+
+def test_lazy_fused_reports_failed_run_per_report_status_propagates(tmp_path: Path) -> None:
+    times = ["2026-05-04T00:00:00", "2026-05-04T00:00:01"]
+    pa = _write_timed_parquet(tmp_path, 0, "report__A", times)
+    pb = _write_timed_parquet(tmp_path, 0, "report__B", times, value_offset=10)
+    entries = [
+        _ok_two_reports_entry(0, pa, pb),
+        _nonok_entry(1, "failed"),
+    ]
+
+    df = lazy_fused_reports(_make_manifest(entries), tmp_path, ["A", "B"], tolerance="exact")
+
+    run_1 = df.xs(1, level="run_id")
+    assert len(run_1) == 1
+    assert (run_1[("A", "__status")] == "failed").all()
+    assert (run_1[("B", "__status")] == "failed").all()
+    assert (run_1[("__status", "")] == "failed").all()
+
+
+def test_lazy_fused_reports_right_report_failed_anchor_ok(tmp_path: Path) -> None:
+    # Run 0: both reports ok. Run 1: A ok, B missing (manifest entry has no B key).
+    times = ["2026-05-04T00:00:00", "2026-05-04T00:00:01"]
+    pa0 = _write_timed_parquet(tmp_path, 0, "report__A", times)
+    pb0 = _write_timed_parquet(tmp_path, 0, "report__B", times, value_offset=10)
+    pa1 = _write_timed_parquet(tmp_path, 1, "report__A", times, value_offset=100)
+    entries = [
+        _ok_two_reports_entry(0, pa0, pb0),
+        _ok_entry(1, pa1, key="report__A"),
+    ]
+
+    df = lazy_fused_reports(_make_manifest(entries), tmp_path, ["A", "B"], tolerance="exact")
+
+    # Run 1: anchor has data → 2 rows. B's data NaN because B was missing.
+    run_1 = df.xs(1, level="run_id")
+    assert len(run_1) == 2
+    assert run_1[("A", "x")].notna().all()
+    assert run_1[("B", "x")].isna().all()
+    # B's per-report status is "ok" — the run was ok, just no B output.
+    assert (run_1[("B", "__status")] == "ok").all()
+
+
+def test_lazy_fused_reports_three_reports_chain_merge(tmp_path: Path) -> None:
+    times = [f"2026-05-04T00:00:0{i}" for i in range(2)]
+    pa = _write_timed_parquet(tmp_path, 0, "report__A", times, value_offset=0)
+    pb = _write_timed_parquet(tmp_path, 0, "report__B", times, value_offset=10)
+    pc = _write_timed_parquet(tmp_path, 0, "report__C", times, value_offset=20)
+    entry = _ok_entry(
+        0,
+        pa,
+        key="report__A",
+        extra_paths={"report__B": pb, "report__C": pc},
+    )
+
+    df = lazy_fused_reports(_make_manifest([entry]), tmp_path, ["A", "B", "C"], tolerance="exact")
+
+    assert len(df) == 2
+    assert {("A", "x"), ("B", "x"), ("C", "x")} <= set(df.columns)
+    assert df[("A", "x")].tolist() == [0, 1]
+    assert df[("B", "x")].tolist() == [10, 11]
+    assert df[("C", "x")].tolist() == [20, 21]
+
+
+def test_lazy_fused_reports_empty_manifest(tmp_path: Path) -> None:
+    df = lazy_fused_reports(_make_manifest([]), tmp_path, ["A", "B"], tolerance="exact")
+
+    assert df.empty
+    assert df.index.names == ["run_id", "time"]
+    assert isinstance(df.columns, pd.MultiIndex)
+    assert ("__status", "") in df.columns
+
+
+def test_lazy_fused_reports_single_name_raises(tmp_path: Path) -> None:
+    with pytest.raises(SweepConfigError, match=r"at least 2 report names"):
+        lazy_fused_reports(_make_manifest([]), tmp_path, ["A"], tolerance="exact")
+
+
+def test_lazy_fused_reports_duplicate_names_raises(tmp_path: Path) -> None:
+    with pytest.raises(SweepConfigError, match=r"unique report names"):
+        lazy_fused_reports(_make_manifest([]), tmp_path, ["A", "A"], tolerance="exact")
 
 
 def test_lazy_contacts_three_kinds_aggregate_independently(tmp_path: Path) -> None:

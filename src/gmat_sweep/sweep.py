@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
-from gmat_sweep.aggregate import lazy_contacts, lazy_ephemerides, lazy_multiindex
+from gmat_sweep.aggregate import (
+    lazy_contacts,
+    lazy_ephemerides,
+    lazy_fused_reports,
+    lazy_multiindex,
+)
 from gmat_sweep.errors import BackendError, SweepConfigError
 from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 
@@ -326,6 +331,23 @@ class Sweep:
         See :func:`gmat_sweep.aggregate.lazy_contacts` for the contract.
         """
         return lazy_contacts(self.to_manifest(), self._output_dir, name=name)
+
+    def to_fused_reports(
+        self,
+        names: Sequence[str],
+        *,
+        tolerance: str | pd.Timedelta,
+        spool: bool = True,
+    ) -> pd.DataFrame:
+        """Fuse N ``ReportFile`` outputs per run into one wide MultiIndex-column DataFrame.
+
+        See :func:`gmat_sweep.aggregate.lazy_fused_reports` for the
+        contract — this is a thin convenience that binds the sweep's own
+        manifest and output directory.
+        """
+        return lazy_fused_reports(
+            self.to_manifest(), self._output_dir, names, tolerance=tolerance, spool=spool
+        )
 
     def _enforce_debug_pool_single_spec(self, runs: Sequence[RunSpec]) -> None:
         # DebugPool runs every spec on the driver process and dirties GMAT's

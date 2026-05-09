@@ -85,6 +85,68 @@ the same way you'd use a per-run row position; the actual visibility
 times are still in the data columns (`Start`, `Stop`, `Duration`, etc.,
 depending on the `ContactLocator.ReportFormat` setting).
 
+## Fusing multiple reports per run
+
+When a sweep produces several `ReportFile` outputs and you want them
+side-by-side on a shared timeline,
+[`lazy_fused_reports`][gmat_sweep.lazy_fused_reports] (and
+`Sweep.to_fused_reports`) reshape them into one wide DataFrame with a
+column-level `pandas.MultiIndex` keyed by `(report_name, column)`. The
+first name in `names` is the merge anchor; subsequent reports are
+joined onto it per `run_id`.
+
+| `tolerance` | Merge per run | When it fits |
+|-------------|---------------|--------------|
+| `"exact"` (literal) | inner join on `time` | every report shares the same step setting and you only want rows present in all of them |
+| `pd.Timedelta(...)` | `pd.merge_asof` (`backward` direction, default) | reports use different cadences and a "nearest within window" match per anchor row is what you want |
+
+```python
+from pathlib import Path
+
+import pandas as pd
+from gmat_sweep import Manifest, lazy_fused_reports
+
+manifest = Manifest.load(Path("./sweep/manifest.jsonl"))
+
+# Two reports on the same step setting → exact inner join.
+exact = lazy_fused_reports(
+    manifest, Path("./sweep"), names=["StateReport", "BurnReport"], tolerance="exact",
+)
+
+# Reports on different cadences (e.g. 1 Hz state + 10 s maneuvers) → asof merge
+# with a per-row tolerance window.
+fused = lazy_fused_reports(
+    manifest,
+    Path("./sweep"),
+    names=["StateReport", "BurnReport"],
+    tolerance=pd.Timedelta(seconds=2),
+)
+
+# Anchor's columns under (StateReport, *), right-side under (BurnReport, *).
+fused[("StateReport", "Sat.X")]
+fused[("BurnReport", "Sat.Tank.Mass")]
+```
+
+### Column shape
+
+| Column | Meaning |
+|--------|---------|
+| `(report_name, column)` | data column from that report |
+| `(report_name, "__status")` | per-report status — preserves the [`lazy_multiindex`][gmat_sweep.lazy_multiindex] contract for each report independently (e.g. one report failed-for-this-run while others succeeded) |
+| `("__status", "")` | run-level status, mirrored from the manifest entry |
+
+A run whose anchor failed (`status != "ok"` for the first name in
+`names`, or its parquet was missing) lands as a single `time=NaT` row
+with all data NaN. The per-report `__status` columns still surface every
+report's individual state for that run, but the other reports' data is
+not merged in — anchor-failure shadows the rest of the row. Pick the
+report most likely to be present as the first entry of `names`.
+
+`tolerance` is required (no default). See the
+[`pandas.merge_asof` reference](https://pandas.pydata.org/docs/reference/api/pandas.merge_asof.html)
+for the `direction` (`backward` by default), `allow_exact_matches`, and
+accepted `tolerance` types.
+
 ## Memory: streaming vs. eager reads
 
 `lazy_multiindex` and `lazy_ephemerides` accept `spool: bool = True`.

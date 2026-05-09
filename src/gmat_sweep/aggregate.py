@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
     from gmat_sweep.manifest import Manifest, ManifestEntry
 
-__all__ = ["lazy_contacts", "lazy_ephemerides", "lazy_multiindex"]
+__all__ = ["lazy_contacts", "lazy_ephemerides", "lazy_fused_reports", "lazy_multiindex"]
 
 
 _RUN_ID_COL = "run_id"
@@ -347,4 +347,221 @@ def _empty_frame(*, secondary_index: str, index_names: tuple[str, str]) -> pd.Da
             [pd.Series([], dtype="int64"), secondary_series],
             names=list(index_names),
         ),
+    )
+
+
+def lazy_fused_reports(
+    manifest: Manifest,
+    output_dir: Path,
+    names: Sequence[str],
+    *,
+    tolerance: str | pd.Timedelta,
+    spool: bool = True,
+) -> pd.DataFrame:
+    """Fuse N ``ReportFile`` outputs per run into one wide ``(run_id, time)``-indexed DataFrame.
+
+    Each report is read via :func:`lazy_multiindex` and the per-run slices
+    are stitched together into a single frame whose columns form a
+    two-level :class:`pandas.MultiIndex` keyed by ``(report_name, column)``.
+    The first name in ``names`` is the merge anchor: subsequent reports
+    are joined to it per ``run_id`` via :func:`pandas.merge_asof` (with
+    the user-supplied ``tolerance``), or via an inner join on ``time``
+    when ``tolerance="exact"`` — appropriate when every report shares a
+    step setting.
+
+    Parameters
+    ----------
+    manifest
+        The sweep manifest.
+    output_dir
+        Sweep output root, used to anchor relative paths in the manifest.
+    names
+        The ``ReportFile`` resource names to fuse, in merge order. The
+        first name is the anchor (left side of every merge); later names
+        are joined onto it. Must contain at least two unique names — for a
+        single report use :func:`lazy_multiindex` with ``name=...``.
+    tolerance
+        Required. Either the literal string ``"exact"`` (collapses to an
+        inner join on ``time`` per run, appropriate when reports share a
+        step setting) or any value :func:`pandas.merge_asof` accepts as a
+        ``tolerance`` argument — typically a :class:`pandas.Timedelta`.
+    spool
+        Forwarded to each underlying :func:`lazy_multiindex` call.
+        ``True`` (default) streams per-run Parquet a batch at a time;
+        ``False`` reads each fragment in one shot.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Row index: ``(run_id, time)`` :class:`MultiIndex`. Column index:
+        a two-level :class:`MultiIndex` ``("report", "field")``. For each
+        report, data columns appear at ``(report_name, column)`` and the
+        per-report status (preserving the per-report contract from
+        :func:`lazy_multiindex`) at ``(report_name, "__status")``. A
+        run-level status sits at ``("__status", "")``.
+
+    Notes
+    -----
+    The anchor selection is asymmetric. A run whose anchor failed
+    (``__status != "ok"``) — or whose anchor parquet was missing — lands
+    as a single ``time=NaT`` row with all data ``NaN`` and the per-report
+    ``__status`` of every report preserved. The other reports' data for
+    that run is not surfaced. Pick the report most likely to be present
+    as the first entry of ``names``.
+
+    Raises
+    ------
+    SweepConfigError
+        ``names`` has fewer than two entries, contains duplicates, or any
+        entry does not match a ``ReportFile`` resource in the sweep
+        (raised by the underlying :func:`lazy_multiindex` call).
+    """
+    if len(names) < 2:
+        raise SweepConfigError(
+            f"lazy_fused_reports requires at least 2 report names; got {len(names)}. "
+            "Use lazy_multiindex(name=...) for a single report."
+        )
+    if len(set(names)) != len(names):
+        raise SweepConfigError(
+            f"lazy_fused_reports requires unique report names; got duplicates in {list(names)}"
+        )
+
+    asof_tolerance: pd.Timedelta | None
+    if isinstance(tolerance, str):
+        if tolerance != "exact":
+            raise SweepConfigError(
+                f"tolerance must be the literal string 'exact' or a pd.Timedelta; got {tolerance!r}"
+            )
+        asof_tolerance = None
+    else:
+        asof_tolerance = tolerance
+
+    per_report: list[pd.DataFrame] = [
+        lazy_multiindex(manifest, output_dir, name=name, spool=spool) for name in names
+    ]
+
+    # Internal flat labels avoid string-prefix collisions with arbitrary
+    # GMAT column names. The flat → (report, field) mapping is applied
+    # once at the very end to build the column MultiIndex.
+    flat_to_tuple: dict[str, tuple[str, str]] = {}
+    rename_per_report: list[dict[str, str]] = []
+    for ridx, (name, df) in enumerate(zip(names, per_report, strict=True)):
+        rename: dict[str, str] = {}
+        for cidx, col in enumerate(df.columns):
+            flat = f"_s{ridx}" if col == _STATUS_COL else f"_d{ridx}_{cidx}"
+            rename[col] = flat
+            flat_to_tuple[flat] = (name, col)
+        rename_per_report.append(rename)
+
+    flat_per_report: list[pd.DataFrame] = [
+        df.reset_index().rename(columns=rename_per_report[i]) for i, df in enumerate(per_report)
+    ]
+
+    run_status: dict[int, str] = {e.run_id: e.status for e in manifest.entries}
+    run_ids: list[int] = [e.run_id for e in manifest.entries]
+
+    parts: list[pd.DataFrame] = []
+    for run_id in run_ids:
+        per_run = [
+            df[df[_RUN_ID_COL] == run_id].drop(columns=[_RUN_ID_COL]) for df in flat_per_report
+        ]
+        anchor = per_run[0]
+        anchor_has_data = not anchor.empty and bool(anchor[_TIME_COL].notna().any())
+        if anchor_has_data:
+            fused = _merge_run_fused(
+                per_run, tolerance=asof_tolerance, rename_per_report=rename_per_report
+            )
+        else:
+            fused = _anchor_failed_row_fused(
+                per_run,
+                rename_per_report=rename_per_report,
+                run_level_status=run_status[run_id],
+            )
+        fused[_RUN_ID_COL] = run_id
+        fused[_STATUS_COL] = run_status[run_id]
+        parts.append(fused)
+
+    if not parts:
+        return _empty_fused_frame(flat_to_tuple)
+
+    result = pd.concat(parts, axis=0, ignore_index=True, sort=False)
+    result[_TIME_COL] = pd.to_datetime(result[_TIME_COL]).astype("datetime64[ns]")
+    result = result.set_index([_RUN_ID_COL, _TIME_COL]).sort_index()
+
+    new_cols: list[tuple[str, str]] = [
+        (_STATUS_COL, "") if col == _STATUS_COL else flat_to_tuple[col] for col in result.columns
+    ]
+    result.columns = pd.MultiIndex.from_tuples(new_cols, names=["report", "field"])
+    return cast(pd.DataFrame, result)
+
+
+def _merge_run_fused(
+    per_run: Sequence[pd.DataFrame],
+    *,
+    tolerance: pd.Timedelta | None,
+    rename_per_report: Sequence[dict[str, str]],
+) -> pd.DataFrame:
+    # Anchor has ok-data here; later reports join onto it. ``tolerance=None``
+    # is the "exact" sentinel from lazy_fused_reports — collapses the merge
+    # to an inner join on time. Reports with only a NaN-marker row for this
+    # run contribute one row's worth of NaN data + their NaN-marker per-report
+    # status.
+    anchor = cast(
+        pd.DataFrame,
+        per_run[0].dropna(subset=[_TIME_COL]).sort_values(_TIME_COL).reset_index(drop=True),
+    )
+
+    for i in range(1, len(per_run)):
+        right = per_run[i]
+        right_has_data = not right.empty and bool(right[_TIME_COL].notna().any())
+        if right_has_data:
+            right_ok = cast(
+                pd.DataFrame,
+                right.dropna(subset=[_TIME_COL]).sort_values(_TIME_COL).reset_index(drop=True),
+            )
+            if tolerance is None:
+                anchor = anchor.merge(right_ok, on=_TIME_COL, how="inner")
+            else:
+                anchor = pd.merge_asof(anchor, right_ok, on=_TIME_COL, tolerance=tolerance)
+        else:
+            for orig_col, flat in rename_per_report[i].items():
+                if orig_col == _STATUS_COL:
+                    anchor[flat] = right[flat].iloc[0] if not right.empty else pd.NA
+                else:
+                    anchor[flat] = np.nan
+    return anchor
+
+
+def _anchor_failed_row_fused(
+    per_run: Sequence[pd.DataFrame],
+    *,
+    rename_per_report: Sequence[dict[str, str]],
+    run_level_status: str,
+) -> pd.DataFrame:
+    # Anchor has no ok-data for this run; emit one NaT-time row carrying
+    # every report's per-report status. Data columns are NaN regardless of
+    # whether non-anchor reports happened to have data — the asymmetry is
+    # documented on lazy_fused_reports.
+    row: dict[str, Any] = {_TIME_COL: pd.NaT}
+    for i, df in enumerate(per_run):
+        for orig_col, flat in rename_per_report[i].items():
+            if orig_col == _STATUS_COL:
+                if not df.empty:
+                    row[flat] = df[flat].iloc[0]
+                else:
+                    row[flat] = run_level_status
+            else:
+                row[flat] = np.nan
+    return pd.DataFrame([row])
+
+
+def _empty_fused_frame(flat_to_tuple: dict[str, tuple[str, str]]) -> pd.DataFrame:
+    cols = [*flat_to_tuple.values(), (_STATUS_COL, "")]
+    return pd.DataFrame(
+        {col: pd.Series([], dtype="object") for col in cols},
+        index=pd.MultiIndex.from_arrays(
+            [pd.Series([], dtype="int64"), pd.Series([], dtype="datetime64[ns]")],
+            names=[_RUN_ID_COL, _TIME_COL],
+        ),
+        columns=pd.MultiIndex.from_tuples(cols, names=["report", "field"]),
     )
