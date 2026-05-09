@@ -195,3 +195,21 @@ class RunOutcome:
             started_at=datetime.fromisoformat(data["started_at"]),
             ended_at=datetime.fromisoformat(data["ended_at"]),
         )
+
+    def _repr_html_(self) -> str:
+        from gmat_sweep._repr_html import (
+            build_kv_table,
+            format_paths_html,
+            summarise_stderr_html,
+        )
+
+        rows: list[tuple[str, str]] = [
+            ("run_id", str(self.run_id)),
+            ("status", self.status),
+            ("duration", f"{self.duration_s:.2f} s"),
+            ("started_at", self.started_at.isoformat()),
+            ("ended_at", self.ended_at.isoformat()),
+            ("output_paths", format_paths_html(self.output_paths)),
+            ("stderr", summarise_stderr_html(self.stderr)),
+        ]
+        return build_kv_table(f"RunOutcome run_id={self.run_id}", rows)
