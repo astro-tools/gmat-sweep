@@ -160,10 +160,31 @@ def _clone_manifest_with_entries(manifest: Manifest, entries: list[ManifestEntry
 
 
 def _serialise_manifest(manifest: Manifest) -> bytes:
-    """Serialise a manifest header + entries as one trailing-newline-terminated JSONL blob."""
+    """Serialise a manifest header + entries as one trailing-newline-terminated JSONL blob.
+
+    Path values in entries go through :meth:`Path.as_posix` so the bundled
+    manifest carries forward-slash paths on every host — :class:`Path` on
+    Windows is a :class:`WindowsPath` whose ``str`` uses backslashes, which
+    would otherwise leak ``runs\\run-0\\foo`` into a deposit.
+    """
     lines = [json.dumps(manifest._header_dict(), sort_keys=True)]
-    lines.extend(json.dumps(e.to_dict(), sort_keys=True) for e in manifest.entries)
+    lines.extend(json.dumps(_entry_to_posix_dict(e), sort_keys=True) for e in manifest.entries)
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _entry_to_posix_dict(entry: ManifestEntry) -> dict[str, object]:
+    """Mirror :meth:`ManifestEntry.to_dict` but force POSIX-style path strings."""
+    return {
+        "run_id": entry.run_id,
+        "overrides": dict(entry.overrides),
+        "status": entry.status,
+        "output_paths": {k: Path(v).as_posix() for k, v in entry.output_paths.items()},
+        "started_at": entry.started_at.isoformat(),
+        "ended_at": entry.ended_at.isoformat(),
+        "duration_s": entry.duration_s,
+        "stderr": entry.stderr,
+        "log_path": None if entry.log_path is None else Path(entry.log_path).as_posix(),
+    }
 
 
 def _collect_run_members(
