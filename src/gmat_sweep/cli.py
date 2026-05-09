@@ -483,6 +483,35 @@ def _cmd_explicit(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_archive(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_file():
+        print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
+        return EXIT_MANIFEST
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    from gmat_sweep import __version__ as sweep_version
+    from gmat_sweep.archive import _archive_sweep
+
+    manifest = Manifest.load(manifest_path)
+    out = Path(args.out)
+    bundle = _archive_sweep(
+        manifest=manifest,
+        output_dir=manifest_path.parent,
+        script_path=script,
+        out=out,
+        include_logs=args.include_logs,
+        sweep_version=sweep_version,
+        allow_script_drift=args.allow_script_drift,
+    )
+    print(_format_summary(manifest, manifest_path.parent))
+    print(f"archive: {bundle}")
+    return EXIT_OK
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     if not manifest_path.is_file():
@@ -816,6 +845,57 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_backend_flag(resume)
     resume.set_defaults(func=_cmd_resume)
+
+    archive = subparsers.add_parser(
+        "archive",
+        help="Pack a finished sweep into a portable .zip for archival deposit.",
+        description=(
+            "Bundle a sweep's script, manifest, and per-run Parquet outputs into "
+            "a single .zip suitable for Zenodo / JOSS deposit or internal handoff. "
+            "Output paths in the bundled manifest are rewritten to be bundle-"
+            "relative; a sha256sum-compatible MANIFEST.hash and a generated "
+            "README.md describing how to resume the sweep are also included."
+        ),
+    )
+    archive.add_argument(
+        "manifest",
+        metavar="MANIFEST",
+        help="Path to a manifest.jsonl produced by a prior sweep.",
+    )
+    archive.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the sweep loaded. Its canonical "
+            "SHA-256 must equal the manifest's script_sha256 unless "
+            "--allow-script-drift is set."
+        ),
+    )
+    archive.add_argument(
+        "--out",
+        required=True,
+        metavar="PATH",
+        help="Destination .zip path. Parent directories are created on demand.",
+    )
+    archive.add_argument(
+        "--include-logs",
+        action="store_true",
+        help=(
+            "Bundle per-run worker.log files alongside the Parquet outputs. "
+            "Default is to drop them so the archive stays small; the manifest's "
+            "log_path field is set to null in that case."
+        ),
+    )
+    archive.add_argument(
+        "--allow-script-drift",
+        action="store_true",
+        help=(
+            "Proceed even if the script's canonical hash differs from the "
+            "manifest's. The bundle still records the manifest's original hash."
+        ),
+    )
+    archive.set_defaults(func=_cmd_archive)
 
     return parser
 
