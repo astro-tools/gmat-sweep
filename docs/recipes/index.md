@@ -51,3 +51,10 @@ schedulers — write a custom `Pool` against the
 subprocess hop, and yield [`RunOutcome`][gmat_sweep.spec.RunOutcome]s as
 they complete. The three shipped pools are exactly that pattern, three
 different ways.
+
+## Looking for the other side?
+
+These recipes wire `gmat-sweep` *onto* cluster infrastructure. For
+patterns that turn the sweep's outputs into the inputs downstream
+consumers need — visualisation export, cross-tool validation,
+external-tool wrapping — see the [Cookbook](../cookbook.md).

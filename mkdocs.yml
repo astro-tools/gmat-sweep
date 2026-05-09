@@ -53,6 +53,7 @@ nav:
       - Latin hypercube vs Monte Carlo: examples/05_latin_hypercube.ipynb
       - Dask cluster recipe: examples/06_dask_cluster_recipe.ipynb
       - Ray autoscaling recipe: examples/07_ray_autoscaling_recipe.ipynb
+  - Cookbook: cookbook.md
   - Recipes:
       - recipes/index.md
       - Slurm with srun: recipes/slurm.md
