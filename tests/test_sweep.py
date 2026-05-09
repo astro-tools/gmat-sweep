@@ -274,6 +274,45 @@ def test_sweep_to_dataframe_marks_failed_run(tmp_path: Path, fake_gmat_run: Fake
     assert failed_rows.index.get_level_values("run_id").tolist() == [1]
 
 
+def test_sweep_to_fused_reports_returns_multiindex_column_frame(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    script = _write_script(tmp_path)
+    output_dir = tmp_path / "out"
+    runs = _make_runs(script, output_dir, n=2)
+
+    times = pd.to_datetime([f"2026-05-04T00:00:0{i}" for i in range(2)])
+
+    def _run(**_: Any) -> FakeResults:
+        return FakeResults(
+            reports={
+                "A": pd.DataFrame({"time": times, "x": [1.0, 2.0]}),
+                "B": pd.DataFrame({"time": times, "y": [10.0, 20.0]}),
+            }
+        )
+
+    fake_gmat_run.install_loader(run_hook=_run)
+
+    with LocalJoblibPool(workers=1) as pool:
+        sweep = Sweep(
+            runs=runs,
+            backend=pool,
+            manifest_path=output_dir / "manifest.jsonl",
+            output_dir=output_dir,
+            script_path=script,
+            parameter_spec={},
+            progress=False,
+        ).run()
+
+    df = sweep.to_fused_reports(["A", "B"], tolerance="exact")
+
+    assert df.index.names == ["run_id", "time"]
+    assert isinstance(df.columns, pd.MultiIndex)
+    assert {("A", "x"), ("B", "y"), ("__status", "")} <= set(df.columns)
+    assert len(df) == 2 * 2
+    assert (df[("__status", "")] == "ok").all()
+
+
 def test_sweep_to_manifest_requires_run_first(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
     script = _write_script(tmp_path)
     output_dir = tmp_path / "out"
