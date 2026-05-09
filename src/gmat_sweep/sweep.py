@@ -211,7 +211,11 @@ class Sweep:
             script hash drifted and ``allow_script_drift`` is ``False``, or
             the manifest's ``parameter_spec`` carries an unknown ``_kind``.
         """
-        manifest_path_obj = Path(manifest_path)
+        # Resolve to absolute so the derived `output_dir` (and every
+        # subsequent per-run path it seeds) is GMAT-safe. Matches the
+        # `_run_sweep` resolution on the fresh-sweep path; see the
+        # OUTPUT_PATH note there for why.
+        manifest_path_obj = Path(manifest_path).resolve()
         script_path_obj = Path(script_path)
         output_dir = manifest_path_obj.parent
         if not output_dir.exists():
