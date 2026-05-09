@@ -160,6 +160,72 @@ on small sweeps. The result frame is identical either way.
 are typically tiny (one row per pass) and the streaming overhead is not
 worth the knob.
 
+## Summarising across runs
+
+`gmat-sweep` returns one row per `(run_id, time)` — every run kept,
+every time step kept. The canonical next step for dispersion analysis
+is to collapse across runs at each time step into per-time
+statistics: median, 5th and 95th percentile, mean, std, and a count of
+ok contributions. [`sweep_summary`][gmat_sweep.sweep_summary] does
+exactly that and pairs with
+[`sweep_band_plot`][gmat_sweep.plotting.sweep_band_plot] (gated on the
+`[plot]` extra) for the matching figure.
+
+```python
+from pathlib import Path
+
+from gmat_sweep import Manifest, lazy_multiindex, sweep_summary
+from gmat_sweep.plotting import sweep_band_plot
+
+manifest = Manifest.load(Path("./sweep/manifest.jsonl"))
+df = lazy_multiindex(manifest, Path("./sweep"))
+
+# Default: per-time-step 5/50/95 + mean + std across runs.
+summary = sweep_summary(df)
+
+# (time, q=0.5) slice — the median Sat.X over time across all runs.
+median_x = summary[("q0.5", "Sat.X")]
+
+# Median + 5–95% band for Sat.X.
+ax = sweep_band_plot(summary, "Sat.X")
+ax.figure.savefig("sat_x_band.png")
+```
+
+### Output shape
+
+The result is a single DataFrame whose row index is the unique values
+of the `by` level and whose column index is a two-level
+`pandas.MultiIndex`:
+
+| Column | Meaning |
+|--------|---------|
+| `(statistic, field)` | one column per `(statistic, original-column)` pair |
+
+Statistic labels are exactly the entries of `include` followed by
+`f"q{q_val}"` for each requested quantile — e.g. `"mean"`, `"std"`,
+`"q0.05"`, `"q0.5"`, `"q0.95"` for the defaults. `count_ok` counts
+non-NaN values per group; useful for spotting time steps where many
+runs produced NaNs.
+
+### `by="time"` vs `by="run_id"`
+
+- `by="time"` (default) — collapse across runs at each time step. The
+  natural input for "median over time with a 5/95% band".
+- `by="run_id"` — collapse across time steps within each run. The
+  natural input for per-run summary metrics (e.g. mean Sat.X over the
+  whole trajectory).
+
+Other values raise `SweepConfigError`. Categorical groupings and
+arbitrary `by=` keys are intentionally out of scope in this release.
+
+### Failed and skipped runs
+
+By default (`dropna=True`) `sweep_summary` filters rows where
+`__status != "ok"` before aggregating, so failed and skipped runs are
+excluded from every statistic. Pass `dropna=False` to keep them — the
+NaT marker rows from non-ok runs land as a NaT-keyed group in the
+output (mostly NaN, with `count_ok` reflecting the contribution).
+
 ## Migrating from v0.1
 
 v0.1 used a bare `<name>.parquet` per-run layout and keyed

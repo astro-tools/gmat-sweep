@@ -1,7 +1,7 @@
-"""Plot helpers for sweep DataFrames — corner/pair plots and 2-axis heatmaps.
+"""Plot helpers for sweep DataFrames — corner/pair plots, 2-axis heatmaps, and bands.
 
-The two public entry points cover the two figures users hand-roll most
-often on top of a sweep result:
+The public entry points cover the figures users hand-roll most often on
+top of a sweep result:
 
 - :func:`sweep_corner` — pair plot of the perturbed dotted-paths coloured
   by a per-run scalar metric. Useful for Monte Carlo and Latin hypercube
@@ -9,12 +9,17 @@ often on top of a sweep result:
 - :func:`sweep_heatmap` — 2-D grid heatmap. Asserts the sweep was a
   two-axis :func:`gmat_sweep.sweep` grid and pivots the per-run metric
   into a matrix.
+- :func:`sweep_band_plot` — median-and-band plot of one column over time
+  (or run_id), reading a :func:`gmat_sweep.sweep_summary` DataFrame
+  directly.
 
-Both helpers consume the v0.2 ``(run_id, time)``-MultiIndexed DataFrame
-:func:`gmat_sweep.sweep` returns. Per-run parameter values come from
-either the DataFrame itself (when the perturbed dotted-path is also a
-report column) or from ``manifest.entries[i].overrides`` — the resolution
-order is documented per helper.
+The corner/heatmap helpers consume the v0.2
+``(run_id, time)``-MultiIndexed DataFrame :func:`gmat_sweep.sweep`
+returns. Per-run parameter values come from either the DataFrame itself
+(when the perturbed dotted-path is also a report column) or from
+``manifest.entries[i].overrides`` — the resolution order is documented
+per helper. :func:`sweep_band_plot` instead consumes the per-``time``
+(or per-``run_id``) statistics frame :func:`sweep_summary` returns.
 
 This module imports :mod:`matplotlib` lazily (inside each helper) so
 ``import gmat_sweep.plotting`` succeeds without the ``[plot]`` extra; the
@@ -39,7 +44,7 @@ if TYPE_CHECKING:
 
     from gmat_sweep.manifest import Manifest
 
-__all__ = ["sweep_corner", "sweep_heatmap"]
+__all__ = ["sweep_band_plot", "sweep_corner", "sweep_heatmap"]
 
 
 def sweep_corner(
@@ -426,3 +431,121 @@ def _edges_from_centres(centres: NDArray[Any]) -> NDArray[Any]:
     first = sorted_centres[0] - diffs[0] / 2.0
     last = sorted_centres[-1] + diffs[-1] / 2.0
     return np.concatenate(([first], inner, [last]))
+
+
+def sweep_band_plot(
+    summary: pd.DataFrame,
+    column: str,
+    *,
+    ax: Axes | None = None,
+    **kwargs: Any,
+) -> Axes:
+    """Plot one ``column``'s median and quantile band from a ``sweep_summary`` frame.
+
+    Reads the two-level ``("statistic", "field")`` column index produced
+    by :func:`gmat_sweep.sweep_summary`, slices the band — the lowest
+    and highest ``q*`` statistics for ``column`` — and draws a
+    :meth:`matplotlib.axes.Axes.fill_between` shaded band plus a centre
+    line. The centre is the median (``q0.5``) when present, otherwise
+    falls back to ``mean``. The x-axis is the summary's row index
+    (``time`` for ``by="time"``, ``run_id`` for ``by="run_id"``).
+
+    Parameters
+    ----------
+    summary
+        DataFrame as returned by :func:`gmat_sweep.sweep_summary`. Must
+        carry the two-level ``("statistic", "field")`` column index.
+    column
+        Original data-column name to plot — the ``"field"`` slice under
+        every statistic in the summary's column index.
+    ax
+        Optional pre-existing :class:`matplotlib.axes.Axes`. ``None``
+        (default) creates a fresh figure with size ``(8, 4)`` inches.
+    **kwargs
+        Forwarded to the centre :meth:`matplotlib.axes.Axes.plot` call
+        (e.g. ``label=``, ``linestyle=``, ``linewidth=``). The band's
+        ``fill_between`` reuses the line colour at ``alpha=0.25``.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The Axes carrying the band plot. Save the figure via
+        ``ax.figure.savefig(...)``.
+
+    Raises
+    ------
+    SweepConfigError
+        ``summary.columns`` is not a 2-level MultiIndex; ``column`` does
+        not appear in the ``"field"`` level; or no centre statistic
+        (neither a quantile nor ``mean``) is available for ``column``.
+    """
+    import matplotlib.pyplot as plt
+
+    if not isinstance(summary.columns, pd.MultiIndex) or summary.columns.nlevels != 2:
+        raise SweepConfigError(
+            "sweep_band_plot: summary must have a 2-level column MultiIndex "
+            "as produced by gmat_sweep.sweep_summary"
+        )
+
+    field_level = summary.columns.get_level_values(1)
+    if column not in field_level:
+        available = sorted(set(field_level))
+        raise SweepConfigError(
+            f"sweep_band_plot: column={column!r} not found in summary; "
+            f"available fields: {available}"
+        )
+
+    stat_level = summary.columns.get_level_values(0)
+    quantile_stats: list[tuple[float, str]] = []
+    for stat in dict.fromkeys(stat_level):
+        if isinstance(stat, str) and stat.startswith("q"):
+            try:
+                quantile_stats.append((float(stat[1:]), stat))
+            except ValueError:
+                continue
+    quantile_stats.sort()
+
+    has_mean = "mean" in set(stat_level)
+
+    centre_stat: str | None = None
+    for q_val, stat in quantile_stats:
+        if q_val == 0.5:
+            centre_stat = stat
+            break
+    if centre_stat is None and has_mean:
+        centre_stat = "mean"
+    if centre_stat is None:
+        raise SweepConfigError(
+            f"sweep_band_plot: column={column!r} has no centre statistic "
+            "(need either q=0.5 or mean in include=)"
+        )
+
+    band: tuple[str, str] | None = (
+        (quantile_stats[0][1], quantile_stats[-1][1]) if len(quantile_stats) >= 2 else None
+    )
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 4))
+
+    x = summary.index.to_numpy()
+    centre = summary[(centre_stat, column)].to_numpy()
+
+    plot_kwargs: dict[str, Any] = {"label": f"{column} ({centre_stat})", **kwargs}
+    (line,) = ax.plot(x, centre, **plot_kwargs)
+
+    if band is not None:
+        lo = summary[(band[0], column)].to_numpy()
+        hi = summary[(band[1], column)].to_numpy()
+        ax.fill_between(
+            x,
+            lo,
+            hi,
+            color=line.get_color(),
+            alpha=0.25,
+            label=f"{column} ({band[0]} to {band[1]})",
+        )
+
+    x_label = summary.index.name or "index"
+    ax.set_xlabel(str(x_label))
+    ax.set_ylabel(column)
+    return ax

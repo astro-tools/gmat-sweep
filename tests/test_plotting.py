@@ -15,11 +15,12 @@ import pytest
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
-from matplotlib.collections import PathCollection, QuadMesh  # noqa: E402
+from matplotlib.collections import PathCollection, PolyCollection, QuadMesh  # noqa: E402
 
+from gmat_sweep.aggregate import sweep_summary  # noqa: E402
 from gmat_sweep.errors import SweepConfigError  # noqa: E402
 from gmat_sweep.manifest import Manifest, ManifestEntry  # noqa: E402
-from gmat_sweep.plotting import sweep_corner, sweep_heatmap  # noqa: E402
+from gmat_sweep.plotting import sweep_band_plot, sweep_corner, sweep_heatmap  # noqa: E402
 
 
 def _ts(seconds: int = 0) -> datetime:
@@ -337,3 +338,102 @@ def test_sweep_heatmap_callable_z() -> None:
     ax = sweep_heatmap(df, x="a", y="b", z=z, manifest=manifest)
     mesh = next(c for c in ax.collections if isinstance(c, QuadMesh))
     assert np.asarray(mesh.get_array()).shape == (2, 3)
+
+
+# ---------------------------------------------------------------------------
+# sweep_band_plot
+# ---------------------------------------------------------------------------
+
+
+def _band_summary(n_runs: int = 50, n_steps: int = 4) -> pd.DataFrame:
+    """A sweep-summary frame with two columns for sweep_band_plot tests."""
+    rows: list[dict[str, Any]] = []
+    times = pd.to_datetime([f"2026-05-04T00:00:0{i}" for i in range(n_steps)])
+    for run_id in range(n_runs):
+        for step, t in enumerate(times):
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": t,
+                    "value": float(run_id) + step * 0.5,
+                    "other": float(run_id) - step,
+                    "__status": "ok",
+                }
+            )
+    df = pd.DataFrame(rows).set_index(["run_id", "time"])
+    return sweep_summary(df)
+
+
+def test_sweep_band_plot_returns_axes_with_line_and_band() -> None:
+    summary = _band_summary()
+    ax = sweep_band_plot(summary, "value")
+
+    # One line for the centre and one PolyCollection for the fill_between band.
+    assert len(ax.lines) == 1
+    polys = [c for c in ax.collections if isinstance(c, PolyCollection)]
+    assert len(polys) == 1
+    assert ax.get_xlabel() == "time"
+    assert ax.get_ylabel() == "value"
+
+
+def test_sweep_band_plot_uses_q_5_as_centre_and_q_band_extremes() -> None:
+    summary = _band_summary(n_runs=20, n_steps=3)
+    ax = sweep_band_plot(summary, "value")
+
+    centre = ax.lines[0].get_ydata()
+    pd.testing.assert_series_equal(
+        pd.Series(centre, name=("q0.5", "value")),
+        summary[("q0.5", "value")].reset_index(drop=True),
+        check_names=False,
+        check_index=False,
+    )
+
+
+def test_sweep_band_plot_falls_back_to_mean_without_q_5() -> None:
+    rows: list[dict[str, Any]] = []
+    for run_id in range(10):
+        for step in range(3):
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": pd.Timestamp(f"2026-05-04T00:00:0{step}"),
+                    "v": float(run_id),
+                    "__status": "ok",
+                }
+            )
+    df = pd.DataFrame(rows).set_index(["run_id", "time"])
+    summary = sweep_summary(df, q=(0.1, 0.9), include=("mean",))
+
+    ax = sweep_band_plot(summary, "v")
+    centre = ax.lines[0].get_ydata()
+    assert centre == pytest.approx(summary[("mean", "v")].to_numpy())
+
+
+def test_sweep_band_plot_rejects_unknown_column() -> None:
+    summary = _band_summary(n_runs=4, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"not found in summary"):
+        sweep_band_plot(summary, "nope")
+
+
+def test_sweep_band_plot_rejects_flat_column_index() -> None:
+    flat = pd.DataFrame({"x": [1.0, 2.0]}, index=pd.Index([0, 1], name="time"))
+    with pytest.raises(SweepConfigError, match=r"2-level column MultiIndex"):
+        sweep_band_plot(flat, "x")
+
+
+def test_sweep_band_plot_rejects_summary_without_centre() -> None:
+    rows: list[dict[str, Any]] = []
+    for run_id in range(5):
+        for step in range(2):
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": pd.Timestamp(f"2026-05-04T00:00:0{step}"),
+                    "v": float(run_id),
+                    "__status": "ok",
+                }
+            )
+    df = pd.DataFrame(rows).set_index(["run_id", "time"])
+    summary = sweep_summary(df, q=(0.1, 0.9), include=())  # no q=0.5, no mean
+    with pytest.raises(SweepConfigError, match=r"no centre statistic"):
+        sweep_band_plot(summary, "v")

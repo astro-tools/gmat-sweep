@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -13,6 +14,7 @@ from gmat_sweep.aggregate import (
     lazy_ephemerides,
     lazy_fused_reports,
     lazy_multiindex,
+    sweep_summary,
 )
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.manifest import Manifest, ManifestEntry
@@ -639,3 +641,161 @@ def test_lazy_contacts_three_kinds_aggregate_independently(tmp_path: Path) -> No
     assert len(reports_df) == 4 * 3
     assert len(eph_df) == 4 * 3
     assert len(contacts_df) == 4 * 2
+
+
+# ---------------------------------------------------------------------------
+# sweep_summary
+# ---------------------------------------------------------------------------
+
+
+def _summary_df(
+    *,
+    n_runs: int = 100,
+    n_steps: int = 4,
+    statuses: dict[int, str] | None = None,
+) -> pd.DataFrame:
+    """A ``(run_id, time)``-MultiIndexed test frame with two data columns."""
+    statuses = statuses or {}
+    rows: list[dict[str, object]] = []
+    times = pd.to_datetime([f"2026-05-04T00:00:0{i}" for i in range(n_steps)])
+    for run_id in range(n_runs):
+        status = statuses.get(run_id, "ok")
+        if status != "ok":
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": pd.NaT,
+                    "x": float("nan"),
+                    "y": float("nan"),
+                    "__status": status,
+                }
+            )
+            continue
+        for step, t in enumerate(times):
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": t,
+                    "x": float(run_id) + step * 0.1,
+                    "y": float(run_id) * 2.0 - step,
+                    "__status": "ok",
+                }
+            )
+    return cast(pd.DataFrame, pd.DataFrame(rows).set_index(["run_id", "time"]))
+
+
+def test_sweep_summary_default_shape_and_multiindex_columns() -> None:
+    df = _summary_df(n_runs=10, n_steps=3)
+    summary = sweep_summary(df)
+
+    # Row index keyed on the unique time steps from the input.
+    assert summary.index.name == "time"
+    assert len(summary) == 3
+
+    # Column index is a 2-level (statistic, field) MultiIndex with default
+    # mean + std + 5/50/95 quantiles times the 2 data columns (x, y).
+    assert isinstance(summary.columns, pd.MultiIndex)
+    assert summary.columns.names == ["statistic", "field"]
+    statistics = list(dict.fromkeys(summary.columns.get_level_values(0)))
+    assert statistics == ["mean", "std", "q0.05", "q0.5", "q0.95"]
+    fields = list(dict.fromkeys(summary.columns.get_level_values(1)))
+    assert fields == ["x", "y"]
+
+
+def test_sweep_summary_quantile_matches_hand_rolled_groupby() -> None:
+    """DoD criterion: (time, q=0.5) slice equals df.groupby('time').quantile(0.5)."""
+    df = _summary_df(n_runs=100, n_steps=4)
+    summary = sweep_summary(df)
+
+    # Drop __status to mirror sweep_summary's internal data-only view.
+    expected = df.drop(columns=["__status"]).groupby(level="time").quantile(0.5)
+    got = cast(pd.DataFrame, summary["q0.5"])
+    pd.testing.assert_frame_equal(got, expected, check_names=False)
+
+
+def test_sweep_summary_by_run_id_collapses_across_time() -> None:
+    df = _summary_df(n_runs=4, n_steps=5)
+    summary = sweep_summary(df, by="run_id", q=(), include=("mean",))
+
+    assert summary.index.name == "run_id"
+    assert list(summary.index) == [0, 1, 2, 3]
+    # Each run's mean(x) is run_id + mean(0..n_steps-1)*0.1.
+    expected_x = pd.Series(
+        [float(rid) + 0.2 for rid in range(4)],
+        index=pd.Index([0, 1, 2, 3], name="run_id"),
+        name=("mean", "x"),
+    )
+    pd.testing.assert_series_equal(summary[("mean", "x")], expected_x)
+
+
+def test_sweep_summary_count_ok_counts_non_nan_values() -> None:
+    df = _summary_df(n_runs=5, n_steps=3)
+    summary = sweep_summary(df, q=(), include=("count_ok",))
+
+    # Every ok row contributes; per time, count == 5 across all 5 runs.
+    assert (summary[("count_ok", "x")] == 5).all()
+    assert (summary[("count_ok", "y")] == 5).all()
+
+
+def test_sweep_summary_dropna_true_excludes_failed_and_skipped_runs() -> None:
+    df = _summary_df(n_runs=6, n_steps=2, statuses={1: "failed", 4: "skipped"})
+    summary = sweep_summary(df, q=(), include=("count_ok",))
+
+    # 4 ok runs (0, 2, 3, 5) — failed/skipped runs (NaT marker rows) excluded.
+    assert summary.index.name == "time"
+    assert len(summary) == 2
+    assert (summary[("count_ok", "x")] == 4).all()
+
+
+def test_sweep_summary_dropna_false_keeps_marker_rows() -> None:
+    df = _summary_df(n_runs=3, n_steps=2, statuses={2: "failed"})
+    summary = sweep_summary(df, q=(), include=("count_ok",), dropna=False)
+
+    # The NaT marker row from the failed run lands as a NaT-keyed group.
+    assert bool(pd.isna(summary.index).any())
+    # The two real time steps still see 2 ok contributions each.
+    real_rows = summary.loc[summary.index.notna()]
+    assert (real_rows[("count_ok", "x")] == 2).all()
+
+
+def test_sweep_summary_custom_q_and_include() -> None:
+    df = _summary_df(n_runs=20, n_steps=3)
+    summary = sweep_summary(
+        df,
+        q=(0.25, 0.75),
+        include=("min", "max"),
+    )
+    statistics = list(dict.fromkeys(summary.columns.get_level_values(0)))
+    assert statistics == ["min", "max", "q0.25", "q0.75"]
+
+
+def test_sweep_summary_no_status_column_works() -> None:
+    """A frame without __status should aggregate cleanly — dropna is a no-op."""
+    df = _summary_df(n_runs=4, n_steps=2).drop(columns=["__status"])
+    summary = sweep_summary(df, q=(0.5,), include=())
+    assert list(summary.columns.get_level_values(0)) == ["q0.5", "q0.5"]
+    assert len(summary) == 2
+
+
+def test_sweep_summary_rejects_unsupported_by() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"by=.*not supported"):
+        sweep_summary(df, by="run")
+
+
+def test_sweep_summary_rejects_q_outside_open_interval() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"open interval"):
+        sweep_summary(df, q=(0.0, 0.5))
+
+
+def test_sweep_summary_rejects_unknown_statistic() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"unknown statistic"):
+        sweep_summary(df, include=("median",))
+
+
+def test_sweep_summary_rejects_missing_index_level() -> None:
+    df = _summary_df(n_runs=2, n_steps=2).reset_index().set_index("run_id")
+    with pytest.raises(SweepConfigError, match=r"does not have a 'time' level"):
+        sweep_summary(df)

@@ -8,6 +8,7 @@ from gmat_sweep.aggregate import (
     lazy_ephemerides,
     lazy_fused_reports,
     lazy_multiindex,
+    sweep_summary,
 )
 from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
 from gmat_sweep.backends import LocalJoblibPool, Pool
@@ -79,4 +80,5 @@ __all__ = [
     "lazy_multiindex",
     "monte_carlo",
     "sweep",
+    "sweep_summary",
 ]
