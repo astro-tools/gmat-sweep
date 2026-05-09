@@ -64,6 +64,12 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.lazy_fused_reports
 
+::: gmat_sweep.sweep_summary
+
+## Plotting
+
+::: gmat_sweep.plotting.sweep_band_plot
+
 ## Exceptions
 
 ::: gmat_sweep.GmatSweepError

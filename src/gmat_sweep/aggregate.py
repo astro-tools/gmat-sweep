@@ -26,6 +26,10 @@ through pandas one fragment at a time so peak conversion memory is one
 batch, not one full sweep. ``spool=False`` flips to an eager
 fragment-at-a-time read for small sweeps where the streaming overhead is
 not worth it; the result DataFrame is identical.
+
+:func:`sweep_summary` collapses the parent DataFrame across runs into a
+per-``time`` (or per-``run_id``) statistics frame — the canonical input
+for "median +/- 95% band over time" dispersion plots.
 """
 
 from __future__ import annotations
@@ -45,7 +49,16 @@ if TYPE_CHECKING:
 
     from gmat_sweep.manifest import Manifest, ManifestEntry
 
-__all__ = ["lazy_contacts", "lazy_ephemerides", "lazy_fused_reports", "lazy_multiindex"]
+__all__ = [
+    "lazy_contacts",
+    "lazy_ephemerides",
+    "lazy_fused_reports",
+    "lazy_multiindex",
+    "sweep_summary",
+]
+
+_VALID_BY: tuple[str, ...] = ("time", "run_id")
+_VALID_INCLUDE: tuple[str, ...] = ("mean", "std", "min", "max", "count_ok")
 
 
 _RUN_ID_COL = "run_id"
@@ -565,3 +578,143 @@ def _empty_fused_frame(flat_to_tuple: dict[str, tuple[str, str]]) -> pd.DataFram
         ),
         columns=pd.MultiIndex.from_tuples(cols, names=["report", "field"]),
     )
+
+
+def sweep_summary(
+    df: pd.DataFrame,
+    *,
+    by: str = _TIME_COL,
+    q: Sequence[float] = (0.05, 0.5, 0.95),
+    include: Sequence[str] = ("mean", "std"),
+    dropna: bool = True,
+) -> pd.DataFrame:
+    """Summarise a sweep DataFrame across runs at each ``by`` key.
+
+    Turns a ``(run_id, time)``-MultiIndexed DataFrame — as returned by
+    :func:`lazy_multiindex`, :func:`gmat_sweep.sweep`,
+    :func:`gmat_sweep.monte_carlo`, or :func:`gmat_sweep.latin_hypercube`
+    — into a per-``by`` statistics frame: one row per unique ``by``
+    value, one column per ``(statistic, original-column)`` pair under a
+    two-level :class:`pandas.MultiIndex`. The default
+    ``q=(0.05, 0.5, 0.95)`` matches the standard 5/50/95 dispersion bands
+    and feeds directly into :func:`gmat_sweep.plotting.sweep_band_plot`.
+
+    Parameters
+    ----------
+    df
+        Input DataFrame indexed by ``(run_id, time)`` (or any other
+        2-level :class:`pandas.MultiIndex` whose levels include the
+        requested ``by`` key). A ``__status`` column, if present, is
+        treated as a per-run status flag and excluded from the statistic
+        columns.
+    by
+        Index level to group on. ``"time"`` (default) collapses across
+        runs at each time step. ``"run_id"`` collapses across time
+        steps within each run. Other values raise
+        :class:`gmat_sweep.errors.SweepConfigError` — categorical or
+        arbitrary keys are out of scope in this release.
+    q
+        Quantiles to compute. Each entry must be a float in the open
+        interval ``(0, 1)``. The default returns the 5th, 50th, and
+        95th percentiles. Pass an empty tuple to skip quantiles.
+    include
+        Non-quantile statistics to compute, in the order they appear in
+        the output's column-level ``"statistic"`` index. Allowed values:
+        ``"mean"``, ``"std"``, ``"min"``, ``"max"``, ``"count_ok"``.
+        ``"count_ok"`` is the per-group count of non-NaN values in each
+        data column. Pass an empty tuple to skip the non-quantile stats
+        and emit only quantiles.
+    dropna
+        ``True`` (default) drops rows whose ``__status != "ok"`` before
+        aggregating, so failed and skipped runs are excluded from every
+        statistic. ``False`` keeps them — their NaT/NaN marker rows
+        contribute a NaT (or run-id) group to the output, mostly NaN.
+        When ``df`` has no ``__status`` column the flag has no effect.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Row index: the unique values of ``df.index.get_level_values(by)``.
+        Column index: a two-level :class:`pandas.MultiIndex`
+        ``("statistic", "field")``. Statistic labels are exactly the
+        entries of ``include`` plus ``f"q{q_val}"`` (e.g. ``"q0.05"``,
+        ``"q0.5"``, ``"q0.95"``) for each requested quantile, in the
+        order ``include`` then ``q``. ``field`` carries the original
+        data-column names.
+
+    Raises
+    ------
+    SweepConfigError
+        ``by`` is not ``"time"`` or ``"run_id"``; any ``q_val`` falls
+        outside ``(0, 1)``; ``include`` contains an unknown statistic;
+        or ``by`` is not an index level of ``df``.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from gmat_sweep import sweep_summary
+    >>> # df is a (run_id, time)-MultiIndexed sweep DataFrame
+    >>> summary = sweep_summary(df)  # doctest: +SKIP
+    >>> summary[("q0.5", "Sat.X")]  # median Sat.X across runs at each time  # doctest: +SKIP
+    """
+    if by not in _VALID_BY:
+        raise SweepConfigError(
+            f"sweep_summary: by={by!r} is not supported in this release; "
+            f"pass one of {list(_VALID_BY)}"
+        )
+
+    bad_q = [val for val in q if not (0.0 < float(val) < 1.0)]
+    if bad_q:
+        raise SweepConfigError(
+            f"sweep_summary: q values must lie in the open interval (0, 1); got {bad_q}"
+        )
+
+    bad_include = [s for s in include if s not in _VALID_INCLUDE]
+    if bad_include:
+        raise SweepConfigError(
+            f"sweep_summary: unknown statistic(s) in include={list(include)}: "
+            f"{bad_include}; allowed: {list(_VALID_INCLUDE)}"
+        )
+
+    if df.index.nlevels < 2 or by not in (df.index.names or []):
+        raise SweepConfigError(
+            f"sweep_summary: df.index does not have a {by!r} level "
+            f"(got names={list(df.index.names or [])})"
+        )
+
+    working = df
+    if dropna and _STATUS_COL in working.columns:
+        working = working.loc[working[_STATUS_COL] == "ok"]
+
+    data = working.drop(columns=[_STATUS_COL], errors="ignore")
+    data_columns = list(data.columns)
+
+    grouped = data.groupby(level=by, dropna=dropna)
+
+    stat_blocks: list[tuple[str, pd.DataFrame]] = []
+    for stat in include:
+        if stat == "count_ok":
+            block = cast(pd.DataFrame, grouped.count())
+        else:
+            block = cast(pd.DataFrame, grouped.agg(stat))
+        stat_blocks.append((stat, block.reindex(columns=data_columns)))
+
+    for q_val in q:
+        block = cast(pd.DataFrame, grouped.quantile(float(q_val)))
+        stat_blocks.append((f"q{q_val}", block.reindex(columns=data_columns)))
+
+    if not stat_blocks:
+        # No statistics requested — return an empty-column frame still keyed
+        # by the unique `by` values so callers can attach their own columns.
+        empty_index = data.index.get_level_values(by).unique()
+        return pd.DataFrame(
+            index=empty_index,
+            columns=pd.MultiIndex.from_arrays([[], []], names=["statistic", "field"]),
+        )
+
+    result = pd.concat(
+        {label: block for label, block in stat_blocks},
+        axis=1,
+        names=["statistic", "field"],
+    )
+    return result
