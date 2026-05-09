@@ -108,6 +108,28 @@ def test_sweep_creates_out_directory_when_missing(
     assert (out / "manifest.jsonl").exists()
 
 
+def test_sweep_resolves_relative_out_to_absolute(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # GMAT resolves a relative `working_dir` against its installed
+    # `OUTPUT_PATH` (e.g. `/opt/gmat/output/` in the canonical container
+    # image), so a relative `out=` would land per-run files somewhere
+    # other than where the user pointed. Public entry points must
+    # absolutise before per-run dirs are seeded.
+    script = _write_script(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(workers=1), out="rel-out")
+
+    manifest_path = tmp_path / "rel-out" / "manifest.jsonl"
+    manifest = Manifest.load(manifest_path)
+    [entry] = manifest.entries
+    assert entry.log_path is not None
+    assert Path(entry.log_path).is_absolute()
+
+
 # ---- no out: temp dir lifetime --------------------------------------------
 
 

@@ -39,7 +39,7 @@ def sweep(
     grid: Mapping[str, Iterable[Any]] | None = None,
     samples: pd.DataFrame | None = None,
     backend: Pool | None = None,
-    out: Path | None = None,
+    out: str | Path | None = None,
     seed: int | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
@@ -84,7 +84,10 @@ def sweep(
         returned DataFrame — the temp dir survives until the caller drops the
         DataFrame, mirroring the :meth:`gmat_run.Mission.run` Results lifetime
         trick. Pass an explicit path to keep the per-run Parquet files and
-        the manifest after the call returns.
+        the manifest after the call returns. Relative paths are resolved to
+        absolute before per-run directories are created, so manifest entries
+        and the ``working_dir`` handed to GMAT do not depend on the caller's
+        CWD or on GMAT's installed ``OUTPUT_PATH``.
     seed:
         Optional integer recorded on the manifest header. ``sweep()`` itself
         does not consume it for grid or explicit-row sweeps; the value lives
@@ -165,7 +168,7 @@ def monte_carlo(
     perturb: Mapping[str, DistSpec],
     seed: int | None = None,
     backend: Pool | None = None,
-    out: Path | None = None,
+    out: str | Path | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
     """Run a Monte Carlo dispersion sweep over a GMAT mission.
@@ -245,7 +248,7 @@ def latin_hypercube(
     perturb: Mapping[str, DistSpec],
     seed: int | None = None,
     backend: Pool | None = None,
-    out: Path | None = None,
+    out: str | Path | None = None,
     progress: bool = True,
 ) -> pd.DataFrame:
     """Run a Latin hypercube sweep over a GMAT mission.
@@ -337,7 +340,7 @@ def _run_sweep(
     parameter_spec: dict[str, Any],
     sweep_seed: int | None,
     backend: Pool | None,
-    out: Path | None,
+    out: str | Path | None,
     progress: bool,
 ) -> pd.DataFrame:
     """Shared orchestration for the public entry points.
@@ -355,7 +358,14 @@ def _run_sweep(
         output_dir = Path(tempdir.name)
     else:
         tempdir = None
-        output_dir = Path(out)
+        # `output_dir` becomes each `RunSpec.output_dir`, which is forwarded to
+        # `gmat_run.Mission.run(working_dir=...)` and ultimately to the GMAT
+        # API. GMAT resolves a relative `working_dir` against its installed
+        # `OUTPUT_PATH` (e.g. `/opt/gmat/output/` in the canonical container
+        # image), which is rarely what the caller wants. Resolve to absolute
+        # so per-run paths land where the user pointed regardless of GMAT's
+        # configured output root.
+        output_dir = Path(out).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
     runs = build_runs(output_dir)
