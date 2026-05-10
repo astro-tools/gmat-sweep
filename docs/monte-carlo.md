@@ -204,6 +204,65 @@ ok = df[df["__status"] == "ok"]
 failed = df[df["__status"] == "failed"]
 ```
 
+## Convergence diagnostics
+
+Once a Monte Carlo finishes, the next question is "did I draw enough
+samples?". [`mc_convergence()`][gmat_sweep.mc_convergence] reduces every
+run to one scalar under a metric of your choice, then reports the
+running mean, running standard deviation, and standard error of the mean
+across `run_id` prefixes — `n = 1, 2, …, N`. A flattening centre and a
+shrinking `se_mean` curve indicate that the estimator has stabilised:
+
+```python
+from gmat_sweep import mc_convergence
+
+# Pick a metric — here, the final-time miss distance per run.
+conv = mc_convergence(df, "MissDistance", terminal_only=True)
+conv.tail()
+#         n  running_mean  running_std    se_mean
+# 1995  1996      127.34      14.21     0.318
+# 1996  1997      127.32      14.20     0.318
+# ...
+```
+
+`se_mean` is the parametric standard error `running_std / sqrt(n)` (with
+`ddof=1`); for `N(0, σ²)` draws it tracks `σ / sqrt(n)` to within
+small-sample noise — the operational definition of "converged" most
+analyses use.
+
+For derived metrics that aren't already a column of `df`, pass a callable
+that reduces a per-run subframe to a float:
+
+```python
+import numpy as np
+
+def final_state_miss(sub):
+    """Distance from the nominal final state for one run."""
+    return float(np.linalg.norm(sub.iloc[-1][["X", "Y", "Z"]].to_numpy() - nominal_xyz))
+
+conv = mc_convergence(df, final_state_miss)
+```
+
+`terminal_only=False` (the default for column-name metrics) keeps every
+time step and emits one running curve per `time`, so you can ask "did
+each step's mean stabilise?" rather than only the terminal state. The
+output gains a leading `time` column and is otherwise identical.
+
+The companion plot helper renders the running mean and the ±1·SE band:
+
+```python
+from gmat_sweep.plotting import mc_convergence_plot
+
+ax = mc_convergence_plot(conv)
+ax.figure.savefig("convergence.png")
+```
+
+`mc_convergence` is **not** a formal stationarity test — Geweke,
+Gelman-Rubin, and the rest of the MCMC convergence machinery solve a
+different problem (correlated draws from a chain) than independent
+Monte Carlo. The diagnostic here is the parametric SE curve; if it has
+plateaued, the mean has converged.
+
 ## See also
 
 - [Parameter spec → Stochastic specs](parameter-spec.md#stochastic-specs)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -14,6 +15,7 @@ from gmat_sweep.aggregate import (
     lazy_ephemerides,
     lazy_fused_reports,
     lazy_multiindex,
+    mc_convergence,
     sweep_summary,
 )
 from gmat_sweep.errors import SweepConfigError
@@ -799,3 +801,185 @@ def test_sweep_summary_rejects_missing_index_level() -> None:
     df = _summary_df(n_runs=2, n_steps=2).reset_index().set_index("run_id")
     with pytest.raises(SweepConfigError, match=r"does not have a 'time' level"):
         sweep_summary(df)
+
+
+# ---------------------------------------------------------------------------
+# mc_convergence
+# ---------------------------------------------------------------------------
+
+
+def _conv_df(
+    *,
+    n_runs: int,
+    n_steps: int = 1,
+    statuses: dict[int, str] | None = None,
+    seed: int = 42,
+    sigma: float = 1.0,
+) -> pd.DataFrame:
+    """A ``(run_id, time)``-MultiIndexed test frame for mc_convergence.
+
+    Each ok run has ``n_steps`` rows; the per-run final ``miss`` value is
+    drawn from ``N(0, sigma^2)`` under a fixed numpy generator. Earlier
+    rows linearly ramp from 0 to the terminal value, so callable metrics
+    that pull the last row see the same draw as ``terminal_only=True``.
+    """
+    statuses = statuses or {}
+    rng = np.random.default_rng(seed)
+    terminal = rng.normal(loc=0.0, scale=sigma, size=n_runs)
+    rows: list[dict[str, object]] = []
+    times = pd.to_datetime([f"2026-05-04T00:00:0{i}" for i in range(n_steps)])
+    for run_id in range(n_runs):
+        status = statuses.get(run_id, "ok")
+        if status != "ok":
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": pd.NaT,
+                    "miss": float("nan"),
+                    "__status": status,
+                }
+            )
+            continue
+        for step, t in enumerate(times):
+            ramp = (step + 1) / n_steps
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "time": t,
+                    "miss": float(terminal[run_id]) * ramp,
+                    "__status": "ok",
+                }
+            )
+    return cast(pd.DataFrame, pd.DataFrame(rows).set_index(["run_id", "time"]))
+
+
+def test_mc_convergence_terminal_only_columns_and_shape() -> None:
+    df = _conv_df(n_runs=10)
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    assert list(conv.columns) == ["n", "running_mean", "running_std", "se_mean"]
+    assert len(conv) == 10
+    assert list(conv["n"]) == list(range(1, 11))
+    # n=1 has no sample variance under ddof=1.
+    assert pd.isna(conv.loc[0, "running_std"])
+    assert pd.isna(conv.loc[0, "se_mean"])
+
+
+def test_mc_convergence_matches_hand_rolled_cumulative_stats() -> None:
+    df = _conv_df(n_runs=20)
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    terminal = df.groupby(level="run_id")["miss"].last().to_numpy()
+    for k in (1, 2, 5, 10, 20):
+        prefix = terminal[:k]
+        expected_mean = float(prefix.mean())
+        row = conv.loc[k - 1]
+        assert row["running_mean"] == pytest.approx(expected_mean)
+        if k == 1:
+            assert pd.isna(row["running_std"])
+            assert pd.isna(row["se_mean"])
+        else:
+            expected_std = float(prefix.std(ddof=1))
+            assert row["running_std"] == pytest.approx(expected_std)
+            assert row["se_mean"] == pytest.approx(expected_std / np.sqrt(k))
+
+
+def test_mc_convergence_se_curve_matches_sigma_over_sqrt_n() -> None:
+    """Definition-of-done check: ``se_mean(n) ~ sigma / sqrt(n)`` to within MC noise."""
+    sigma = 2.5
+    df = _conv_df(n_runs=2000, sigma=sigma, seed=20260509)
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    # The terminal-row SE should land within ~10% of the analytic ceiling
+    # at n=2000 (large enough to suppress the small-sample noise).
+    final = conv.iloc[-1]
+    analytic = sigma / np.sqrt(int(final["n"]))
+    assert abs(float(final["se_mean"]) - analytic) / analytic < 0.10
+
+    # The SE curve's late-n decay rate should track 1/sqrt(n): compare two
+    # samples at n=500 and n=2000 — the ratio should be close to 2.
+    def se_at(n: int) -> float:
+        return float(conv.loc[conv["n"] == n, "se_mean"].iloc[0])
+
+    ratio = se_at(500) / se_at(2000)
+    assert 1.7 < ratio < 2.3
+
+
+def test_mc_convergence_drops_failed_and_skipped_runs() -> None:
+    df = _conv_df(n_runs=8, statuses={2: "failed", 5: "skipped"})
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    # 6 ok runs survive after status-filtering.
+    assert len(conv) == 6
+    assert list(conv["n"]) == [1, 2, 3, 4, 5, 6]
+
+
+def test_mc_convergence_callable_metric() -> None:
+    df = _conv_df(n_runs=5)
+    # Callable that returns the final-time absolute value of "miss".
+    conv = mc_convergence(df, lambda sub: float(abs(sub["miss"].iloc[-1])))
+
+    expected = df.groupby(level="run_id")["miss"].last().abs().to_numpy()
+    np.testing.assert_allclose(conv["running_mean"].iloc[-1], expected.mean())
+    assert list(conv.columns) == ["n", "running_mean", "running_std", "se_mean"]
+
+
+def test_mc_convergence_callable_metric_receives_time_indexed_subframe() -> None:
+    df = _conv_df(n_runs=3, n_steps=2)
+    seen_indices: list[Any] = []
+
+    def metric(sub: pd.DataFrame) -> float:
+        seen_indices.append(list(sub.index.names))
+        return float(sub["miss"].iloc[-1])
+
+    mc_convergence(df, metric)
+    # Each sub-frame should have run_id stripped — only the time level remains.
+    assert all(names == ["time"] for names in seen_indices)
+
+
+def test_mc_convergence_callable_metric_bad_return_raises() -> None:
+    df = _conv_df(n_runs=3)
+
+    def bad_metric(sub: pd.DataFrame) -> Any:  # returns a Series, not a float
+        return sub["miss"]
+
+    with pytest.raises(SweepConfigError, match=r"numeric scalar"):
+        mc_convergence(df, bad_metric)
+
+
+def test_mc_convergence_terminal_only_false_emits_per_time_block() -> None:
+    df = _conv_df(n_runs=4, n_steps=3)
+    conv = mc_convergence(df, "miss", terminal_only=False)
+
+    assert list(conv.columns) == ["time", "n", "running_mean", "running_std", "se_mean"]
+    # 3 unique time steps x 4 prefix sizes = 12 rows.
+    assert len(conv) == 12
+    # Per-time blocks each carry n=1..4 in order.
+    for _t, block in conv.groupby("time"):
+        assert list(block["n"]) == [1, 2, 3, 4]
+    # The terminal time slice should reproduce the terminal_only=True curve.
+    terminal_time = conv["time"].iloc[-1]
+    last_block = conv.loc[conv["time"] == terminal_time].reset_index(drop=True)
+    terminal_conv = mc_convergence(df, "miss", terminal_only=True)
+    pd.testing.assert_series_equal(
+        last_block["running_mean"], terminal_conv["running_mean"], check_names=False
+    )
+
+
+def test_mc_convergence_rejects_unknown_column() -> None:
+    df = _conv_df(n_runs=3)
+    with pytest.raises(SweepConfigError, match=r"not a column of df"):
+        mc_convergence(df, "nope")
+
+
+def test_mc_convergence_rejects_missing_run_id_index() -> None:
+    df = _conv_df(n_runs=3).reset_index().set_index("time")
+    with pytest.raises(SweepConfigError, match=r"must have a 'run_id' level"):
+        mc_convergence(df, "miss")
+
+
+def test_mc_convergence_works_without_status_column() -> None:
+    df = _conv_df(n_runs=4).drop(columns=["__status"])
+    conv = mc_convergence(df, "miss", terminal_only=True)
+    assert len(conv) == 4
+    assert list(conv["n"]) == [1, 2, 3, 4]

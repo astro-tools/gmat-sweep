@@ -17,10 +17,15 @@ matplotlib.use("Agg")
 
 from matplotlib.collections import PathCollection, PolyCollection, QuadMesh  # noqa: E402
 
-from gmat_sweep.aggregate import sweep_summary  # noqa: E402
+from gmat_sweep.aggregate import mc_convergence, sweep_summary  # noqa: E402
 from gmat_sweep.errors import SweepConfigError  # noqa: E402
 from gmat_sweep.manifest import Manifest, ManifestEntry  # noqa: E402
-from gmat_sweep.plotting import sweep_band_plot, sweep_corner, sweep_heatmap  # noqa: E402
+from gmat_sweep.plotting import (  # noqa: E402
+    mc_convergence_plot,
+    sweep_band_plot,
+    sweep_corner,
+    sweep_heatmap,
+)
 
 
 def _ts(seconds: int = 0) -> datetime:
@@ -437,3 +442,65 @@ def test_sweep_band_plot_rejects_summary_without_centre() -> None:
     summary = sweep_summary(df, q=(0.1, 0.9), include=())  # no q=0.5, no mean
     with pytest.raises(SweepConfigError, match=r"no centre statistic"):
         sweep_band_plot(summary, "v")
+
+
+# ---------------------------------------------------------------------------
+# mc_convergence_plot
+# ---------------------------------------------------------------------------
+
+
+def _convergence_df(n_runs: int = 30, *, seed: int = 42) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    terminal = rng.normal(loc=0.0, scale=1.0, size=n_runs)
+    rows: list[dict[str, Any]] = []
+    for run_id in range(n_runs):
+        rows.append(
+            {
+                "run_id": run_id,
+                "time": pd.Timestamp("2026-05-04T00:00:00"),
+                "miss": float(terminal[run_id]),
+                "__status": "ok",
+            }
+        )
+    df = pd.DataFrame(rows).set_index(["run_id", "time"])
+    return mc_convergence(df, "miss", terminal_only=True)
+
+
+def test_mc_convergence_plot_returns_axes_with_line_and_band() -> None:
+    conv = _convergence_df()
+    ax = mc_convergence_plot(conv)
+
+    assert len(ax.lines) == 1
+    polys = [c for c in ax.collections if isinstance(c, PolyCollection)]
+    assert len(polys) == 1
+    assert ax.get_xlabel() == "n"
+    assert ax.get_ylabel() == "running mean"
+
+
+def test_mc_convergence_plot_line_x_is_n_and_y_is_running_mean() -> None:
+    conv = _convergence_df(n_runs=10)
+    ax = mc_convergence_plot(conv)
+
+    line = ax.lines[0]
+    np.testing.assert_array_equal(line.get_xdata(), conv["n"].to_numpy())
+    np.testing.assert_array_equal(line.get_ydata(), conv["running_mean"].to_numpy())
+
+
+def test_mc_convergence_plot_rejects_per_time_frame() -> None:
+    conv = pd.DataFrame(
+        {
+            "time": pd.to_datetime(["2026-05-04T00:00:00"]),
+            "n": [1],
+            "running_mean": [0.0],
+            "running_std": [float("nan")],
+            "se_mean": [float("nan")],
+        }
+    )
+    with pytest.raises(SweepConfigError, match=r"per-time"):
+        mc_convergence_plot(conv)
+
+
+def test_mc_convergence_plot_rejects_missing_columns() -> None:
+    conv = pd.DataFrame({"n": [1, 2], "running_mean": [0.0, 0.1]})  # no se_mean
+    with pytest.raises(SweepConfigError, match=r"missing required column"):
+        mc_convergence_plot(conv)
