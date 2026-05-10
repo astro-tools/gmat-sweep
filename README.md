@@ -153,7 +153,7 @@ A `gmat-sweep` console script is also installed for shell-script and CI use:
 gmat-sweep run         --grid Sat.SMA=7000:7200:3 --workers 8 --out ./sweep mission.script
 gmat-sweep run         --grid Sat.SMA=7000:7200:3 --backend dask --workers 8 --out ./sweep mission.script
 gmat-sweep monte-carlo --n 1000 --perturb 'Sat.SMA=normal:7100:50' --seed 42 --out ./mc mission.script
-gmat-sweep resume      --script mission.script --workers 8 ./mc/manifest.jsonl
+gmat-sweep resume      ./mc/manifest.jsonl mission.script --workers 8
 gmat-sweep show        ./sweep/manifest.jsonl
 ```
 
