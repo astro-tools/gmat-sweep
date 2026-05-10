@@ -843,6 +843,21 @@ def sweep_summary(
             f"{bad_include}; allowed: {list(_VALID_INCLUDE)}"
         )
 
+    # Duplicate quantiles or include entries would collide in the
+    # MultiIndex column key built via pd.concat({label: ...}) below and
+    # produce a non-unique columns axis. Reject up front instead.
+    dup_q = sorted({val for val in q if list(q).count(val) > 1})
+    if dup_q:
+        raise SweepConfigError(
+            f"sweep_summary: q must not contain duplicates; got duplicate(s) {dup_q}"
+        )
+    dup_include = sorted({s for s in include if list(include).count(s) > 1})
+    if dup_include:
+        raise SweepConfigError(
+            f"sweep_summary: include must not contain duplicates; "
+            f"got duplicate(s) {dup_include}"
+        )
+
     if df.index.nlevels < 2 or by not in (df.index.names or []):
         raise SweepConfigError(
             f"sweep_summary: df.index does not have a {by!r} level "

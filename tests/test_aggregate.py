@@ -838,6 +838,18 @@ def test_sweep_summary_rejects_missing_index_level() -> None:
         sweep_summary(df)
 
 
+def test_sweep_summary_rejects_duplicate_q() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"q must not contain duplicates"):
+        sweep_summary(df, q=(0.5, 0.5))
+
+
+def test_sweep_summary_rejects_duplicate_include() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"include must not contain duplicates"):
+        sweep_summary(df, include=("mean", "mean"))
+
+
 # ---------------------------------------------------------------------------
 # mc_convergence
 # ---------------------------------------------------------------------------
