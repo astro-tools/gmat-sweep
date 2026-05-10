@@ -613,14 +613,27 @@ def lazy_fused_reports(
         df.reset_index().rename(columns=rename_per_report[i]) for i, df in enumerate(per_report)
     ]
 
+    # One groupby(run_id) per report — O(N) total — instead of a fresh
+    # boolean mask per (report, run_id) pair, which was O(N · runs) and
+    # showed up as a quadratic hot spot on large sweeps (#130). pandas'
+    # group iteration is cheap; we materialise the per-run slice lazily.
+    grouped_per_report: list[dict[int, pd.DataFrame]] = [
+        {
+            int(rid): cast(pd.DataFrame, sub.drop(columns=[_RUN_ID_COL]))
+            for rid, sub in df.groupby(_RUN_ID_COL, sort=False)
+        }
+        for df in flat_per_report
+    ]
+    empty_slices: list[pd.DataFrame] = [
+        flat_per_report[i].iloc[0:0].drop(columns=[_RUN_ID_COL]) for i in range(len(per_report))
+    ]
+
     run_status: dict[int, str] = {e.run_id: e.status for e in manifest.entries}
     run_ids: list[int] = [e.run_id for e in manifest.entries]
 
     parts: list[pd.DataFrame] = []
     for run_id in run_ids:
-        per_run = [
-            df[df[_RUN_ID_COL] == run_id].drop(columns=[_RUN_ID_COL]) for df in flat_per_report
-        ]
+        per_run = [grouped_per_report[i].get(run_id, empty_slices[i]) for i in range(len(per_report))]
         anchor = per_run[0]
         anchor_has_data = not anchor.empty and bool(anchor[_TIME_COL].notna().any())
         if anchor_has_data:
@@ -678,6 +691,17 @@ def _merge_run_fused(
             if tolerance is None:
                 anchor = anchor.merge(right_ok, on=_TIME_COL, how="inner")
             else:
+                # pd.merge_asof silently produces wrong answers when its
+                # inputs aren't sorted on the asof key; we sort both sides
+                # explicitly above, but assert the contract so future
+                # refactors here surface as a clear failure rather than
+                # silent data corruption.
+                if not anchor[_TIME_COL].is_monotonic_increasing:
+                    raise AssertionError(
+                        "lazy_fused_reports: anchor frame is not sorted on "
+                        f"{_TIME_COL!r} before pd.merge_asof — required for "
+                        "asof tolerance matching"
+                    )
                 anchor = pd.merge_asof(anchor, right_ok, on=_TIME_COL, tolerance=tolerance)
         else:
             for orig_col, flat in rename_per_report[i].items():
