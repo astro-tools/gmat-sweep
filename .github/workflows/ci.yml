@@ -16,12 +16,16 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      # 3 OSes × 3 Python minors × 2 GMAT releases = 18 cells. R2026a is the
-      # primary target, R2025a is the previous release we still support.
+      # Per-PR matrix is trimmed to 10 cells: R2026a × 3 OS × 3 Python = 9, plus
+      # a single R2025a Linux/py3.12 sentinel via the `include:` below. The full
+      # 3 × 3 × 2 = 18 matrix expands on `main` push to catch any cross-version
+      # regression that didn't show up on the trimmed PR run. R2026a is the
+      # primary target; R2025a is the previous release we still support.
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.10', '3.11', '3.12']
-        gmat-version: [R2025a, R2026a]
+        gmat-version: ${{ github.event_name == 'pull_request' && fromJSON('["R2026a"]') || fromJSON('["R2025a","R2026a"]') }}
+        include: ${{ github.event_name == 'pull_request' && fromJSON('[{"os":"ubuntu-latest","python-version":"3.12","gmat-version":"R2025a"}]') || fromJSON('[]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,13 +54,14 @@ jobs:
         # `tests/test_backends_kubernetes.py` (which `pytest.importorskip`
         # the kubernetes client) can run here and contribute to the
         # coverage gate — the real-cluster k8s integration tests still
-        # live in the dedicated `backend-k8s` job below. `--extra polars`
-        # so the engine="polars" tests under `tests/test_aggregate.py`
-        # contribute to the aggregate.py coverage gate. `--extra sensitivity`
-        # so `tests/test_sensitivity.py` can import SALib and contribute to
-        # the overall coverage gate (it would otherwise skip via
-        # `pytest.importorskip("SALib")`). The lint, typecheck, and minimal-
-        # install jobs deliberately keep their syncs narrower.
+        # live in the dedicated `backend-k8s` job in `integration.yml`.
+        # `--extra polars` so the engine="polars" tests under
+        # `tests/test_aggregate.py` contribute to the aggregate.py coverage
+        # gate. `--extra sensitivity` so `tests/test_sensitivity.py` can
+        # import SALib and contribute to the overall coverage gate (it
+        # would otherwise skip via `pytest.importorskip("SALib")`). The
+        # lint, typecheck, and minimal-install jobs deliberately keep
+        # their syncs narrower.
         run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s --extra polars --extra sensitivity
 
       - name: Run pytest
@@ -64,7 +69,7 @@ jobs:
         # default marker filter in pyproject.toml so CI runs both unit and
         # integration suites in a single invocation, while excluding the
         # `slow` integration tests that have their own dedicated cell
-        # (see the `backend-throughput` job below).
+        # (see the `backend-throughput` job in `integration.yml`).
         run: uv run pytest -m "(integration or not integration) and not slow" --cov --cov-report=term-missing
 
       # Coverage gates run on a single matrix combination — the .coverage
@@ -178,75 +183,16 @@ jobs:
       - run: pip install cffconvert==2.0.0
       - run: cffconvert --validate -i CITATION.cff
 
-  # Per-backend throughput regression: runs the 50-run scaled variant of the
-  # canonical reference benchmark on each of LocalJoblibPool / DaskPool /
-  # RayPool and asserts each backend's measured throughput meets the floor
-  # in `tests/data/throughput_floor.json`. One Linux cell on the latest
-  # supported GMAT release is the gate; the docs page reports the author's
-  # local 1000-run numbers separately. The MPI row runs in its own
-  # `backend-mpi` cell below — it requires launching pytest under the
-  # `mpi4py.futures` shim, which is incompatible with the rest of the
-  # parametrize.
-  backend-throughput:
-    name: backend throughput regression
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - uses: astro-tools/setup-gmat@v0
-        with:
-          version: R2026a
-          cache: true
-      - run: uv sync --all-groups --extra dask --extra ray
-      # `-s` disables stdout capture so the test's per-backend BenchmarkRecord
-      # JSON appears in the job log even on a passing run — needed to
-      # recalibrate `tests/data/throughput_floor.json` from the measured
-      # numbers without re-running the sweep locally.
-      - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow" -s
-
-  # Cross-backend equivalence gate: runs three reference sweeps (grid, Monte
-  # Carlo, Latin hypercube) on each of LocalJoblibPool / DaskPool / RayPool
-  # and asserts pairwise bit-equality on the aggregated DataFrame and the
-  # manifest's reproducibility-bearing fields. The contract is that the
-  # `Pool` abstraction is honest — `backend=` is a true execution-only knob
-  # with no observable effect on results. One Linux cell on the latest
-  # supported GMAT release is the gate; cross-platform Dask/Ray equivalence
-  # is out of scope (the 18-cell main matrix already covers LocalJoblibPool
-  # on every OS). The MPI row runs in its own `backend-mpi` cell below.
-  backend-equivalence:
-    name: backend equivalence
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - uses: astro-tools/setup-gmat@v0
-        with:
-          version: R2026a
-          cache: true
-      - run: uv sync --all-groups --extra dask --extra ray
-      - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"
-
   # MPIPool integration cell: launches pytest under the `mpi4py.futures`
   # shim so ranks 1..K-1 are pre-allocated workers and rank 0 runs the
   # test driver. Avoids `MPI_Comm_spawn` (which on the Open MPI 4 build
   # shipped by Ubuntu requires more host slots than a free-tier runner
   # exposes, and refuses to spawn without `--oversubscribe`). Filters the
   # parametrize to the mpi rows only — the dask / ray / local rows live
-  # in `backend-equivalence` and `backend-throughput` above.
+  # in the `backend-equivalence` and `backend-throughput` jobs in
+  # `integration.yml`. Stays on PR because it is fast (~1 min) and the
+  # mpi4py.futures shim is unique surface that lints and unit tests do
+  # not exercise.
   backend-mpi:
     name: backend mpi (mpi4py.futures)
     runs-on: ubuntu-latest
@@ -288,137 +234,3 @@ jobs:
             uv run python -m mpi4py.futures -m pytest \
               tests/test_backend_equivalence.py tests/test_backend_throughput.py \
               -m "integration and slow" -k mpi -s
-
-  # KubernetesJobPool integration cell: spins up a kind cluster, builds a
-  # from-source sweep image (`FROM ghcr.io/astro-tools/gmat:R2026a +
-  # pip install -e .[k8s]`), loads it into the kind node, mounts a PVC,
-  # and runs the equivalence and throughput suites with the k8s row
-  # active. The non-k8s parametrize rows auto-skip here because the dask
-  # and ray extras are not synced — keeping the kind provisioning blast
-  # radius limited to its own job.
-  #
-  # Driver/Pod path discipline: kind's `extraMounts` bind-mounts the
-  # runner's `/sweep` into the kind node at `/sweep`; a hostPath PV on the
-  # node points at the same path; Pods mount the PVC at `/sweep`. Net
-  # effect: the driver-side `/sweep` and Pod-side `/sweep` are the same
-  # directory, so paths inside RunSpec resolve identically on both sides
-  # without translation.
-  backend-k8s:
-    name: backend k8s (kind)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      GMAT_SWEEP_K8S_IMAGE: gmat-sweep-k8s-ci:local
-      GMAT_SWEEP_K8S_PVC: gmat-sweep-ci
-      GMAT_SWEEP_K8S_MOUNT_PATH: /sweep
-      GMAT_SWEEP_K8S_DRIVER_MOUNT_PATH: /sweep
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - uses: astro-tools/setup-gmat@v0
-        with:
-          version: R2026a
-          cache: true
-      - name: Prepare shared /sweep directory
-        run: sudo mkdir -p /sweep && sudo chmod 777 /sweep
-      - name: Provision kind cluster
-        uses: helm/kind-action@v1
-        with:
-          cluster_name: gmat-sweep
-          config: tests/k8s/kind-config.yaml
-      - name: Build sweep CI image
-        run: docker build -t gmat-sweep-k8s-ci:local -f tests/k8s/Dockerfile .
-      - name: Load image into kind
-        run: kind load docker-image gmat-sweep-k8s-ci:local --name gmat-sweep
-      - name: Apply PV + PVC
-        run: kubectl apply -f tests/k8s/sweep-pvc.yaml
-      - run: uv sync --all-groups --extra k8s
-      - run: uv run pytest tests/test_backend_equivalence.py tests/test_backend_throughput.py -m "integration and slow" -k "k8s" -s
-
-  # Smoke-canary against the canonical `ghcr.io/astro-tools/gmat:Rxxxxa` image.
-  # The image carries a verbatim GMAT install with gmatpy importable in pyenv-
-  # managed Python 3.10/3.11/3.12; running the four-line vision snippet plus a
-  # short Monte Carlo inside it is the cheapest signal that the in-tree
-  # `gmat-sweep` and the published image are still ABI/runtime-compatible.
-  # Each GMAT tag gets its own cell. The image is consumed verbatim — no
-  # apt installs, no startup-file edits, no plugin strips.
-  smoke-canary-image:
-    name: smoke canary (${{ matrix.gmat-version }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        gmat-version: [R2025a, R2026a]
-    container:
-      image: ghcr.io/astro-tools/gmat:${{ matrix.gmat-version }}
-    steps:
-      - uses: actions/checkout@v4
-      # Editable install against the image's default Python (3.12, first in
-      # the image's `pyenv global` list). `[dask,ray]` matches the extras
-      # combination the matrix `test:` cell uses, so the canary exercises
-      # the same import surface a real user would land on.
-      - name: Install gmat-sweep with dask + ray extras
-        run: pip install -e ".[dask,ray]"
-      # Mirrors `docs/getting-started.md` "four-line vision snippet" against
-      # the in-tree LEO fixture. `out=...` keeps the manifest for the show
-      # step below; the explicit `__status=="failed"` check fails the cell
-      # on any captured run failure (the API itself never raises on a single
-      # failed run — it lands as a `failed` row).
-      - name: Vision-snippet grid sweep
-        run: |
-          python - <<'PY'
-          from gmat_sweep import sweep
-
-          df = sweep(
-              "tests/data/leo_basic.script",
-              grid={"Sat.SMA": [7000, 7100, 7200]},
-              out="./grid-out",
-          )
-          print(df)
-          if (df["__status"] == "failed").any():
-              raise SystemExit("smoke-canary: grid sweep produced failed runs")
-          PY
-      - name: 4-run monte_carlo
-        run: |
-          python - <<'PY'
-          from gmat_sweep import monte_carlo
-
-          df = monte_carlo(
-              "tests/data/leo_basic.script",
-              n=4,
-              perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
-              seed=42,
-              out="./mc-out",
-          )
-          print(df)
-          if (df["__status"] == "failed").any():
-              raise SystemExit("smoke-canary: monte_carlo produced failed runs")
-          PY
-      - name: gmat-sweep show
-        run: |
-          gmat-sweep show ./grid-out/manifest.jsonl
-          gmat-sweep show ./mc-out/manifest.jsonl
-      # Always-run diagnostic: on a failed cell, dump the per-run details
-      # (`--detail` orders failed rows first) plus the raw manifest so the
-      # captured GMAT stderr is visible in the job log without needing to
-      # download artefacts. No-op on a green cell beyond extra log lines.
-      - name: Diagnostics on failure
-        if: failure()
-        run: |
-          for d in grid-out mc-out; do
-            echo "===== $d ====="
-            if [ -f "./$d/manifest.jsonl" ]; then
-              gmat-sweep show --detail "./$d/manifest.jsonl" || true
-              echo "----- raw $d/manifest.jsonl -----"
-              cat "./$d/manifest.jsonl"
-            else
-              echo "no manifest at ./$d/manifest.jsonl"
-            fi
-          done

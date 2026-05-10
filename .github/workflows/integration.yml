@@ -1,0 +1,216 @@
+name: Integration
+
+# Heavy integration cells that used to live on every PR. Moved off the
+# per-PR critical path because their value-per-typo-fix is low: kind
+# cluster builds, multi-backend bit-equality sweeps, throughput regression
+# floors, and verbatim image canaries are all post-merge concerns. They
+# run on every push to `main` (so a green main always means these passed),
+# nightly at 07:00 UTC (catches dependency-drift breakage even when nobody
+# pushed), and on demand via the Actions UI.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Per-backend throughput regression: runs the 50-run scaled variant of the
+  # canonical reference benchmark on each of LocalJoblibPool / DaskPool /
+  # RayPool and asserts each backend's measured throughput meets the floor
+  # in `tests/data/throughput_floor.json`. One Linux cell on the latest
+  # supported GMAT release is the gate; the docs page reports the author's
+  # local 1000-run numbers separately. The MPI row runs in the
+  # `backend-mpi` cell in `ci.yml` — it requires launching pytest under the
+  # `mpi4py.futures` shim, which is incompatible with the rest of the
+  # parametrize.
+  backend-throughput:
+    name: backend throughput regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - run: uv sync --all-groups --extra dask --extra ray
+      # `-s` disables stdout capture so the test's per-backend BenchmarkRecord
+      # JSON appears in the job log even on a passing run — needed to
+      # recalibrate `tests/data/throughput_floor.json` from the measured
+      # numbers without re-running the sweep locally.
+      - run: uv run pytest tests/test_backend_throughput.py -m "integration and slow" -s
+
+  # Cross-backend equivalence gate: runs three reference sweeps (grid, Monte
+  # Carlo, Latin hypercube) on each of LocalJoblibPool / DaskPool / RayPool
+  # and asserts pairwise bit-equality on the aggregated DataFrame and the
+  # manifest's reproducibility-bearing fields. The contract is that the
+  # `Pool` abstraction is honest — `backend=` is a true execution-only knob
+  # with no observable effect on results. One Linux cell on the latest
+  # supported GMAT release is the gate; cross-platform Dask/Ray equivalence
+  # is out of scope (the main matrix already covers LocalJoblibPool on
+  # every OS). The MPI row runs in the `backend-mpi` cell in `ci.yml`.
+  backend-equivalence:
+    name: backend equivalence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - run: uv sync --all-groups --extra dask --extra ray
+      - run: uv run pytest tests/test_backend_equivalence.py -m "integration and slow"
+
+  # KubernetesJobPool integration cell: spins up a kind cluster, builds a
+  # from-source sweep image (`FROM ghcr.io/astro-tools/gmat:R2026a +
+  # pip install -e .[k8s]`), loads it into the kind node, mounts a PVC,
+  # and runs the equivalence and throughput suites with the k8s row
+  # active. The non-k8s parametrize rows auto-skip here because the dask
+  # and ray extras are not synced — keeping the kind provisioning blast
+  # radius limited to its own job.
+  #
+  # Driver/Pod path discipline: kind's `extraMounts` bind-mounts the
+  # runner's `/sweep` into the kind node at `/sweep`; a hostPath PV on the
+  # node points at the same path; Pods mount the PVC at `/sweep`. Net
+  # effect: the driver-side `/sweep` and Pod-side `/sweep` are the same
+  # directory, so paths inside RunSpec resolve identically on both sides
+  # without translation.
+  backend-k8s:
+    name: backend k8s (kind)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GMAT_SWEEP_K8S_IMAGE: gmat-sweep-k8s-ci:local
+      GMAT_SWEEP_K8S_PVC: gmat-sweep-ci
+      GMAT_SWEEP_K8S_MOUNT_PATH: /sweep
+      GMAT_SWEEP_K8S_DRIVER_MOUNT_PATH: /sweep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: astro-tools/setup-gmat@v0
+        with:
+          version: R2026a
+          cache: true
+      - name: Prepare shared /sweep directory
+        run: sudo mkdir -p /sweep && sudo chmod 777 /sweep
+      - name: Provision kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: gmat-sweep
+          config: tests/k8s/kind-config.yaml
+      - name: Build sweep CI image
+        run: docker build -t gmat-sweep-k8s-ci:local -f tests/k8s/Dockerfile .
+      - name: Load image into kind
+        run: kind load docker-image gmat-sweep-k8s-ci:local --name gmat-sweep
+      - name: Apply PV + PVC
+        run: kubectl apply -f tests/k8s/sweep-pvc.yaml
+      - run: uv sync --all-groups --extra k8s
+      - run: uv run pytest tests/test_backend_equivalence.py tests/test_backend_throughput.py -m "integration and slow" -k "k8s" -s
+
+  # Smoke-canary against the canonical `ghcr.io/astro-tools/gmat:Rxxxxa` image.
+  # The image carries a verbatim GMAT install with gmatpy importable in pyenv-
+  # managed Python 3.10/3.11/3.12; running the four-line vision snippet plus a
+  # short Monte Carlo inside it is the cheapest signal that the in-tree
+  # `gmat-sweep` and the published image are still ABI/runtime-compatible.
+  # Each GMAT tag gets its own cell. The image is consumed verbatim — no
+  # apt installs, no startup-file edits, no plugin strips.
+  smoke-canary-image:
+    name: smoke canary (${{ matrix.gmat-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        gmat-version: [R2025a, R2026a]
+    container:
+      image: ghcr.io/astro-tools/gmat:${{ matrix.gmat-version }}
+    steps:
+      - uses: actions/checkout@v4
+      # Editable install against the image's default Python (3.12, first in
+      # the image's `pyenv global` list). `[dask,ray]` matches the extras
+      # combination the matrix `test:` cell uses, so the canary exercises
+      # the same import surface a real user would land on.
+      - name: Install gmat-sweep with dask + ray extras
+        run: pip install -e ".[dask,ray]"
+      # Mirrors `docs/getting-started.md` "four-line vision snippet" against
+      # the in-tree LEO fixture. `out=...` keeps the manifest for the show
+      # step below; the explicit `__status=="failed"` check fails the cell
+      # on any captured run failure (the API itself never raises on a single
+      # failed run — it lands as a `failed` row).
+      - name: Vision-snippet grid sweep
+        run: |
+          python - <<'PY'
+          from gmat_sweep import sweep
+
+          df = sweep(
+              "tests/data/leo_basic.script",
+              grid={"Sat.SMA": [7000, 7100, 7200]},
+              out="./grid-out",
+          )
+          print(df)
+          if (df["__status"] == "failed").any():
+              raise SystemExit("smoke-canary: grid sweep produced failed runs")
+          PY
+      - name: 4-run monte_carlo
+        run: |
+          python - <<'PY'
+          from gmat_sweep import monte_carlo
+
+          df = monte_carlo(
+              "tests/data/leo_basic.script",
+              n=4,
+              perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+              seed=42,
+              out="./mc-out",
+          )
+          print(df)
+          if (df["__status"] == "failed").any():
+              raise SystemExit("smoke-canary: monte_carlo produced failed runs")
+          PY
+      - name: gmat-sweep show
+        run: |
+          gmat-sweep show ./grid-out/manifest.jsonl
+          gmat-sweep show ./mc-out/manifest.jsonl
+      # Always-run diagnostic: on a failed cell, dump the per-run details
+      # (`--detail` orders failed rows first) plus the raw manifest so the
+      # captured GMAT stderr is visible in the job log without needing to
+      # download artefacts. No-op on a green cell beyond extra log lines.
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          for d in grid-out mc-out; do
+            echo "===== $d ====="
+            if [ -f "./$d/manifest.jsonl" ]; then
+              gmat-sweep show --detail "./$d/manifest.jsonl" || true
+              echo "----- raw $d/manifest.jsonl -----"
+              cat "./$d/manifest.jsonl"
+            else
+              echo "no manifest at ./$d/manifest.jsonl"
+            fi
+          done
