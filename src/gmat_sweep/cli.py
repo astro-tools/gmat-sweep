@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
+from gmat_sweep.api import latin_hypercube, monte_carlo, monte_carlo_extend, sweep
 from gmat_sweep.backends.dask import DaskPool
 from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.backends.mpi import MPIPool
@@ -512,6 +512,30 @@ def _cmd_archive(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_extend(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest)
+    if not manifest_path.is_file():
+        print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
+        return EXIT_MANIFEST
+    script = Path(args.script)
+    if not script.is_file():
+        print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
+        return EXIT_CONFIG
+
+    with _build_pool(args) as pool:
+        monte_carlo_extend(
+            manifest_path,
+            script,
+            n=args.n,
+            backend=pool,
+            allow_script_drift=args.allow_script_drift,
+        )
+
+    manifest = Manifest.load(manifest_path)
+    print(_format_summary(manifest, manifest_path.parent))
+    return EXIT_OK
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     if not manifest_path.is_file():
@@ -803,6 +827,58 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_backend_flag(explicit)
     explicit.set_defaults(func=_cmd_explicit)
+
+    extend = subparsers.add_parser(
+        "extend",
+        help="Append more bit-deterministic Monte Carlo runs to an existing sweep.",
+        description=(
+            "Load a Monte Carlo manifest.jsonl, dispatch N additional runs at "
+            "run_id range [old_n, old_n + N), and reuse the manifest's seed and "
+            "perturb mapping so the new draws are bit-equal to the same indices "
+            "of a fresh monte_carlo(n=old_n + N) call. Refuses if the base "
+            "sweep has any failed or missing runs in [0, old_n) — call "
+            "'gmat-sweep resume' first to fill those in."
+        ),
+    )
+    extend.add_argument(
+        "manifest",
+        metavar="MANIFEST",
+        help="Path to a Monte Carlo manifest.jsonl produced by a prior sweep.",
+    )
+    extend.add_argument(
+        "--n",
+        type=int,
+        required=True,
+        metavar="N",
+        help="Number of additional stochastic runs to append (>= 1).",
+    )
+    extend.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the original sweep loaded. Its "
+            "canonical SHA-256 must equal the manifest's script_sha256 unless "
+            "--allow-script-drift is set."
+        ),
+    )
+    extend.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Number of subprocess workers. Default -1 uses every available core.",
+    )
+    extend.add_argument(
+        "--allow-script-drift",
+        action="store_true",
+        help=(
+            "Proceed even if the script's canonical hash differs from the manifest's. "
+            "Emits a RuntimeWarning."
+        ),
+    )
+    _add_backend_flag(extend)
+    extend.set_defaults(func=_cmd_extend)
 
     resume = subparsers.add_parser(
         "resume",

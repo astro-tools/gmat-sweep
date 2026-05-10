@@ -1188,6 +1188,117 @@ def test_resume_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]
     assert "--script" in out
 
 
+# ---- extend subcommand --------------------------------------------------
+
+
+def test_extend_appends_new_runs_and_prints_combined_summary(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+
+    rc = cli.main(
+        [
+            "monte-carlo",
+            "--n",
+            "4",
+            "--perturb",
+            "Sat.SMA=normal:7100:50",
+            "--seed",
+            "42",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    rc = cli.main(
+        [
+            "extend",
+            str(out / "manifest.jsonl"),
+            "--n",
+            "6",
+            "--script",
+            str(script),
+            "--workers",
+            "1",
+        ]
+    )
+    assert rc == 0
+    summary = capsys.readouterr().out.splitlines()[0]
+    assert "10 runs" in summary  # 4 original + 6 extended
+    assert "10 ok" in summary
+
+
+def test_extend_on_missing_manifest_exits_manifest_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = _write_script(tmp_path)
+    rc = cli.main(
+        [
+            "extend",
+            str(tmp_path / "no-such-manifest.jsonl"),
+            "--n",
+            "2",
+            "--script",
+            str(script),
+        ]
+    )
+    assert rc == cli.EXIT_MANIFEST
+    assert "not found" in capsys.readouterr().err
+
+
+def test_extend_on_grid_manifest_exits_config_code(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A grid manifest is structurally valid but extend refuses it — the
+    SweepConfigError surfaces as exit code 2."""
+    script = _write_script(tmp_path)
+    out = tmp_path / "out"
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
+    cli.main(
+        [
+            "run",
+            "--grid",
+            "Sat.SMA=7000:7100:2",
+            "--workers",
+            "1",
+            "--out",
+            str(out),
+            str(script),
+        ]
+    )
+    capsys.readouterr()
+
+    rc = cli.main(
+        [
+            "extend",
+            str(out / "manifest.jsonl"),
+            "--n",
+            "3",
+            "--script",
+            str(script),
+        ]
+    )
+    assert rc == cli.EXIT_CONFIG
+    assert "Monte Carlo" in capsys.readouterr().err
+
+
+def test_extend_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["extend", "--help"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--allow-script-drift" in out
+    assert "--script" in out
+    assert "--n" in out
+
+
 # ---- archive subcommand -------------------------------------------------
 
 
