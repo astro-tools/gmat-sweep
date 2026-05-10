@@ -12,8 +12,8 @@ type: software
 authors:
   - given-names: Dimitrije
     family-names: Jankovic
-version: 0.3.0
-date-released: "2026-05-08"
+version: 0.4.0
+date-released: "2026-05-10"
 license: MIT
 repository-code: "https://github.com/astro-tools/gmat-sweep"
 url: "https://github.com/astro-tools/gmat-sweep"

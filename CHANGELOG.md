@@ -5,6 +5,190 @@ All notable changes to gmat-sweep are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-10
+
+The quality-of-life and ecosystem release: three new execution
+backends join `KubernetesJobPool` (`MPIPool`,
+`ProcessPoolExecutorPool`, `DebugPool`), six DataFrame helpers land
+on top of the aggregator (`sweep_summary`, `sweep_diff`,
+`mc_convergence`, `lazy_fused_reports`, plus `monte_carlo_extend` /
+`latin_hypercube_extend`), Sobol sensitivity and matplotlib plot
+helpers ship behind opt-in extras, an opt-in Polars output engine
+runs alongside the pandas default, `Sweep.archive` packs a finished
+sweep into a deterministic `.zip` for Zenodo / JOSS deposits, and
+notebook-friendly `_repr_html_` rendering lands on `Sweep` /
+`RunOutcome` / `ManifestEntry`. CI gains a smoke-canary cell against
+the canonical `ghcr.io/astro-tools/gmat` image; per-PR cells trim
+from 18 to 10 with the heavy integration work moving to a scheduled
+`integration.yml`. Coverage gate raises from ≥ 85% to ≥ 90%.
+
+### Added
+
+- `KubernetesJobPool` (`gmat-sweep[k8s]`) — every run becomes one
+  `batch/v1` Job; every Pod is a fresh interpreter; completions
+  drained via a `kubernetes.watch.Watch` loop. Spec/outcome handoff
+  via the same shared PVC the worker Pods mount. No changes to
+  `RunSpec` or the `Pool` ABC. New
+  [`recipes/kubernetes-jobpool.md`](docs/recipes/kubernetes-jobpool.md)
+  walks the pod-per-run wiring (#101).
+- `MPIPool` (`gmat-sweep[mpi]`) — wraps
+  `mpi4py.futures.MPIPoolExecutor` and works under both
+  dynamic-spawn (plain `python …`) and pre-allocated-rank
+  (`mpirun -n K python -m mpi4py.futures …`) launches without any
+  launcher detection on this side. CLI gains `--backend mpi` with
+  `--backend-arg max_workers=N` as the dynamic-spawn knob (#102).
+- `ProcessPoolExecutorPool` (stdlib, Python ≥ 3.11) — wraps
+  `concurrent.futures.ProcessPoolExecutor(max_tasks_per_child=1)`,
+  no `joblib` / `loky` dependency. Coexists with `LocalJoblibPool`
+  rather than replacing it (#104).
+- `DebugPool` — in-process, single-run dispatch so a `breakpoint()`
+  reached during a run drops into the driver's debugger. Two opt-in
+  flags (`subprocess_isolated="debug"` on the `Pool` ABC + an
+  explicit `debug=True` on the constructor) gate the deliberate
+  isolation violation (#105).
+- `gmat_sweep.plotting` module behind `gmat-sweep[plot]`.
+  `sweep_corner(df, params=..., metric=..., manifest=...)` is a pair
+  plot of perturbed dotted-paths coloured by a per-run scalar
+  metric; `sweep_heatmap(df, x=..., y=..., metric=...)` is a
+  contour-grade heatmap on a 2-axis grid sweep. `matplotlib` is
+  imported lazily inside each helper, so `import gmat_sweep.plotting`
+  succeeds without the extra (#109).
+- `gmat_sweep.sensitivity` module behind `gmat-sweep[sensitivity]`
+  (`salib>=1.5`). `sobol_sample(perturb, n, *, seed=None,
+  calc_second_order=True)` builds the Saltelli/Sobol design as an
+  explicit-row DataFrame; `sobol_analyze(df, perturb, metric, *,
+  calc_second_order=True, seed=None)` returns first/total/
+  second-order indices with bootstrap confidence intervals. New
+  [`docs/sensitivity.md`](docs/sensitivity.md) walks the design and
+  the metric-callable contract (#121).
+- `engine="polars"` kwarg across the DataFrame-returning surface —
+  [`sweep`][gmat_sweep.sweep], [`monte_carlo`][gmat_sweep.monte_carlo],
+  [`latin_hypercube`][gmat_sweep.latin_hypercube],
+  [`monte_carlo_extend`][gmat_sweep.monte_carlo_extend],
+  `Sweep.to_dataframe` / `to_ephemerides` / `to_contacts` plus a
+  `Sweep.to_polars()` shortcut, and the standalone
+  `lazy_multiindex` / `lazy_ephemerides` / `lazy_contacts` /
+  `sweep_diff` / `mc_convergence`. Pandas remains the default; the
+  `(run_id, time)` index translates to a column-pair on the polars
+  side. Behind `gmat-sweep[polars]` (#120).
+- [`Sweep.archive(out, *, include_logs=False) -> Path`][gmat_sweep.Sweep.archive]
+  and a matching `gmat-sweep archive MANIFEST --out bundle.zip
+  [--include-logs] [--allow-script-drift]` CLI subcommand pack a
+  finished sweep — script, manifest, per-run Parquet outputs, a
+  generated reproduce-recipe README, and a `sha256sum`-compatible
+  `MANIFEST.hash` — into one deterministic `.zip` ready for Zenodo
+  or a JOSS deposit. Bundled manifest `output_paths` /
+  `log_path` are rewritten to bundle-relative form (#111).
+- `Sweep` / [`RunOutcome`][gmat_sweep.RunOutcome] /
+  [`ManifestEntry`][gmat_sweep.ManifestEntry] gain `_repr_html_`
+  methods rendering as compact HTML key/value tables in Jupyter,
+  instead of the default `<gmat_sweep.sweep.Sweep object at 0x…>`
+  placeholder. `__repr__` is unchanged (#108).
+- [`lazy_fused_reports`][gmat_sweep.lazy_fused_reports] and
+  `Sweep.to_fused_reports` fuse N `ReportFile` outputs per run into
+  one DataFrame with column-level `MultiIndex` keyed by
+  `(report_name, column)`. Per-run merge anchors on the first name;
+  subsequent reports join via `pd.merge_asof` with a user-supplied
+  `tolerance`, or via inner join on `time` when `tolerance` is `None`
+  (#107).
+- [`sweep_summary(df, *, by="time", q=(0.05, 0.5, 0.95),
+  include=("mean", "std"), dropna=True)`][gmat_sweep.sweep_summary]
+  collapses a `(run_id, time)`-MultiIndexed sweep DataFrame into
+  per-`by` statistics with a 2-level `("statistic", "field")`
+  column MultiIndex. Default 5/50/95 quantiles plus mean/std feed
+  directly into the matching plot helper; `count_ok` reports the
+  per-group non-NaN run count (#114).
+- [`monte_carlo_extend(manifest, script, *, n, backend, ...)`][gmat_sweep.monte_carlo_extend]
+  and a sibling `latin_hypercube_extend` run only the new `n`
+  samples on top of an existing sweep; the original `run_id`s'
+  draws are bit-equal to the same indices of a fresh
+  `monte_carlo(n=old_n + n, seed=...)`. Per-run sub-seeds derive
+  from `numpy.random.SeedSequence.spawn`, so the determinism
+  contract holds across extensions (#115).
+- [`mc_convergence(df, metric, *, terminal_only=False)`][gmat_sweep.mc_convergence]
+  returns per-prefix running mean / std / SE-of-mean across
+  `run_id` prefixes — answers "did my Monte Carlo converge?" for
+  a chosen metric. `metric` accepts a column name (with
+  `terminal_only=True` for the per-run last value, or
+  `terminal_only=False` for one running curve per `time` step) or
+  a callable `(per_run_subframe) -> scalar` (#117).
+- [`sweep_diff(df_a, df_b, *, on=None, how="both",
+  tolerance=None)`][gmat_sweep.sweep_diff] for comparing two
+  same-shape sweep DataFrames into a `(run_id, time)`- (or
+  `run_id`-) indexed diff frame. Per shared numeric column emits
+  `<col>__diff = b - a` and/or `<col>__rel = (b - a) / a`;
+  `on="run_id"` first collapses each side to its per-run
+  final-step row (#119).
+- New [`docs/cookbook.md`](docs/cookbook.md) page documenting four
+  patterns for turning sweep outputs into downstream-consumer
+  inputs: visualisation export (CCSDS-OEM 502.0-B-3 KVN, CZML for
+  Cesium), cross-tool validation (manifest + multi-indexed frame
+  as harness inputs), external-tool wrapping (`out=` directory +
+  `manifest.jsonl` + per-run Parquets as today's portable bundle),
+  and archival deposit (Zenodo / JOSS via `Sweep.archive`) (#110).
+- New runnable example notebooks rendered into the docs site:
+  `08_sobol_sensitivity.ipynb` (Saltelli/Sobol design + first/
+  total-order indices with 95% CIs), `09_archive_bundle.ipynb`
+  (pack a sweep with `Sweep.archive()`, inspect + re-aggregate
+  from the unzipped bundle), `10_extending_monte_carlo.ipynb`
+  (100-run base + `monte_carlo_extend(n=200)` + bit-for-bit
+  determinism assertion on the original 100). `sweep_summary`,
+  `sweep_corner`, and `sweep_heatmap` cells appear inline across
+  the existing sweep / Monte Carlo notebooks (#124).
+- `docs/benchmarks.md` extended to report `ProcessPoolExecutorPool`
+  and `MPIPool` alongside the existing `LocalJoblibPool` /
+  `DaskPool` / `RayPool` rows. `KubernetesJobPool` and `DebugPool`
+  are noted under an "Excluded backends" section with rationale
+  (k8s = per-Pod scheduling dominates wall-clock; Debug =
+  single-spec by construction) (#125).
+- Smoke-canary CI cell (`smoke-canary-image`) under
+  `integration.yml` runs the four-line vision-snippet sweep and a
+  4-run Monte Carlo against the canonical
+  `ghcr.io/astro-tools/gmat:R2025a` and `:R2026a` images on every
+  push to `main`, nightly, and on demand (#112).
+- New `integration.yml` workflow consolidates
+  `backend-throughput`, `backend-equivalence`, `backend-k8s`, and
+  `smoke-canary-image (R2025a, R2026a)`. Runs on every push to
+  `main`, nightly at 07:00 UTC, and on `workflow_dispatch` (#126).
+- `CITATION.cff` at the repo root so GitHub's "Cite this
+  repository" UI and academic tooling resolve a canonical
+  citation for the project (#116).
+
+### Changed
+
+- Overall coverage gate on the Ubuntu / Python 3.12 / R2026a cell
+  raised from `>=85%` to `>=90%`, the v0.4 charter line. The four
+  per-file 95% gates on `grids.py`, `distributions.py`,
+  `manifest.py`, and `aggregate.py` are unchanged (#113).
+- Per-PR CI trimmed from 18 to 10 cells: R2026a × 3 OS × 3 Python
+  = 9, plus a single R2025a Linux/py3.12 sentinel. The full
+  3 × 3 × 2 = 18 matrix expands on `main` push. Heavy backend and
+  canary cells move to the new `integration.yml` (push:main +
+  nightly + on-demand). No coverage loss post-merge (#126).
+- Docs alignment pass: `cli.md` gains the `archive` subcommand
+  (it was wired in `cli.py` and used in `cookbook.md` but missing
+  from the CLI reference); `api.md` backfills the public exports
+  the auto-generated reference was missing — the four
+  `expand_*_to_run_specs` helpers, `latin_hypercube_samples`,
+  `sweep_corner` / `sweep_heatmap`, and `DebugPool`. Version-pegged
+  copy across `manifest-schema.md`, `parameter-spec.md`,
+  `supported-versions.md`, and a handful of source comments is
+  scrubbed (#127).
+
+### Fixed
+
+- `sweep()` / `monte_carlo()` / `latin_hypercube()` and
+  `Sweep.from_manifest` now resolve `out=` (or the manifest path)
+  to absolute before per-run directories are seeded. A relative
+  `out=` was forwarded into `gmat_run.Mission.run(working_dir=...)`
+  and on into the GMAT API, which resolves a relative `working_dir`
+  against its installed `OUTPUT_PATH` rather than the caller's
+  CWD — per-run Parquet files landed under the GMAT install
+  directory and the aggregator failed to find them. Existing
+  absolute-`out=` callers see no behavioural change (#112).
+
+[0.4.0]: https://github.com/astro-tools/gmat-sweep/releases/tag/v0.4.0
+
 ## [0.3.0] — 2026-05-07
 
 The cluster-backends release: `DaskPool` and `RayPool` join the
