@@ -42,6 +42,7 @@ from gmat_sweep.manifest import (
     ManifestEntry,
     canonical_script_sha256,
 )
+from gmat_sweep.sensitivity import sobol_analyze, sobol_sample
 from gmat_sweep.spec import RunOutcome, RunSpec, SweepSpec
 from gmat_sweep.sweep import Sweep
 
@@ -92,6 +93,8 @@ __all__ = [
     "mc_convergence",
     "monte_carlo",
     "monte_carlo_extend",
+    "sobol_analyze",
+    "sobol_sample",
     "sweep",
     "sweep_diff",
     "sweep_summary",

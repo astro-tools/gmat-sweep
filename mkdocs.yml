@@ -38,6 +38,7 @@ nav:
   - Parameter spec: parameter-spec.md
   - Backends: backends.md
   - Monte Carlo: monte-carlo.md
+  - Sensitivity: sensitivity.md
   - Aggregation: aggregation.md
   - Resume: resume.md
   - CLI reference: cli.md

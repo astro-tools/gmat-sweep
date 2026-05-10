@@ -52,10 +52,12 @@ jobs:
         # coverage gate — the real-cluster k8s integration tests still
         # live in the dedicated `backend-k8s` job below. `--extra polars`
         # so the engine="polars" tests under `tests/test_aggregate.py`
-        # contribute to the aggregate.py coverage gate. The lint,
-        # typecheck, and minimal-install jobs deliberately keep their
-        # syncs narrower.
-        run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s --extra polars
+        # contribute to the aggregate.py coverage gate. `--extra sensitivity`
+        # so `tests/test_sensitivity.py` can import SALib and contribute to
+        # the overall coverage gate (it would otherwise skip via
+        # `pytest.importorskip("SALib")`). The lint, typecheck, and minimal-
+        # install jobs deliberately keep their syncs narrower.
+        run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s --extra polars --extra sensitivity
 
       - name: Run pytest
         # `-m "(integration or not integration) and not slow"` overrides the
