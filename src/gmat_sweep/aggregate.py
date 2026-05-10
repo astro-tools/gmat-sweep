@@ -635,7 +635,9 @@ def lazy_fused_reports(
 
     parts: list[pd.DataFrame] = []
     for run_id in run_ids:
-        per_run = [grouped_per_report[i].get(run_id, empty_slices[i]) for i in range(len(per_report))]
+        per_run = [
+            grouped_per_report[i].get(run_id, empty_slices[i]) for i in range(len(per_report))
+        ]
         anchor = per_run[0]
         anchor_has_data = not anchor.empty and bool(anchor[_TIME_COL].notna().any())
         if anchor_has_data:
@@ -856,8 +858,7 @@ def sweep_summary(
     dup_include = sorted({s for s in include if list(include).count(s) > 1})
     if dup_include:
         raise SweepConfigError(
-            f"sweep_summary: include must not contain duplicates; "
-            f"got duplicate(s) {dup_include}"
+            f"sweep_summary: include must not contain duplicates; got duplicate(s) {dup_include}"
         )
 
     if df.index.nlevels < 2 or by not in (df.index.names or []):
