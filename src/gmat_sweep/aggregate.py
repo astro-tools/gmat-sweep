@@ -621,7 +621,7 @@ def lazy_fused_reports(
     # group iteration is cheap; we materialise the per-run slice lazily.
     grouped_per_report: list[dict[int, pd.DataFrame]] = [
         {
-            int(rid): cast(pd.DataFrame, sub.drop(columns=[_RUN_ID_COL]))
+            cast(int, rid): cast(pd.DataFrame, sub.drop(columns=[_RUN_ID_COL]))
             for rid, sub in df.groupby(_RUN_ID_COL, sort=False)
         }
         for df in flat_per_report
@@ -1334,6 +1334,9 @@ def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:
     # Pin output ordering explicitly — the contract advertised in
     # mc_convergence's docstring ('sorted by time then n ascending')
     # should hold under refactors to the upstream groupby/concat path.
-    return pd.concat(parts, axis=0, ignore_index=True).sort_values(
-        [_TIME_COL, "n"], ignore_index=True
+    return cast(
+        pd.DataFrame,
+        pd.concat(parts, axis=0, ignore_index=True).sort_values(
+            [_TIME_COL, "n"], ignore_index=True
+        ),
     )
