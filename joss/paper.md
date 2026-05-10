@@ -20,11 +20,11 @@ bibliography: paper.bib
 ---
 
 <!--
-This file is a v0.4-cycle skeleton. The narrative content is intentionally
-stub-level; the paper itself is drafted as part of the v1.0 adoption push
-(see issue #94). When expanding this paper, replace the TODO markers below
-with real prose, verify every bib entry in paper.bib, and confirm the author
-ORCID + affiliation reflect the submitting state at JOSS submission time.
+This file is a skeleton. The narrative content is intentionally stub-level;
+flesh it out before submitting to JOSS. When expanding this paper, replace
+the TODO markers below with real prose, verify every bib entry in paper.bib,
+and confirm the author ORCID + affiliation reflect the submitting state at
+JOSS submission time.
 -->
 
 # Summary
@@ -37,7 +37,7 @@ fans the run set across subprocess workers, aggregates each run's outputs
 into multi-indexed `pandas` DataFrames, and writes a JSON Lines manifest
 so any sweep is reproducible and resumable.
 
-<!-- v1.0 TODO: expand the summary into the standard JOSS three-paragraph form. -->
+<!-- TODO: expand the summary into the standard JOSS three-paragraph form. -->
 
 # Statement of need
 
@@ -57,7 +57,7 @@ the well-validated distributions in SciPy [@scipy], and per-run sub-seeds
 derive deterministically from a user-supplied root seed so a resumed
 sweep samples the same values for any given run identifier.
 
-<!-- v1.0 TODO: contrast with adjacent tooling and expand on the gap. -->
+<!-- TODO: contrast with adjacent tooling and expand on the gap. -->
 
 # Functionality overview
 
@@ -92,7 +92,7 @@ status. A killed sweep restarts from the manifest and re-runs only the
 missing or failed entries; the underlying `gmat-run` [@gmat-run]
 single-run primitive carries the per-run isolation contract.
 
-<!-- v1.0 TODO: add benchmark figures and a worked example. -->
+<!-- TODO: add benchmark figures and a worked example. -->
 
 # Acknowledgements
 
@@ -100,6 +100,6 @@ The author thanks the GMAT development team at NASA Goddard Space Flight
 Center for maintaining the underlying mission-analysis platform that
 `gmat-sweep` builds upon.
 
-<!-- v1.0 TODO: acknowledge specific reviewers, contributors, and funding sources at submission time. -->
+<!-- TODO: acknowledge specific reviewers, contributors, and funding sources at submission time. -->
 
 # References
