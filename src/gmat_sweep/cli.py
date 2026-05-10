@@ -218,7 +218,7 @@ def _build_pool(args: argparse.Namespace) -> Pool:
                 "--backend-arg is not supported with --backend local; "
                 "the local pool only accepts --workers"
             )
-        return LocalJoblibPool(workers=args.workers)
+        return LocalJoblibPool(max_workers=args.workers)
     workers = args.workers if args.workers > 0 else None
     if args.backend == "dask":
         return DaskPool(n_workers=workers, **backend_kwargs)

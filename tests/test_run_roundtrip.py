@@ -39,7 +39,7 @@ def four_run_sweep_df(
     """Run the reference 4-run sweep once and reuse it across the module."""
     out = tmp_path_factory.mktemp("four-run-sweep")
     return gmat_sweep.sweep(
-        leo_basic_script, grid=_GRID, backend=LocalJoblibPool(workers=2), out=out
+        leo_basic_script, grid=_GRID, backend=LocalJoblibPool(max_workers=2), out=out
     )
 
 

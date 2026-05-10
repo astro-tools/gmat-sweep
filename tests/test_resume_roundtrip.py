@@ -97,7 +97,7 @@ def test_16_run_grid_with_3_failures_resumes_to_all_ok(
     sweep(
         script,
         grid={"Sat.SMA": grid_values},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -106,7 +106,7 @@ def test_16_run_grid_with_3_failures_resumes_to_all_ok(
 
     # Patch the failure source out and resume.
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         df = (
             Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False)
             .resume()
@@ -162,7 +162,7 @@ def test_monte_carlo_resume_preserves_bit_equal_draws_for_failed_runs(
         n=8,
         perturb=perturb,
         seed=1729,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -173,7 +173,7 @@ def test_monte_carlo_resume_preserves_bit_equal_draws_for_failed_runs(
 
     # Resume with no failure source.
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False).resume()
 
     post_resume = Manifest.load(out / "manifest.jsonl")
@@ -193,7 +193,7 @@ def test_script_drift_raises_sweep_config_error(tmp_path: Path, fake_gmat_run: F
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -202,7 +202,7 @@ def test_script_drift_raises_sweep_config_error(tmp_path: Path, fake_gmat_run: F
     script.write_text("% mission v2\nCreate Spacecraft Sat;\n", encoding="utf-8")
 
     with (
-        LocalJoblibPool(workers=1) as pool,
+        LocalJoblibPool(max_workers=1) as pool,
         pytest.raises(SweepConfigError, match="script hash mismatch"),
     ):
         Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False)
@@ -215,7 +215,7 @@ def test_allow_script_drift_warns_and_proceeds(tmp_path: Path, fake_gmat_run: Fa
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -224,7 +224,7 @@ def test_allow_script_drift_warns_and_proceeds(tmp_path: Path, fake_gmat_run: Fa
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
     with (
-        LocalJoblibPool(workers=1) as pool,
+        LocalJoblibPool(max_workers=1) as pool,
         pytest.warns(RuntimeWarning, match="script hash mismatch"),
     ):
         rebuilt = Sweep.from_manifest(
@@ -253,7 +253,7 @@ def test_resumed_dataframe_matches_unbroken_sweep_via_sma_echo(
     df_reference = sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "ref",
         progress=False,
     )
@@ -287,13 +287,13 @@ def test_resumed_dataframe_matches_unbroken_sweep_via_sma_echo(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
 
     _install_sma_echoing_loader(fake_gmat_run)
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         df_resumed = (
             Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False)
             .resume()

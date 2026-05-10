@@ -39,12 +39,26 @@ def _ok_outcome(run_id: int) -> RunOutcome:
 
 
 class _StubFuture:
-    """Minimal stand-in for ``distributed.Future`` carrying a precomputed result."""
+    """Minimal stand-in for ``distributed.Future`` carrying a precomputed result.
 
-    def __init__(self, value: RunOutcome) -> None:
+    ``exc`` (optional) lets the stub surface an exception via the
+    ``as_completed(... raise_errors=False)`` path — see
+    :func:`_stub_as_completed`.
+    """
+
+    _next_key = 0
+
+    def __init__(self, value: RunOutcome | None, *, exc: BaseException | None = None) -> None:
         self._value = value
+        self._exc = exc
+        # Mirror distributed.Future.key — DaskPool keys its run_id lookup on it.
+        _StubFuture._next_key += 1
+        self.key = f"stub-{_StubFuture._next_key}"
 
     def result(self) -> RunOutcome:
+        if self._exc is not None:
+            raise self._exc
+        assert self._value is not None
         return self._value
 
 
@@ -71,6 +85,34 @@ class _StubCluster:
         self.closed = True
 
 
+def _stub_as_completed(
+    futures: Iterable[_StubFuture],
+    *,
+    with_results: bool = False,
+    raise_errors: bool = True,
+) -> Iterator[Any]:
+    """Stand-in for ``distributed.as_completed`` covering the kwargs DaskPool uses.
+
+    Mirrors the real distributed.as_completed surface: ``with_results=True``
+    yields ``(future, payload)`` pairs; ``raise_errors=False`` surfaces a
+    task's exception as the payload instead of re-raising. The drain code
+    in :class:`DaskPool.as_completed` depends on both knobs together to
+    fold worker-side exceptions.
+    """
+    for f in futures:
+        if with_results:
+            try:
+                value = f.result()
+            except Exception as exc:
+                if raise_errors:
+                    raise
+                yield f, exc
+                continue
+            yield f, value
+        else:
+            yield f
+
+
 def _patch_distributed_with_stubs(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -85,12 +127,7 @@ def _patch_distributed_with_stubs(
 
     monkeypatch.setattr(distributed, "LocalCluster", cluster_factory, raising=True)
     monkeypatch.setattr(distributed, "Client", client_factory, raising=True)
-    monkeypatch.setattr(
-        distributed,
-        "as_completed",
-        lambda futures: iter(futures),
-        raising=True,
-    )
+    monkeypatch.setattr(distributed, "as_completed", _stub_as_completed, raising=True)
 
 
 def test_daskpool_is_pool_subclass() -> None:
@@ -276,6 +313,69 @@ def test_default_dispatches_run_one_directly(
     pool.close()
 
     assert calls == [("run_one", 0)]
+
+
+def test_worker_side_exception_folds_into_failed_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A Dask task that raises is folded into ``RunOutcome.failed``.
+
+    The drain loop runs ``distributed.as_completed`` with
+    ``raise_errors=False`` and the worker-side exception arrives as the
+    payload instead of propagating out of ``.result()``. The fold must
+    keep the sweep alive and surface the traceback on ``stderr``.
+    """
+
+    class _ExplodingClient:
+        def submit(self, fn: Any, spec: RunSpec, *, pure: bool = True) -> _StubFuture:
+            # Park the exception on the future via the new exc= kwarg —
+            # the stub_as_completed helper surfaces it as the payload.
+            return _StubFuture(None, exc=RuntimeError("worker exploded"))
+
+        def close(self) -> None:
+            pass
+
+    _patch_distributed_with_stubs(monkeypatch)
+    pool = DaskPool(client=_ExplodingClient())
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    outcomes = list(pool.as_completed([f]))
+    pool.close()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].run_id == 0
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].stderr is not None
+    assert "worker exploded" in outcomes[0].stderr
+    assert f.done()
+    assert f.result() is outcomes[0]
+
+
+def test_one_failed_run_does_not_abort_other_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mix one task that raises with two that succeed — sweep yields all three."""
+
+    class _MixedClient:
+        def submit(self, fn: Any, spec: RunSpec, *, pure: bool = True) -> _StubFuture:
+            if spec.run_id == 1:
+                return _StubFuture(None, exc=RuntimeError("worker 1 down"))
+            return _StubFuture(_ok_outcome(spec.run_id))
+
+        def close(self) -> None:
+            pass
+
+    _patch_distributed_with_stubs(monkeypatch)
+    pool = DaskPool(client=_MixedClient())
+    futures = [
+        pool.submit(_make_spec(output_dir=tmp_path / f"run_{i}", run_id=i)) for i in range(3)
+    ]
+    outcomes = sorted(pool.as_completed(futures), key=lambda o: o.run_id)
+    pool.close()
+
+    assert [o.run_id for o in outcomes] == [0, 1, 2]
+    assert [o.status for o in outcomes] == ["ok", "failed", "ok"]
+    assert outcomes[1].stderr is not None
+    assert "worker 1 down" in outcomes[1].stderr
 
 
 def test_reuse_gmat_context_false_dispatches_subprocess_hop(

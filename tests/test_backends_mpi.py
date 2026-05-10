@@ -55,7 +55,12 @@ class _StubMPIPoolExecutor:
     def submit(self, fn: Any, spec: RunSpec) -> Future[RunOutcome]:
         self.submitted.append((fn, spec))
         future: Future[RunOutcome] = Future()
-        future.set_result(fn(spec))
+        try:
+            future.set_result(fn(spec))
+        except Exception as exc:
+            # Mirror MPIPoolExecutor's behaviour: a worker-side exception
+            # is parked on the future and surfaces from ``.result()``.
+            future.set_exception(exc)
         return future
 
     def shutdown(self, *, wait: bool = True) -> None:
@@ -256,6 +261,67 @@ def test_as_completed_rejects_unknown_future(
     with pytest.raises(BackendError):
         list(pool.as_completed([f]))
     pool.close()
+
+
+def test_worker_side_exception_folds_into_failed_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A rank-side exception is folded into a synthetic ``RunOutcome.failed``.
+
+    Simulates the MPI rank-crash path where the executor's future surfaces
+    an exception instead of an outcome. The drain loop must keep the sweep
+    alive and capture the traceback on the synthetic failed outcome's
+    ``stderr``.
+    """
+    from gmat_sweep.backends.mpi import MPIPool
+
+    _install_stub_executor(monkeypatch, _StubMPIPoolExecutor())
+
+    def _boom(_spec: RunSpec) -> RunOutcome:
+        raise RuntimeError("rank exploded")
+
+    monkeypatch.setattr("gmat_sweep.backends.mpi.run_one", _boom)
+
+    pool = MPIPool()
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    outcomes = list(pool.as_completed([f]))
+    pool.close()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].run_id == 0
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].stderr is not None
+    assert "rank exploded" in outcomes[0].stderr
+    assert f.done()
+    assert f.result() is outcomes[0]
+
+
+def test_one_failed_rank_does_not_abort_other_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mix one rank-crashing task with two successful ones — sweep yields all three."""
+    from gmat_sweep.backends.mpi import MPIPool
+
+    _install_stub_executor(monkeypatch, _StubMPIPoolExecutor())
+
+    def _maybe_boom(spec: RunSpec) -> RunOutcome:
+        if spec.run_id == 1:
+            raise RuntimeError("rank 1 down")
+        return _ok_outcome(spec.run_id)
+
+    monkeypatch.setattr("gmat_sweep.backends.mpi.run_one", _maybe_boom)
+
+    pool = MPIPool()
+    futures = [
+        pool.submit(_make_spec(output_dir=tmp_path / f"run_{i}", run_id=i)) for i in range(3)
+    ]
+    outcomes = sorted(pool.as_completed(futures), key=lambda o: o.run_id)
+    pool.close()
+
+    assert [o.run_id for o in outcomes] == [0, 1, 2]
+    assert [o.status for o in outcomes] == ["ok", "failed", "ok"]
+    assert outcomes[1].stderr is not None
+    assert "rank 1 down" in outcomes[1].stderr
 
 
 def test_mpi_run_one_delegates_to_subprocess_helper(

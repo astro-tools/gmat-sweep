@@ -49,7 +49,7 @@ def _install_sma_echoing_loader(fake_gmat_run: FakeGmatRun) -> None:
 def _run_grid(*, script: Path, out: Path, n: int = 16, fake_gmat_run: FakeGmatRun) -> Sweep:
     _install_sma_echoing_loader(fake_gmat_run)
     grid_values = [7000.0 + i for i in range(n)]
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep_obj = Sweep(
             runs=__import__(
                 "gmat_sweep.grids", fromlist=["expand_grid_to_run_specs"]
@@ -193,7 +193,7 @@ def test_16_run_grid_archive_and_resume_yields_bit_equal_dataframe(
     with zipfile.ZipFile(bundle) as zf:
         zf.extractall(extracted)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         resumed = (
             Sweep.from_manifest(
                 extracted / "manifest.jsonl",
@@ -240,7 +240,7 @@ def test_failed_runs_are_packed_without_parquet_with_stderr_intact(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7001.0, 7002.0, 7003.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -249,7 +249,7 @@ def test_failed_runs_are_packed_without_parquet_with_stderr_intact(
     assert len(failed) == 1
     failed_run_id = failed[0]
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         loaded_sweep = Sweep.from_manifest(
             out / "manifest.jsonl", script, backend=pool, progress=False
         )
@@ -294,7 +294,7 @@ def test_archive_before_run_raises_runtime_error(
     out.mkdir()
     runs = expand_grid_to_run_specs({"Sat.SMA": [7000.0, 7001.0]}, script, out)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep_obj = Sweep(
             runs=runs,
             backend=pool,

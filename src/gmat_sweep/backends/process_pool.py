@@ -12,6 +12,22 @@ remains the default; ``ProcessPoolExecutorPool`` is opt-in via explicit
 construction. Pick it when avoiding the ``joblib`` runtime dep matters and
 the per-task gmatpy bootstrap cost is acceptable.
 
+Because ``max_tasks_per_child=1`` already gives every task a fresh
+interpreter, this backend dispatches each task as
+:func:`gmat_sweep.worker.run_one` directly regardless of
+``reuse_gmat_context``. The nested ``run_spec_in_subprocess`` hop that
+other backends use for the ``reuse_gmat_context=False`` mode would just
+double-pay the subprocess cost here without changing the contract.
+
+Transport-failure semantics
+---------------------------
+
+A worker-side exception that escapes :func:`gmat_sweep.worker.run_one`
+(``BrokenProcessPool`` on worker death, an unpicklable return value, …)
+is caught at the drain site and folded into a synthetic
+:meth:`gmat_sweep.spec.RunOutcome.failed` carrying the formatted traceback
+as ``stderr`` so the parent sweep does not abort.
+
 Python floor
 ------------
 
@@ -37,11 +53,12 @@ if not TYPE_CHECKING and sys.version_info < (3, 11):
         "use gmat_sweep.LocalJoblibPool on Python 3.10."
     )
 
-from collections.abc import Callable, Iterable, Iterator
+import traceback
+from collections.abc import Iterable, Iterator
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures import as_completed as _futures_as_completed
+from datetime import datetime, timezone
 
-from gmat_sweep.backends._subprocess import run_spec_in_subprocess
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.errors import BackendError
 from gmat_sweep.spec import RunOutcome, RunSpec
@@ -67,14 +84,13 @@ class ProcessPoolExecutorPool(Pool):
         default) lets the executor pick — :func:`os.process_cpu_count`
         on Python 3.13+, :func:`os.cpu_count` on 3.11-3.12.
     reuse_gmat_context:
-        ``True`` (default) dispatches each task as
-        :func:`gmat_sweep.worker.run_one` directly inside the fresh worker
-        process — one gmatpy bootstrap per task (the worker is already
-        fresh thanks to ``max_tasks_per_child=1``). ``False`` dispatches
-        through :func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess`,
-        spawning a *second* nested Python interpreter for the gmatpy load
-        — wasteful but contract-compliant. Same flag, same contract as
-        :class:`gmat_sweep.backends.base.Pool` documents.
+        Accepted for :class:`Pool` API parity. Both values dispatch each
+        task as :func:`gmat_sweep.worker.run_one` directly inside the
+        worker process — the ``max_tasks_per_child=1`` baked into the
+        executor already provides the per-task fresh-interpreter
+        guarantee the ``reuse_gmat_context=False`` contract requires.
+        Nested ``run_spec_in_subprocess`` hops on this backend would
+        double-pay the subprocess cost without changing the contract.
     """
 
     def __init__(
@@ -108,9 +124,7 @@ class ProcessPoolExecutorPool(Pool):
             raise BackendError("ProcessPoolExecutorPool is closed; cannot drain futures")
 
         wanted = list(futures)
-        task_fn: Callable[[RunSpec], RunOutcome] = (
-            run_one if self._reuse_gmat_context else run_spec_in_subprocess
-        )
+        executor_future_to_run_id: dict[Future[RunOutcome], int] = {}
         future_by_executor_future: dict[Future[RunOutcome], Future[RunOutcome]] = {}
         for f in wanted:
             spec = self._pending.pop(f, None)
@@ -118,12 +132,21 @@ class ProcessPoolExecutorPool(Pool):
                 raise BackendError(
                     "Future was not submitted to this pool, or has already been drained"
                 )
-            executor_future = self._executor.submit(task_fn, spec)
+            executor_future = self._executor.submit(run_one, spec)
             future_by_executor_future[executor_future] = f
+            executor_future_to_run_id[executor_future] = spec.run_id
 
         for executor_future in _futures_as_completed(future_by_executor_future):
-            outcome: RunOutcome = executor_future.result()
             user_future = future_by_executor_future[executor_future]
+            run_id = executor_future_to_run_id[executor_future]
+            try:
+                outcome: RunOutcome = executor_future.result()
+            except Exception as exc:
+                # Worker-side transport failure (BrokenProcessPool from
+                # worker death, unpicklable result, …). ``run_one`` itself
+                # already catches its own exceptions into RunOutcome.failed;
+                # anything that escapes here is a transport-level fault.
+                outcome = _failed_outcome(run_id, "".join(traceback.format_exception(exc)))
             user_future.set_result(outcome)
             yield outcome
 
@@ -137,3 +160,8 @@ class ProcessPoolExecutorPool(Pool):
             self._pending.clear()
         finally:
             self._executor.shutdown(wait=True)
+
+
+def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)

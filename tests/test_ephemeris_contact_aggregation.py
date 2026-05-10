@@ -104,7 +104,7 @@ def test_4_run_sweep_aggregates_ephemeris_and_contact_into_indexed_frames(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -140,7 +140,7 @@ def test_failed_run_lands_as_nan_row_in_both_aggregators(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -177,7 +177,7 @@ def test_multi_ephemeris_with_name_none_raises_listing_available_names(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -206,7 +206,7 @@ def test_user_ephemeris_columns_survive_round_trip_through_aggregator(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )

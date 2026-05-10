@@ -1353,7 +1353,7 @@ def test_archive_writes_zip_and_matches_api(
     assert "script/mission.script" in names
 
     # API and CLI produce byte-equal bundles for the same manifest.
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         api_sweep = Sweep.from_manifest(
             out / "manifest.jsonl", script, backend=pool, progress=False
         )
@@ -1559,7 +1559,7 @@ def _make_recording_pool_class() -> Any:
 
         def __init__(self, **kwargs: Any) -> None:
             type(self).calls.append(dict(kwargs))
-            super().__init__(workers=1)
+            super().__init__(max_workers=1)
 
     return _RecordingPool
 

@@ -43,7 +43,7 @@ Wall-clock seconds, median of three runs, min–max range in parentheses.
 
 | Backend | Median (s) | Min (s) | Max (s) |
 | --- | --- | --- | --- |
-| `LocalJoblibPool(workers=8)` | 11.93 | 11.02 | 12.37 |
+| `LocalJoblibPool(max_workers=8)` | 11.93 | 11.02 | 12.37 |
 | `DaskPool(n_workers=8)` (LocalCluster) | 13.55 | 13.30 | 14.48 |
 | `RayPool(num_cpus=8)` (local) | 14.06 | 13.71 | 14.68 |
 | `MPIPool(max_workers=8)` (`mpi4py.futures`, 9 ranks) | 12.64 | 12.54 | 13.01 |
@@ -53,7 +53,7 @@ Wall-clock seconds, median of three runs, min–max range in parentheses.
 
 | Backend | Runs/sec | Per-worker runs/sec |
 | --- | --- | --- |
-| `LocalJoblibPool(workers=8)` | 83.83 | 10.48 |
+| `LocalJoblibPool(max_workers=8)` | 83.83 | 10.48 |
 | `DaskPool(n_workers=8)` | 73.80 | 9.23 |
 | `RayPool(num_cpus=8)` | 71.11 | 8.89 |
 | `MPIPool(max_workers=8)` | 79.14 | 9.89 |

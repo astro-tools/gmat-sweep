@@ -33,7 +33,7 @@ from pathlib import Path
 from gmat_sweep import Sweep
 from gmat_sweep.backends.joblib import LocalJoblibPool
 
-with LocalJoblibPool(workers=4) as pool:
+with LocalJoblibPool(max_workers=4) as pool:
     df = (
         Sweep.from_manifest(
             "./sweep/manifest.jsonl",

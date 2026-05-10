@@ -179,7 +179,7 @@ df = monte_carlo(
         "Sat.DryMass": ("lognormal", math.log(1200.0), 0.02),
     },
     seed=20260504,
-    backend=LocalJoblibPool(workers=8),
+    backend=LocalJoblibPool(max_workers=8),
     out="./launch-dispersion",
 )
 

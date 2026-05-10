@@ -30,14 +30,26 @@ Submission semantics match :class:`gmat_sweep.backends.joblib.LocalJoblibPool`:
 :meth:`submit` parks the spec under a placeholder
 :class:`concurrent.futures.Future` and returns immediately; dispatch happens
 inside :meth:`as_completed`, which submits one Dask task per parked spec and
-drains via :func:`distributed.as_completed`.
+drains via :func:`distributed.as_completed` with ``with_results=True`` so
+the completion event and the result arrive in the same round-trip.
+
+Transport-failure semantics
+---------------------------
+
+A worker-side exception that escapes the task callable (Dask worker death,
+serialiser failure, …) is caught at the drain site — :meth:`as_completed`
+runs with ``raise_errors=False`` and folds the captured traceback into a
+synthetic :meth:`gmat_sweep.spec.RunOutcome.failed` so the parent sweep
+does not abort.
 """
 
 from __future__ import annotations
 
 import os
+import traceback
 from collections.abc import Iterable, Iterator
 from concurrent.futures import Future
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from gmat_sweep.backends._subprocess import run_spec_in_subprocess
@@ -138,6 +150,7 @@ class DaskPool(Pool):
 
         wanted = list(futures)
         future_by_run_id: dict[int, Future[RunOutcome]] = {}
+        run_id_by_dask_key: dict[Any, int] = {}
         dask_futures: list[Any] = []
         task_fn = run_one if self._reuse_gmat_context else _dask_run_one
         for f in wanted:
@@ -147,10 +160,24 @@ class DaskPool(Pool):
                     "Future was not submitted to this pool, or has already been drained"
                 )
             future_by_run_id[spec.run_id] = f
-            dask_futures.append(self._client.submit(task_fn, spec, pure=False))
+            dask_future = self._client.submit(task_fn, spec, pure=False)
+            dask_futures.append(dask_future)
+            run_id_by_dask_key[dask_future.key] = spec.run_id
 
-        for dask_future in self._distributed.as_completed(dask_futures):
-            outcome: RunOutcome = dask_future.result()
+        # ``with_results=True`` pulls the result in the same round-trip as
+        # the completion event, instead of issuing a separate ``.result()``
+        # per future.
+        for dask_future, payload in self._distributed.as_completed(
+            dask_futures, with_results=True, raise_errors=False
+        ):
+            run_id = run_id_by_dask_key[dask_future.key]
+            if isinstance(payload, RunOutcome):
+                outcome = payload
+            else:
+                # ``raise_errors=False`` hands us the exception instance as
+                # the payload when the task raised. Fold into a synthetic
+                # RunOutcome.failed so the sweep does not abort.
+                outcome = _failed_outcome(run_id, "".join(traceback.format_exception(payload)))
             f = future_by_run_id.pop(outcome.run_id)
             f.set_result(outcome)
             yield outcome
@@ -168,3 +195,8 @@ class DaskPool(Pool):
                 self._client.close()
             if self._owns_cluster and self._cluster is not None:
                 self._cluster.close()
+
+
+def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)

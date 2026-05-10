@@ -62,7 +62,7 @@ def test_sweep_run_returns_self(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> N
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=1)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -82,7 +82,7 @@ def test_sweep_run_writes_one_manifest_entry_per_run(
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=4)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -113,7 +113,7 @@ def test_sweep_manifest_header_carries_script_hash_seed_and_spec(
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=1)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -202,7 +202,7 @@ def test_sweep_manifest_parent_directory_is_created(
     output_dir = tmp_path / "deeply" / "nested" / "out"
     runs = _make_runs(script, output_dir, n=1)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -228,7 +228,7 @@ def test_sweep_to_dataframe_returns_multiindexed_frame(
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=2))
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -257,7 +257,7 @@ def test_sweep_to_dataframe_engine_polars_returns_polars_frame(
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=2))
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -294,7 +294,7 @@ def test_sweep_to_dataframe_marks_failed_run(tmp_path: Path, fake_gmat_run: Fake
 
     fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook(rows=1))
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -331,7 +331,7 @@ def test_sweep_to_fused_reports_returns_multiindex_column_frame(
 
     fake_gmat_run.install_loader(run_hook=_run)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -356,7 +356,7 @@ def test_sweep_to_manifest_requires_run_first(tmp_path: Path, fake_gmat_run: Fak
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=1)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -382,7 +382,7 @@ def test_sweep_progress_disabled_quiet_on_stderr(
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=2)
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -488,7 +488,7 @@ def _build_grid_manifest(
     else:
         fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -509,7 +509,7 @@ def test_from_manifest_grid_rebuilds_runs(tmp_path: Path, fake_gmat_run: FakeGma
     script, output_dir = _build_grid_manifest(tmp_path, fake_gmat_run, n=4)
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep.from_manifest(
             output_dir / "manifest.jsonl",
             script,
@@ -536,7 +536,7 @@ def test_from_manifest_tagged_grid_kind_rebuilds_runs(
     sweep_api(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=output_dir,
     )
 
@@ -547,7 +547,7 @@ def test_from_manifest_tagged_grid_kind_rebuilds_runs(
     assert saved.parameter_spec["_kind"] == "grid"
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         rebuilt = Sweep.from_manifest(
             output_dir / "manifest.jsonl",
             script,
@@ -574,10 +574,10 @@ def test_from_manifest_explicit_kind_rebuilds_runs(
     samples = pd.DataFrame({"Sat.SMA": [7000.0, 7100.0, 7200.0], "Sat.ECC": [0.001, 0.002, 0.003]})
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    sweep_api(script, samples=samples, backend=LocalJoblibPool(workers=1), out=output_dir)
+    sweep_api(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=output_dir)
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         rebuilt = Sweep.from_manifest(
             output_dir / "manifest.jsonl",
             script,
@@ -608,7 +608,7 @@ def test_from_manifest_monte_carlo_rebuilds_bit_equal_overrides(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0), "Sat.INC": ("uniform", 0.0, 90.0)},
         seed=1729,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -617,7 +617,7 @@ def test_from_manifest_monte_carlo_rebuilds_bit_equal_overrides(
     }
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         rebuilt = Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False)
 
     rebuilt_overrides = {s.run_id: s.overrides for s in rebuilt._runs}
@@ -637,14 +637,14 @@ def test_from_manifest_latin_hypercube_rebuilds_bit_equal_overrides(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0), "Sat.INC": ("uniform", 0.0, 90.0)},
         seed=1729,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
     original = {e.run_id: e.overrides for e in Manifest.load(out / "manifest.jsonl").entries}
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         rebuilt = Sweep.from_manifest(out / "manifest.jsonl", script, backend=pool, progress=False)
 
     assert {s.run_id: s.overrides for s in rebuilt._runs} == original
@@ -655,7 +655,7 @@ def test_from_manifest_script_drift_raises(tmp_path: Path, fake_gmat_run: FakeGm
     # Mutate the script: same path, different bytes ⇒ different canonical hash.
     script.write_text("% GMAT script v2\nCreate Spacecraft Sat;\n", encoding="utf-8")
 
-    with LocalJoblibPool(workers=1) as pool:  # noqa: SIM117 — context manager scope is intentional
+    with LocalJoblibPool(max_workers=1) as pool:  # noqa: SIM117 — context manager scope is intentional
         with pytest.raises(SweepConfigError, match="script hash mismatch"):
             Sweep.from_manifest(output_dir / "manifest.jsonl", script, backend=pool, progress=False)
 
@@ -668,7 +668,7 @@ def test_from_manifest_script_drift_allowed_warns_and_proceeds(
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
     with (
-        LocalJoblibPool(workers=1) as pool,
+        LocalJoblibPool(max_workers=1) as pool,
         pytest.warns(RuntimeWarning, match="script hash mismatch"),
     ):
         sweep = Sweep.from_manifest(
@@ -686,7 +686,7 @@ def test_from_manifest_missing_output_dir_raises(tmp_path: Path) -> None:
     Parquet files are gone — raise rather than silently produce a sweep
     that would re-execute everything."""
     fake_path = tmp_path / "vanished" / "manifest.jsonl"
-    with LocalJoblibPool(workers=1) as pool:  # noqa: SIM117
+    with LocalJoblibPool(max_workers=1) as pool:  # noqa: SIM117
         with pytest.raises(SweepConfigError, match="output directory does not exist"):
             Sweep.from_manifest(
                 fake_path, tmp_path / "mission.script", backend=pool, progress=False
@@ -705,7 +705,7 @@ def test_from_manifest_unknown_kind_raises(tmp_path: Path, fake_gmat_run: FakeGm
     raw[0] = _json.dumps(header, sort_keys=True) + "\n"
     manifest_path.write_text("".join(raw), encoding="utf-8")
 
-    with LocalJoblibPool(workers=1) as pool:  # noqa: SIM117
+    with LocalJoblibPool(max_workers=1) as pool:  # noqa: SIM117
         with pytest.raises(SweepConfigError, match="unknown parameter_spec _kind"):
             Sweep.from_manifest(manifest_path, script, backend=pool, progress=False)
 
@@ -720,7 +720,7 @@ def test_resume_requires_from_manifest(tmp_path: Path, fake_gmat_run: FakeGmatRu
     script = _write_script(tmp_path)
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=1)
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -748,7 +748,7 @@ def test_resume_only_runs_failed_and_missing_run_ids(
         second_pass_overrides.append(value)
 
     fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep.from_manifest(
             output_dir / "manifest.jsonl", script, backend=pool, progress=False
         ).resume()
@@ -778,7 +778,7 @@ def test_resume_acceptance_16_runs_with_3_failures(
             raise ValueError("rejected by GMAT")
 
     fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep(
             runs=runs,
             backend=pool,
@@ -794,7 +794,7 @@ def test_resume_acceptance_16_runs_with_3_failures(
 
     # Patch the override out, resume.
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         df = (
             Sweep.from_manifest(output_dir / "manifest.jsonl", script, backend=pool, progress=False)
             .resume()
@@ -816,7 +816,7 @@ def test_resume_writes_duplicate_lines_but_load_dedups(
     raw_lines_before = manifest_path.read_text(encoding="utf-8").splitlines()
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep.from_manifest(manifest_path, script, backend=pool, progress=False).resume()
 
     raw_lines_after = manifest_path.read_text(encoding="utf-8").splitlines()
@@ -838,7 +838,7 @@ def test_resume_with_no_failures_or_missing_is_a_noop(
     bytes_before = manifest_path.read_bytes()
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         Sweep.from_manifest(manifest_path, script, backend=pool, progress=False).resume()
 
     assert manifest_path.read_bytes() == bytes_before
