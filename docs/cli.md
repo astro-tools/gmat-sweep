@@ -31,9 +31,14 @@ The sweep-running subcommands (`run`, `monte-carlo`, `latin-hypercube`,
 
 | Flag         | Default | Meaning                                                                      |
 |--------------|---------|------------------------------------------------------------------------------|
-| `--workers N`| `-1`    | Number of subprocess workers. `-1` uses every available core.                |
+| `--workers N`| `-1`    | Number of subprocess workers. `-1` uses every available core. Not accepted on `--backend mpi` (the launcher fixes the rank count); passing it there exits `2`. |
 | `--out PATH` | —       | Required. Output directory for per-run artefacts and `manifest.jsonl`.       |
 | `SCRIPT`     | —       | Required positional. Path to the GMAT `.script` every run loads.             |
+
+The post-hoc subcommands (`extend`, `resume`, `archive`) take the script as
+a `--script PATH` flag instead — the manifest is the primary positional
+input on those, and the script is a parameter pointing at the previously-
+loaded mission file.
 
 Each of those four subcommands writes a `manifest.jsonl` under `--out` and
 prints a one-line summary to stdout when the sweep finishes:
@@ -138,8 +143,9 @@ Repeated `--grid` flags for the same axis name exit with code `2`.
 ## `monte-carlo`
 
 Run `n` independent stochastic samples by sampling each `--perturb`
-parameter from its own distribution. With `--seed` set, the run set is
-reproducible across machines.
+parameter from its own distribution. With `--seed` set, two runs at the
+same `(--perturb, --n, --seed)` produce bit-equal DataFrames; without
+`--seed` the draws fall back to OS entropy and are not reproducible.
 
 ```bash
 gmat-sweep monte-carlo \

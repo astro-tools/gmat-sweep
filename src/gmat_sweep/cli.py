@@ -17,18 +17,12 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-import numpy as np
-
-from gmat_sweep.api import latin_hypercube, monte_carlo, monte_carlo_extend, sweep
-from gmat_sweep.backends.dask import DaskPool
-from gmat_sweep.backends.joblib import LocalJoblibPool
-from gmat_sweep.backends.mpi import MPIPool
-from gmat_sweep.backends.ray import RayPool
 from gmat_sweep.errors import (
     BackendError,
     GmatSweepError,
@@ -36,6 +30,64 @@ from gmat_sweep.errors import (
     SweepConfigError,
 )
 from gmat_sweep.manifest import Manifest, ManifestEntry
+
+# Heavy submodules (api, backends.{dask,ray,mpi}, joblib) are imported on
+# first use — `gmat-sweep --help` should not pull pandas / pyarrow / tqdm /
+# joblib just to print usage text. ``_cmd_*`` functions import from
+# ``gmat_sweep.api`` directly inside their bodies; backend pool classes are
+# resolved through :func:`_import_backend_class`, which keeps them
+# monkey-patchable in tests.
+
+# Backend pool class slots. ``None`` means "load lazily on first access";
+# tests that do ``monkeypatch.setattr(cli, "MPIPool", fake)`` set their
+# preferred class here and :func:`_import_backend_class` picks it up.
+DaskPool: Any = None
+LocalJoblibPool: Any = None
+MPIPool: Any = None
+RayPool: Any = None
+
+# Public-API function slots. Same pattern as the backend pool slots — kept at
+# module level so ``monkeypatch.setattr("gmat_sweep.cli.sweep", fake)`` still
+# works without forcing ``gmat_sweep.api`` (and its tqdm / pandas / pyarrow
+# transitive imports) on every ``gmat-sweep --help`` invocation.
+sweep: Any = None
+monte_carlo: Any = None
+latin_hypercube: Any = None
+monte_carlo_extend: Any = None
+
+_BACKEND_MODULES: dict[str, str] = {
+    "DaskPool": "gmat_sweep.backends.dask",
+    "LocalJoblibPool": "gmat_sweep.backends.joblib",
+    "MPIPool": "gmat_sweep.backends.mpi",
+    "RayPool": "gmat_sweep.backends.ray",
+}
+
+_API_FUNCS = ("sweep", "monte_carlo", "latin_hypercube", "monte_carlo_extend")
+
+
+def _import_backend_class(class_name: str) -> Any:
+    """Return the named backend pool class, importing on first call."""
+    existing = globals().get(class_name)
+    if existing is not None:
+        return existing
+    from importlib import import_module
+
+    cls = getattr(import_module(_BACKEND_MODULES[class_name]), class_name)
+    globals()[class_name] = cls
+    return cls
+
+
+def _import_api_func(name: str) -> Any:
+    """Return the named :mod:`gmat_sweep.api` function, importing on first call."""
+    existing = globals().get(name)
+    if existing is not None:
+        return existing
+    from importlib import import_module
+
+    fn = getattr(import_module("gmat_sweep.api"), name)
+    globals()[name] = fn
+    return fn
+
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -60,16 +112,24 @@ _STATUS_BUCKETS: dict[str, int] = {"failed": 0, "skipped": 1, "ok": 2}
 
 
 def _parse_grid_value(token: str) -> int | float | str:
-    """Coerce a single explicit-list token via int → float → str fallback."""
+    """Coerce a single explicit-list token via int → float → str fallback.
+
+    Non-finite floats (``nan``, ``inf``, ``-inf``) are rejected even though
+    Python's :func:`float` parses them: a NaN axis carries no signal, and an
+    infinite override would silently produce an unrunnable spec. They surface
+    as :class:`SweepConfigError` here instead of corrupting the run set.
+    """
     try:
         return int(token)
     except ValueError:
         pass
     try:
-        return float(token)
+        as_float = float(token)
     except ValueError:
-        pass
-    return token
+        return token
+    if not math.isfinite(as_float):
+        raise SweepConfigError(f"non-finite numeric value is not allowed: {token!r}")
+    return as_float
 
 
 def _parse_grid_spec(spec: str) -> tuple[str, list[Any]]:
@@ -112,6 +172,10 @@ def _parse_grid_spec(spec: str) -> tuple[str, list[Any]]:
             raise SweepConfigError(
                 f"linspace bounds for {name!r} must be numeric, got {lo_str!r}:{hi_str!r}"
             ) from exc
+        if not math.isfinite(lo) or not math.isfinite(hi):
+            raise SweepConfigError(
+                f"linspace bounds for {name!r} must be finite, got {lo_str!r}:{hi_str!r}"
+            )
         try:
             count = int(count_str)
         except ValueError as exc:
@@ -120,6 +184,8 @@ def _parse_grid_spec(spec: str) -> tuple[str, list[Any]]:
             ) from exc
         if count < 2:
             raise SweepConfigError(f"linspace count for {name!r} must be >= 2, got {count}")
+        import numpy as np
+
         return name, np.linspace(lo, hi, count).tolist()
 
     tokens = rhs.split(",")
@@ -218,14 +284,30 @@ def _build_pool(args: argparse.Namespace) -> Pool:
                 "--backend-arg is not supported with --backend local; "
                 "the local pool only accepts --workers"
             )
-        return LocalJoblibPool(max_workers=args.workers)
+        return cast("Pool", _import_backend_class("LocalJoblibPool")(max_workers=args.workers))
     workers = args.workers if args.workers > 0 else None
     if args.backend == "dask":
-        return DaskPool(n_workers=workers, **backend_kwargs)
+        return cast(
+            "Pool",
+            _import_backend_class("DaskPool")(n_workers=workers, **backend_kwargs),
+        )
     if args.backend == "ray":
-        return RayPool(num_cpus=workers, **backend_kwargs)
+        return cast(
+            "Pool",
+            _import_backend_class("RayPool")(num_cpus=workers, **backend_kwargs),
+        )
     if args.backend == "mpi":
-        return MPIPool(**backend_kwargs)
+        # MPIPool's rank count is fixed by the launcher (``mpirun -n …`` or the
+        # ``--backend-arg max_workers=N`` escape hatch); --workers has no
+        # meaning here. Silently ignoring the flag used to confuse users into
+        # thinking their value had been honoured — fail loudly instead.
+        if args.workers != -1:
+            raise SweepConfigError(
+                "--workers is not supported with --backend mpi; the rank count is "
+                "fixed by the MPI launcher. Pass '--backend-arg max_workers=N' to "
+                "cap MPIPool's in-flight set instead."
+            )
+        return cast("Pool", _import_backend_class("MPIPool")(**backend_kwargs))
     raise AssertionError(f"unreachable backend: {args.backend!r}")  # pragma: no cover
 
 
@@ -281,6 +363,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if name in grid:
             raise SweepConfigError(f"grid spec for {name!r} given more than once")
         grid[name] = values
+
+    sweep = _import_api_func("sweep")
 
     out = Path(args.out)
     with _build_pool(args) as pool:
@@ -389,12 +473,16 @@ def _format_run_detail(entry: ManifestEntry) -> str:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
+    # Validate flag shape before touching disk so a typo like
+    # `gmat-sweep show --filter ok` fails immediately, not after a manifest
+    # stat or load.
+    if args.filter is not None and not args.detail:
+        raise SweepConfigError("--filter requires --detail")
+
     manifest_path = Path(args.manifest)
     if not manifest_path.is_file():
         print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
         return EXIT_MANIFEST
-    if args.filter is not None and not args.detail:
-        raise SweepConfigError("--filter requires --detail")
 
     manifest = Manifest.load(manifest_path)
 
@@ -435,6 +523,8 @@ def _cmd_monte_carlo(args: argparse.Namespace) -> int:
         return EXIT_CONFIG
 
     perturb = _collect_perturb(args.perturb)
+    monte_carlo = _import_api_func("monte_carlo")
+
     out = Path(args.out)
     with _build_pool(args) as pool:
         monte_carlo(
@@ -460,6 +550,8 @@ def _cmd_latin_hypercube(args: argparse.Namespace) -> int:
         return EXIT_CONFIG
 
     perturb = _collect_perturb(args.perturb)
+    latin_hypercube = _import_api_func("latin_hypercube")
+
     out = Path(args.out)
     with _build_pool(args) as pool:
         latin_hypercube(
@@ -485,6 +577,8 @@ def _cmd_explicit(args: argparse.Namespace) -> int:
         return EXIT_CONFIG
 
     samples = _load_samples(Path(args.samples))
+    sweep = _import_api_func("sweep")
+
     out = Path(args.out)
     with _build_pool(args) as pool:
         sweep(
@@ -539,6 +633,8 @@ def _cmd_extend(args: argparse.Namespace) -> int:
     if not script.is_file():
         print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
         return EXIT_CONFIG
+
+    monte_carlo_extend = _import_api_func("monte_carlo_extend")
 
     with _build_pool(args) as pool:
         monte_carlo_extend(
@@ -609,6 +705,24 @@ def _add_fsync_flags(subparser: argparse.ArgumentParser) -> None:
     )
 
 
+_WORKERS_HELP = (
+    "Number of subprocess workers. Default -1 uses every available core. "
+    "Ignored on --backend mpi (the launcher fixes the rank count); pass "
+    "--workers explicitly there and gmat-sweep exits 2."
+)
+
+
+def _add_workers_flag(subparser: argparse.ArgumentParser) -> None:
+    """Attach the shared ``--workers`` flag to a sweep-running subparser."""
+    subparser.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        metavar="N",
+        help=_WORKERS_HELP,
+    )
+
+
 def _add_backend_flag(subparser: argparse.ArgumentParser) -> None:
     """Attach ``--backend`` / ``--backend-arg`` to a sweep-running subparser."""
     subparser.add_argument(
@@ -665,13 +779,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Repeat --grid for additional axes; the cartesian product is run."
         ),
     )
-    run.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(run)
     run.add_argument(
         "--out",
         required=True,
@@ -734,8 +842,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run a Monte Carlo dispersion sweep over a GMAT script.",
         description=(
             "Run n stochastic samples by independently sampling each --perturb "
-            "parameter from its own distribution. With --seed set, the run set "
-            "is reproducible."
+            "parameter from its own distribution. Two runs at the same "
+            "(--perturb, --n, --seed) produce bit-equal DataFrames; without "
+            "--seed the draws fall back to OS entropy."
         ),
     )
     monte.add_argument(
@@ -764,13 +873,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SEED",
         help="Optional integer parent seed. Omit for OS entropy (non-reproducible).",
     )
-    monte.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(monte)
     monte.add_argument(
         "--out",
         required=True,
@@ -821,13 +924,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SEED",
         help="Optional integer seed for the Latin hypercube sampler.",
     )
-    lhs.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(lhs)
     lhs.add_argument(
         "--out",
         required=True,
@@ -858,13 +955,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Path to a .csv or .parquet sample design.",
     )
-    explicit.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(explicit)
     explicit.add_argument(
         "--out",
         required=True,
@@ -914,13 +1005,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "--allow-script-drift is set."
         ),
     )
-    extend.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(extend)
     extend.add_argument(
         "--allow-script-drift",
         action="store_true",
@@ -957,13 +1042,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "is set."
         ),
     )
-    resume.add_argument(
-        "--workers",
-        type=int,
-        default=-1,
-        metavar="N",
-        help="Number of subprocess workers. Default -1 uses every available core.",
-    )
+    _add_workers_flag(resume)
     resume.add_argument(
         "--allow-script-drift",
         action="store_true",

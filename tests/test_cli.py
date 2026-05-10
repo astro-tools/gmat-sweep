@@ -96,6 +96,22 @@ def test_parse_grid_spec_explicit_rejects_empty_value() -> None:
         cli._parse_grid_spec("a=1,,3")
 
 
+@pytest.mark.parametrize("token", ["nan", "NaN", "inf", "-inf", "Infinity"])
+def test_parse_grid_spec_explicit_rejects_non_finite_floats(token: str) -> None:
+    """``name=1,2,nan`` etc. used to silently produce ``[1, 2, nan]``."""
+    with pytest.raises(SweepConfigError, match="non-finite"):
+        cli._parse_grid_spec(f"a=1,2,{token}")
+
+
+@pytest.mark.parametrize("token", ["nan", "inf", "-inf"])
+def test_parse_grid_spec_linspace_rejects_non_finite_bounds(token: str) -> None:
+    """``name=nan:10:5`` and ``name=0:inf:5`` are unrunnable specs."""
+    with pytest.raises(SweepConfigError, match="finite"):
+        cli._parse_grid_spec(f"a={token}:10:5")
+    with pytest.raises(SweepConfigError, match="finite"):
+        cli._parse_grid_spec(f"a=0:{token}:5")
+
+
 # ---- _parse_grid_spec: malformed ----------------------------------------
 
 
@@ -479,6 +495,23 @@ def test_show_filter_without_detail_exits_config_error(
     rc = cli.main(["show", "--filter", "ok", str(path)])
     assert rc == cli.EXIT_CONFIG
     assert "--filter requires --detail" in capsys.readouterr().err
+
+
+def test_show_filter_without_detail_fails_before_manifest_open(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The cross-flag check must fire before any disk I/O.
+
+    Pointing at a missing manifest with a bad flag combination used to surface
+    "manifest not found" first; the user only learned their flags were wrong
+    after fixing the path. The flag-shape error wins now.
+    """
+    missing = tmp_path / "does-not-exist.jsonl"
+    rc = cli.main(["show", "--filter", "ok", str(missing)])
+    assert rc == cli.EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "--filter requires --detail" in err
+    assert "manifest not found" not in err
 
 
 def test_show_detail_and_run_are_mutually_exclusive(
@@ -1534,6 +1567,13 @@ def test_parse_backend_arg_rejects_empty_value() -> None:
         cli._parse_backend_arg("threads_per_worker=")
 
 
+@pytest.mark.parametrize("token", ["nan", "inf", "-inf"])
+def test_parse_backend_arg_rejects_non_finite_float(token: str) -> None:
+    """``--backend-arg KEY=nan`` would silently inject a NaN into the pool kwargs."""
+    with pytest.raises(SweepConfigError, match="non-finite"):
+        cli._parse_backend_arg(f"timeout={token}")
+
+
 # ---- _build_pool / --backend wiring -------------------------------------
 
 # A recording fake stands in for DaskPool / RayPool: subclasses LocalJoblibPool
@@ -1637,7 +1677,7 @@ def test_build_pool_ray_constructs_ray_pool_with_num_cpus_and_kwargs(
 def test_build_pool_mpi_forwards_kwargs_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``--backend mpi`` ignores ``--workers`` and forwards every ``--backend-arg``.
+    """``--backend mpi`` forwards every ``--backend-arg`` to ``MPIPool()``.
 
     Rank count is set externally — by ``mpirun -n K`` under the pre-allocated
     launch mode, or by ``--backend-arg max_workers=N`` under dynamic-spawn.
@@ -1648,13 +1688,30 @@ def test_build_pool_mpi_forwards_kwargs_only(
 
     args = argparse.Namespace(
         backend="mpi",
-        workers=8,
+        workers=-1,
         backend_arg=["max_workers=4"],
     )
     with cli._build_pool(args):
         pass
 
     assert fake.calls == [{"max_workers": 4}]
+
+
+def test_build_pool_mpi_rejects_explicit_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--backend mpi`` paired with a non-default ``--workers`` exits 2.
+
+    Previously the flag was silently ignored, which led users to believe their
+    value had been honoured. The CLI now rejects it with the MPI exception
+    spelled out in the error message.
+    """
+    fake = _make_recording_pool_class()
+    monkeypatch.setattr(cli, "MPIPool", fake)
+
+    args = argparse.Namespace(backend="mpi", workers=4, backend_arg=[])
+    with pytest.raises(SweepConfigError, match="--backend mpi"):
+        cli._build_pool(args)
+    # The pool constructor must not have been called.
+    assert fake.calls == []
 
 
 def test_build_pool_mpi_no_backend_arg_constructs_with_defaults(
