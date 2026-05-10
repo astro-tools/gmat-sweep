@@ -21,7 +21,7 @@ from typing import Any
 
 import pandas as pd
 
-from gmat_sweep.api import monte_carlo
+from gmat_sweep.api import monte_carlo, monte_carlo_extend
 from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.grids import expand_monte_carlo_to_run_specs
 from tests.conftest import FakeGmatRun, FakeMission, FakeResults
@@ -158,6 +158,86 @@ def test_adding_a_second_perturbed_parameter_preserves_first_dataframe_draws(
     )
 
     pd.testing.assert_series_equal(df_one["x"], df_two["x"])
+
+
+# ---- monte_carlo_extend bit-equivalence (issue #92) ----------------------
+
+
+def test_extend_preserves_original_run_ids_bit_for_bit(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """A 100-run MC followed by ``monte_carlo_extend(n=200)`` produces a
+    300-run aggregated DataFrame whose first 100 ``run_id``\\ s match the
+    original 100 bit-for-bit. Pinned at the user-visible DataFrame level
+    via the SMA echo so the assertion catches any silent draw drift."""
+    script = _write_script(tmp_path)
+    _install_sma_echoing_loader(fake_gmat_run)
+    out = tmp_path / "out"
+
+    df_pre = monte_carlo(
+        script,
+        n=100,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        backend=LocalJoblibPool(workers=1),
+        out=out,
+        progress=False,
+    )
+
+    df_post = monte_carlo_extend(
+        out / "manifest.jsonl",
+        script,
+        n=200,
+        backend=LocalJoblibPool(workers=1),
+        progress=False,
+    )
+
+    assert df_post.index.get_level_values("run_id").nunique() == 300
+    pd.testing.assert_frame_equal(
+        df_post.loc[df_post.index.get_level_values("run_id") < 100],
+        df_pre,
+    )
+
+
+def test_extend_matches_fresh_full_size_sweep_at_overlap(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """A fresh 300-run ``monte_carlo(n=300)`` produces a DataFrame whose
+    first 100 ``run_id``\\ s match the extended sweep's first 100
+    bit-for-bit. The contract: extend(n=200) on top of a 100-run base is
+    indistinguishable from monte_carlo(n=300) at every run_id < 300."""
+    script = _write_script(tmp_path)
+    _install_sma_echoing_loader(fake_gmat_run)
+
+    base_out = tmp_path / "base"
+    monte_carlo(
+        script,
+        n=100,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        backend=LocalJoblibPool(workers=1),
+        out=base_out,
+        progress=False,
+    )
+    df_extended = monte_carlo_extend(
+        base_out / "manifest.jsonl",
+        script,
+        n=200,
+        backend=LocalJoblibPool(workers=1),
+        progress=False,
+    )
+
+    df_fresh = monte_carlo(
+        script,
+        n=300,
+        perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+        seed=42,
+        backend=LocalJoblibPool(workers=1),
+        out=tmp_path / "fresh",
+        progress=False,
+    )
+
+    pd.testing.assert_frame_equal(df_extended, df_fresh)
 
 
 # ---- cross-process determinism -------------------------------------------

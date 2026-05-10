@@ -10,7 +10,13 @@ from gmat_sweep.aggregate import (
     lazy_multiindex,
     sweep_summary,
 )
-from gmat_sweep.api import latin_hypercube, monte_carlo, sweep
+from gmat_sweep.api import (
+    latin_hypercube,
+    latin_hypercube_extend,
+    monte_carlo,
+    monte_carlo_extend,
+    sweep,
+)
 from gmat_sweep.backends import LocalJoblibPool, Pool
 from gmat_sweep.errors import (
     BackendError,
@@ -22,6 +28,7 @@ from gmat_sweep.errors import (
 from gmat_sweep.grids import (
     expand_grid_to_run_specs,
     expand_latin_hypercube_to_run_specs,
+    expand_monte_carlo_extension_to_run_specs,
     expand_monte_carlo_to_run_specs,
     expand_samples_to_run_specs,
     full_factorial,
@@ -69,16 +76,19 @@ __all__ = [
     "canonical_script_sha256",
     "expand_grid_to_run_specs",
     "expand_latin_hypercube_to_run_specs",
+    "expand_monte_carlo_extension_to_run_specs",
     "expand_monte_carlo_to_run_specs",
     "expand_samples_to_run_specs",
     "full_factorial",
     "latin_hypercube",
+    "latin_hypercube_extend",
     "latin_hypercube_samples",
     "lazy_contacts",
     "lazy_ephemerides",
     "lazy_fused_reports",
     "lazy_multiindex",
     "monte_carlo",
+    "monte_carlo_extend",
     "sweep",
     "sweep_summary",
 ]
