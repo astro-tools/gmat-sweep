@@ -321,6 +321,75 @@ function does **not** reshape across `parameter_spec` shapes — diffing a
 grid sweep against a Monte Carlo sweep is the user's responsibility to
 align (e.g. via `df.reset_index().set_index([...])`) before calling.
 
+## Polars output engine
+
+Pandas is the default and only return type with no extra installed.
+With the `[polars]` extra, every flat-column DataFrame-returning entry
+point in this module accepts an `engine="polars"` keyword that returns
+a [`polars.DataFrame`][polars-df] instead.
+
+```bash
+pip install gmat-sweep[polars]
+```
+
+The MultiIndex on `lazy_multiindex`/`lazy_ephemerides` (`(run_id, time)`)
+and `lazy_contacts` (`(run_id, interval_id)`) is flattened into two
+sorted leading columns; row order, row count, and the non-index column
+set match the pandas-engine equivalent. Polars carries the typed nulls
+across — `NaT` becomes a polars `null` in `Datetime[ns]`, the nullable
+`Int64` `interval_id` round-trips to a polars `Int64` with `null`, and
+`NaN` in numeric columns becomes a `null` in `Float64`.
+
+```python
+from gmat_sweep import sweep
+
+# pandas (default) — returns a (run_id, time)-MultiIndexed pandas DataFrame.
+df = sweep("mission.script", grid={"Sat.SMA": [7000, 7100]}, out=...)
+
+# polars — returns a polars.DataFrame with run_id/time as leading columns.
+plf = sweep("mission.script", grid={"Sat.SMA": [7000, 7100]}, out=..., engine="polars")
+plf.filter(plf["__status"] == "ok").group_by("run_id").agg(...)
+```
+
+The `engine="polars"` knob is available on:
+
+- The top-level entry points: [`sweep`][gmat_sweep.sweep],
+  [`monte_carlo`][gmat_sweep.monte_carlo],
+  [`latin_hypercube`][gmat_sweep.latin_hypercube], and
+  [`monte_carlo_extend`][gmat_sweep.monte_carlo_extend].
+- The `Sweep` orchestrator methods:
+  [`Sweep.to_dataframe`][gmat_sweep.Sweep.to_dataframe],
+  [`Sweep.to_ephemerides`][gmat_sweep.Sweep.to_ephemerides],
+  [`Sweep.to_contacts`][gmat_sweep.Sweep.to_contacts]. The
+  `Sweep.to_polars()` shortcut is equivalent to
+  `Sweep.to_dataframe(engine="polars")`.
+- The standalone aggregators:
+  [`lazy_multiindex`][gmat_sweep.lazy_multiindex],
+  [`lazy_ephemerides`][gmat_sweep.lazy_ephemerides],
+  [`lazy_contacts`][gmat_sweep.lazy_contacts],
+  [`mc_convergence`][gmat_sweep.mc_convergence], and
+  [`sweep_diff`][gmat_sweep.sweep_diff].
+
+Two helpers stay pandas-only because their output carries a column-level
+`MultiIndex` and polars has no native equivalent:
+[`sweep_summary`][gmat_sweep.sweep_summary] (`(statistic, field)`
+columns) and
+[`lazy_fused_reports`][gmat_sweep.lazy_fused_reports] /
+[`Sweep.to_fused_reports`][gmat_sweep.Sweep.to_fused_reports]
+(`(report_name, column)` columns). Convert by hand when you need a
+flat polars frame:
+
+```python
+import polars as pl
+
+summary = sweep_summary(df)
+flat = summary.copy()
+flat.columns = [f"{stat}__{field}" for stat, field in flat.columns]
+plf_summary = pl.from_pandas(flat.reset_index())
+```
+
+[polars-df]: https://docs.pola.rs/api/python/stable/reference/dataframe/index.html
+
 ## Migrating from v0.1
 
 v0.1 used a bare `<name>.parquet` per-run layout and keyed
