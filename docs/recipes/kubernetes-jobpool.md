@@ -27,7 +27,7 @@ the Kubernetes API directly.
 
 ## Image
 
-`KubernetesJobPool` requires `image=` because v0.4 ships no default. The
+`KubernetesJobPool` requires `image=` — the pool ships no default. The
 canonical image at `ghcr.io/astro-tools/gmat:<tag>` carries GMAT and
 `gmatpy` but **not** `gmat-sweep` itself — downstream consumers add
 their own packages on top:
