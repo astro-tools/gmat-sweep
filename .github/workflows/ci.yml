@@ -50,10 +50,12 @@ jobs:
         # `tests/test_backends_kubernetes.py` (which `pytest.importorskip`
         # the kubernetes client) can run here and contribute to the
         # coverage gate — the real-cluster k8s integration tests still
-        # live in the dedicated `backend-k8s` job below. The lint,
+        # live in the dedicated `backend-k8s` job below. `--extra polars`
+        # so the engine="polars" tests under `tests/test_aggregate.py`
+        # contribute to the aggregate.py coverage gate. The lint,
         # typecheck, and minimal-install jobs deliberately keep their
         # syncs narrower.
-        run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s
+        run: uv sync --all-groups --extra dask --extra ray --extra plot --extra k8s --extra polars
 
       - name: Run pytest
         # `-m "(integration or not integration) and not slow"` overrides the

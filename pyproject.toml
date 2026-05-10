@@ -53,6 +53,7 @@ ray = ["ray[default]>=2.10"]
 k8s = ["kubernetes>=29,<33"]
 mpi = ["mpi4py>=3.1"]
 plot = ["matplotlib>=3.8"]
+polars = ["polars>=1.0"]
 examples = ["matplotlib>=3.8", "distributed>=2024.1", "ray[default]>=2.10"]
 
 [project.scripts]
@@ -180,6 +181,16 @@ follow_imports = "skip"
 # (which does not install [plot]) keeps passing.
 [[tool.mypy.overrides]]
 module = ["matplotlib", "matplotlib.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# polars is an optional [polars]-extra dependency; aggregate.py imports it
+# lazily inside _to_polars only, so the default install path never touches
+# polars. polars ships a `py.typed` marker, so `follow_imports = "skip"` is
+# needed alongside `ignore_missing_imports` for the typecheck cell that
+# does not install the extra.
+[[tool.mypy.overrides]]
+module = ["polars", "polars.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
