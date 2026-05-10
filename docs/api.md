@@ -74,6 +74,12 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.mc_convergence
 
+## Sensitivity
+
+::: gmat_sweep.sobol_sample
+
+::: gmat_sweep.sobol_analyze
+
 ## Plotting
 
 ::: gmat_sweep.plotting.sweep_band_plot
