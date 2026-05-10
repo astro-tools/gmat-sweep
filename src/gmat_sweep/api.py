@@ -52,6 +52,8 @@ def sweep(
     out: str | Path | None = ...,
     seed: int | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["pandas"] = ...,
 ) -> pd.DataFrame: ...
 @overload
@@ -64,6 +66,8 @@ def sweep(
     out: str | Path | None = ...,
     seed: int | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["polars"],
 ) -> pl.DataFrame: ...
 @overload
@@ -76,6 +80,8 @@ def sweep(
     out: str | Path | None = ...,
     seed: int | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: str,
 ) -> DataFrame: ...
 def sweep(
@@ -87,6 +93,8 @@ def sweep(
     out: str | Path | None = None,
     seed: int | None = None,
     progress: bool = True,
+    fsync_each: bool = True,
+    fsync_batch: int = 50,
     engine: str = "pandas",
 ) -> DataFrame:
     """Run a parameter sweep over a GMAT mission.
@@ -145,6 +153,17 @@ def sweep(
         runs complete. Set to ``False`` for non-interactive use (CI logs,
         notebooks committed with outputs) where the progress bar would
         otherwise be captured as noisy stderr snapshots.
+    fsync_each:
+        ``True`` (default) fsyncs the manifest after every appended
+        entry — strict per-run durability, matching the v0.3 behaviour.
+        Set to ``False`` to amortise the fsync cost across batches of
+        ``fsync_batch`` entries; useful for sub-second runs at large
+        counts where the per-entry fsync would otherwise dominate the
+        driver thread. Forwarded verbatim to :class:`Sweep`; see
+        :class:`Sweep` for the full durability tradeoff.
+    fsync_batch:
+        Fsync interval (in entries) when ``fsync_each`` is ``False``.
+        Default ``50``. Ignored when ``fsync_each`` is ``True``.
     engine:
         ``"pandas"`` (default) returns a ``(run_id, time)``-MultiIndexed
         :class:`pandas.DataFrame`. ``"polars"`` returns a
@@ -217,6 +236,8 @@ def sweep(
         out=out,
         progress=progress,
         engine=engine,
+        fsync_each=fsync_each,
+        fsync_batch=fsync_batch,
     )
 
 
@@ -230,6 +251,8 @@ def monte_carlo(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["pandas"] = ...,
 ) -> pd.DataFrame: ...
 @overload
@@ -242,6 +265,8 @@ def monte_carlo(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["polars"],
 ) -> pl.DataFrame: ...
 @overload
@@ -254,6 +279,8 @@ def monte_carlo(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: str,
 ) -> DataFrame: ...
 def monte_carlo(
@@ -265,6 +292,8 @@ def monte_carlo(
     backend: Pool | None = None,
     out: str | Path | None = None,
     progress: bool = True,
+    fsync_each: bool = True,
+    fsync_batch: int = 50,
     engine: str = "pandas",
 ) -> DataFrame:
     """Run a Monte Carlo dispersion sweep over a GMAT mission.
@@ -340,6 +369,8 @@ def monte_carlo(
         out=out,
         progress=progress,
         engine=engine,
+        fsync_each=fsync_each,
+        fsync_batch=fsync_batch,
     )
 
 
@@ -353,6 +384,8 @@ def latin_hypercube(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["pandas"] = ...,
 ) -> pd.DataFrame: ...
 @overload
@@ -365,6 +398,8 @@ def latin_hypercube(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["polars"],
 ) -> pl.DataFrame: ...
 @overload
@@ -377,6 +412,8 @@ def latin_hypercube(
     backend: Pool | None = ...,
     out: str | Path | None = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: str,
 ) -> DataFrame: ...
 def latin_hypercube(
@@ -388,6 +425,8 @@ def latin_hypercube(
     backend: Pool | None = None,
     out: str | Path | None = None,
     progress: bool = True,
+    fsync_each: bool = True,
+    fsync_batch: int = 50,
     engine: str = "pandas",
 ) -> DataFrame:
     """Run a Latin hypercube sweep over a GMAT mission.
@@ -459,6 +498,8 @@ def latin_hypercube(
         out=out,
         progress=progress,
         engine=engine,
+        fsync_each=fsync_each,
+        fsync_batch=fsync_batch,
     )
 
 
@@ -471,6 +512,8 @@ def monte_carlo_extend(
     backend: Pool | None = ...,
     allow_script_drift: bool = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["pandas"] = ...,
 ) -> pd.DataFrame: ...
 @overload
@@ -482,6 +525,8 @@ def monte_carlo_extend(
     backend: Pool | None = ...,
     allow_script_drift: bool = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: Literal["polars"],
 ) -> pl.DataFrame: ...
 @overload
@@ -493,6 +538,8 @@ def monte_carlo_extend(
     backend: Pool | None = ...,
     allow_script_drift: bool = ...,
     progress: bool = ...,
+    fsync_each: bool = ...,
+    fsync_batch: int = ...,
     engine: str,
 ) -> DataFrame: ...
 def monte_carlo_extend(
@@ -503,6 +550,8 @@ def monte_carlo_extend(
     backend: Pool | None = None,
     allow_script_drift: bool = False,
     progress: bool = True,
+    fsync_each: bool = True,
+    fsync_batch: int = 50,
     engine: str = "pandas",
 ) -> DataFrame:
     """Append ``n`` more bit-deterministic Monte Carlo runs to an existing sweep.
@@ -575,6 +624,8 @@ def monte_carlo_extend(
             backend=pool,
             allow_script_drift=allow_script_drift,
             progress=progress,
+            fsync_each=fsync_each,
+            fsync_batch=fsync_batch,
         ).extend(n=n)
         return sweep_obj.to_dataframe(engine=engine)
 
@@ -634,6 +685,8 @@ def _run_sweep(
     out: str | Path | None,
     progress: bool,
     engine: str,
+    fsync_each: bool = True,
+    fsync_batch: int = 50,
 ) -> DataFrame:
     """Shared orchestration for the public entry points.
 
@@ -674,6 +727,8 @@ def _run_sweep(
                 parameter_spec=parameter_spec,
                 sweep_seed=sweep_seed,
                 progress=progress,
+                fsync_each=fsync_each,
+                fsync_batch=fsync_batch,
             )
             .run()
             .to_dataframe(engine=engine)

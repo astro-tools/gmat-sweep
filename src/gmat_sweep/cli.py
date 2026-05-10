@@ -284,7 +284,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     out = Path(args.out)
     with _build_pool(args) as pool:
-        sweep(script, grid=grid, backend=pool, out=out)
+        sweep(
+            script,
+            grid=grid,
+            backend=pool,
+            out=out,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
+        )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -437,6 +444,8 @@ def _cmd_monte_carlo(args: argparse.Namespace) -> int:
             seed=args.seed,
             backend=pool,
             out=out,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
         )
 
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -460,6 +469,8 @@ def _cmd_latin_hypercube(args: argparse.Namespace) -> int:
             seed=args.seed,
             backend=pool,
             out=out,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
         )
 
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -476,7 +487,14 @@ def _cmd_explicit(args: argparse.Namespace) -> int:
     samples = _load_samples(Path(args.samples))
     out = Path(args.out)
     with _build_pool(args) as pool:
-        sweep(script, samples=samples, backend=pool, out=out)
+        sweep(
+            script,
+            samples=samples,
+            backend=pool,
+            out=out,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
+        )
 
     manifest = Manifest.load(out / "manifest.jsonl")
     print(_format_summary(manifest, out))
@@ -529,6 +547,8 @@ def _cmd_extend(args: argparse.Namespace) -> int:
             n=args.n,
             backend=pool,
             allow_script_drift=args.allow_script_drift,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
         )
 
     manifest = Manifest.load(manifest_path)
@@ -555,10 +575,38 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             script,
             backend=pool,
             allow_script_drift=args.allow_script_drift,
+            fsync_each=args.fsync_each,
+            fsync_batch=args.fsync_batch,
         ).resume()
 
     print(_format_summary(sweep_obj.to_manifest(), manifest_path.parent))
     return EXIT_OK
+
+
+def _add_fsync_flags(subparser: argparse.ArgumentParser) -> None:
+    """Attach ``--fsync-each`` / ``--no-fsync-each`` and ``--fsync-batch`` to a subparser."""
+    subparser.add_argument(
+        "--fsync-each",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fsync the manifest after every appended entry (default: --fsync-each). "
+            "Pass --no-fsync-each to amortise fsyncs across batches of "
+            "--fsync-batch entries — faster for sub-second runs at large counts, "
+            "at the cost of losing up to FSYNC_BATCH-1 trailing entries on host "
+            "crash. The resume flow re-runs the missing slice."
+        ),
+    )
+    subparser.add_argument(
+        "--fsync-batch",
+        type=int,
+        default=50,
+        metavar="N",
+        help=(
+            "Fsync interval (in entries) when --no-fsync-each is set. "
+            "Ignored when --fsync-each is in effect. Default: 50."
+        ),
+    )
 
 
 def _add_backend_flag(subparser: argparse.ArgumentParser) -> None:
@@ -636,6 +684,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the GMAT .script file.",
     )
     _add_backend_flag(run)
+    _add_fsync_flags(run)
     run.set_defaults(func=_cmd_run)
 
     show = subparsers.add_parser(
@@ -734,6 +783,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the GMAT .script file.",
     )
     _add_backend_flag(monte)
+    _add_fsync_flags(monte)
     monte.set_defaults(func=_cmd_monte_carlo)
 
     lhs = subparsers.add_parser(
@@ -790,6 +840,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the GMAT .script file.",
     )
     _add_backend_flag(lhs)
+    _add_fsync_flags(lhs)
     lhs.set_defaults(func=_cmd_latin_hypercube)
 
     explicit = subparsers.add_parser(
@@ -826,6 +877,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the GMAT .script file.",
     )
     _add_backend_flag(explicit)
+    _add_fsync_flags(explicit)
     explicit.set_defaults(func=_cmd_explicit)
 
     extend = subparsers.add_parser(
@@ -878,6 +930,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_backend_flag(extend)
+    _add_fsync_flags(extend)
     extend.set_defaults(func=_cmd_extend)
 
     resume = subparsers.add_parser(
@@ -920,6 +973,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_backend_flag(resume)
+    _add_fsync_flags(resume)
     resume.set_defaults(func=_cmd_resume)
 
     archive = subparsers.add_parser(
@@ -986,7 +1040,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"gmat-sweep: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     except ManifestCorruptError as exc:
-        print(f"gmat-sweep: {exc} ({exc.path})", file=sys.stderr)
+        location = f"{exc.path}:{exc.line_number}" if exc.line_number is not None else str(exc.path)
+        print(f"gmat-sweep: {exc} ({location})", file=sys.stderr)
         return EXIT_MANIFEST
     except BackendError as exc:
         print(f"gmat-sweep: backend error: {exc}", file=sys.stderr)

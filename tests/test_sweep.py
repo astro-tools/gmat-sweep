@@ -790,8 +790,7 @@ def test_resume_acceptance_16_runs_with_3_failures(
         ).run()
 
     # Sanity: 3 failed in the first pass.
-    first_pass = Manifest.load(output_dir / "manifest.jsonl")
-    assert sorted(first_pass.find_failed()) == [3, 7, 11]
+    assert sorted(Manifest.find_failed(output_dir / "manifest.jsonl")) == [3, 7, 11]
 
     # Patch the override out, resume.
     fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=1))

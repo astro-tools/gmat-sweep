@@ -95,9 +95,11 @@ These keep loading: the dispatch in
 
 `script_sha256` is computed by
 [`canonical_script_sha256()`][gmat_sweep.canonical_script_sha256], which
-normalises line endings (`\r\n` and lone `\r` → `\n`) and trims trailing
-newlines to exactly one before hashing. Two clones of the same script
-checked out under different line-ending settings produce identical hashes.
+normalises a leading UTF-8 byte-order mark (`﻿`), line endings
+(`\r\n` and lone `\r` → `\n`), and trailing newlines (trimmed to exactly
+one) before hashing. The same `.script` saved from a BOM-emitting
+Windows editor and from a Linux editor without a BOM produces identical
+hashes; same for two clones with different `core.autocrlf` settings.
 
 ## Entry fields
 
@@ -146,16 +148,30 @@ against the sweep's `output_dir`.
 
 ## Loading a manifest back
 
+[`Manifest.load`][gmat_sweep.Manifest.load] materialises every entry
+into the returned manifest's `entries` list, deduplicated last-wins per
+`run_id`. For tail-only operations on large manifests
+(`gmat-sweep resume` against a 10k-run sweep, "what failed?" queries),
+prefer the streaming primitives — they parse the file lazily and never
+hold every entry in memory.
+
 ```python
 from pathlib import Path
 from gmat_sweep import Manifest
 
-manifest = Manifest.load(Path("./sweep/manifest.jsonl"))
+manifest_path = Path("./sweep/manifest.jsonl")
+
+# Eager load: full entries list, deduplicated.
+manifest = Manifest.load(manifest_path)
 print(manifest.script_sha256, manifest.run_count, len(manifest.entries))
 
-# Find runs that need attention:
-failed_ids = manifest.find_failed()                       # [list of run_id]
-missing_ids = manifest.find_missing(range(manifest.run_count))
+# Streaming tail-only scans (do not materialise the entry list):
+failed_ids = Manifest.find_failed(manifest_path)
+missing_ids = Manifest.find_missing(manifest_path, range(manifest.run_count))
+
+# Lazy iteration if you need each entry but not all at once:
+for entry in Manifest.iter_entries(manifest_path):
+    ...
 ```
 
 ## CLI summary
@@ -170,19 +186,49 @@ $ gmat-sweep show ./sweep/manifest.jsonl
 
 ## Append-only invariant
 
-The manifest is written **append-only with fsync after every entry**:
+The manifest is written **append-only**:
 
 - The header is written once, then never touched.
 - Each [`Manifest.append_entry()`][gmat_sweep.Manifest.append_entry] call
-  writes one line and `fsync`s the file (and, on POSIX, the parent
-  directory) before returning.
+  writes one line; whether the line is fsynced before the call returns
+  depends on the manifest's [fsync cadence](#fsync-cadence-and-durability).
 
-A `Ctrl-C`, OOM kill, or `kill -9` can lose only the in-flight write —
-every entry that returned successfully from `append_entry` is durable.
 [`Manifest.load()`][gmat_sweep.Manifest.load] silently tolerates a single
 torn last line; anything more corrupted raises
 [`ManifestCorruptError`][gmat_sweep.ManifestCorruptError] with the offending
-file's path attached.
+file's path attached, and a `line_number` attribute set to the 1-indexed
+line that failed to parse (or `None` for whole-file failures such as an
+empty file). `gmat-sweep show`'s error output surfaces both.
+
+## Fsync cadence and durability
+
+Two knobs on [`Manifest`][gmat_sweep.Manifest] (and forwarded by every
+sweep-running entry point) control how often the manifest is fsynced:
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `fsync_each` | `True` | Every appended entry is fsynced before `append_entry` returns. Strict per-run durability — a `Ctrl-C`, OOM kill, or `kill -9` can lose only the in-flight write. |
+| `fsync_batch` | `50` | When `fsync_each=False`, the manifest is fsynced only every Nth entry (and once on [`Manifest.close()`][gmat_sweep.Manifest.close], called at end-of-sweep). |
+
+The default (`fsync_each=True`) preserves the v0.3 strict-per-entry
+behaviour. Opt into `fsync_each=False` when sub-second runs at large
+counts make the per-entry fsync the dominant cost in the driver thread —
+typical for 1000+ Monte Carlo or grid sweeps with cheap per-run work.
+
+**Tradeoff.** With `fsync_each=False` and `fsync_batch=N`, a host crash
+between fsync boundaries (power loss, kernel panic) can leave up to
+`N - 1` recently-appended entries missing from the on-disk manifest.
+The per-run Parquet files and the script hash are unaffected — the
+[resume flow](resume.md) re-runs only the missing slice. `Ctrl-C`
+mid-sweep deliberately skips the end-of-sweep `close()` so the same
+recovery window applies; the resume flow handles the gap.
+
+The CLI exposes the knob on every sweep-running subcommand as
+`--fsync-each / --no-fsync-each` and `--fsync-batch N`. The Python API
+accepts `fsync_each=` and `fsync_batch=` on
+[`sweep`][gmat_sweep.sweep], [`monte_carlo`][gmat_sweep.monte_carlo],
+[`latin_hypercube`][gmat_sweep.latin_hypercube], and
+[`monte_carlo_extend`][gmat_sweep.monte_carlo_extend].
 
 ## Last-wins merge on load
 
@@ -255,3 +301,12 @@ A `schema_version` bump is a coordinated change: the writer side
 emits the new value and the reader side learns to interpret the new
 shape. Older `gmat-sweep` versions stop accepting bumped manifests
 on the read side, which is the point of the version field.
+
+**Migration ladder.** [`Manifest.load`][gmat_sweep.Manifest.load] routes
+every header through an internal `_migrate_header(data, from_version)`
+shim before constructing the in-memory manifest. Today the shim is a
+pass-through for `v1 → v1`; the ladder exists so that when v2 ships,
+the per-version migration step (renames, splits, default backfills)
+lands in one place and v1 manifests keep loading unchanged. Major bumps
+are one-shot migrations applied on read; minor additive fields do not
+go through the shim.

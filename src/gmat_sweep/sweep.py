@@ -88,6 +88,22 @@ class Sweep:
         :class:`gmat_sweep.errors.BackendError`. Pass :data:`True` together
         with the matching flag on the pool to opt in to in-process,
         single-run debug dispatch.
+    fsync_each:
+        Forwarded to :class:`Manifest`. ``True`` (default) preserves the
+        v0.3 strict-per-entry fsync cadence — every appended entry is
+        durable before the next run is dispatched. ``False`` defers
+        fsyncs to ``fsync_batch``-entry boundaries plus the
+        end-of-sweep :meth:`Manifest.close`; on a host crash between
+        boundaries up to ``fsync_batch - 1`` recently-completed entries
+        can be lost from the on-disk manifest, but the per-run Parquet
+        outputs and the script hash are unaffected and the resume flow
+        re-runs only the missing slice. A ``KeyboardInterrupt`` mid-sweep
+        deliberately skips ``close()`` so the same recovery window
+        applies to user-aborted sweeps.
+    fsync_batch:
+        Forwarded to :class:`Manifest`. Number of entries between
+        fsyncs when ``fsync_each`` is ``False``. Ignored when
+        ``fsync_each`` is ``True``.
     """
 
     def __init__(
@@ -102,6 +118,8 @@ class Sweep:
         sweep_seed: int | None = None,
         progress: bool = True,
         allow_unisolated_pool: bool = False,
+        fsync_each: bool = True,
+        fsync_batch: int = 50,
     ) -> None:
         if backend.subprocess_isolated is not True and not allow_unisolated_pool:
             raise BackendError(
@@ -110,6 +128,8 @@ class Sweep:
                 "pass allow_unisolated_pool=True to acknowledge in-process or "
                 "otherwise unisolated dispatch."
             )
+        if fsync_batch < 1:
+            raise SweepConfigError(f"fsync_batch must be >= 1, got {fsync_batch}")
         self._runs: list[RunSpec] = list(runs)
         self._backend = backend
         self._manifest_path = Path(manifest_path)
@@ -118,6 +138,8 @@ class Sweep:
         self._parameter_spec: dict[str, Any] = dict(parameter_spec)
         self._sweep_seed = sweep_seed
         self._progress = progress
+        self._fsync_each = fsync_each
+        self._fsync_batch = fsync_batch
         self._manifest: Manifest | None = None
         # Set by :meth:`from_manifest`. Gates :meth:`resume` so a freshly-
         # constructed Sweep can't accidentally append onto an unrelated file.
@@ -160,6 +182,12 @@ class Sweep:
                 )
                 manifest.append_entry(entry)
                 progress_bar.update(1)
+            # close() only on normal completion: KeyboardInterrupt and any
+            # other exception fall through to the finally and skip the
+            # final fsync, which is what makes ``fsync_each=False`` honour
+            # its documented "up to fsync_batch-1 entries lost on crash"
+            # window. Resume picks up the slack.
+            manifest.close()
         finally:
             progress_bar.close()
 
@@ -174,6 +202,8 @@ class Sweep:
         backend: Pool,
         allow_script_drift: bool = False,
         progress: bool = True,
+        fsync_each: bool = True,
+        fsync_batch: int = 50,
     ) -> Sweep:
         """Rebuild a :class:`Sweep` from a manifest written by a prior run.
 
@@ -205,6 +235,11 @@ class Sweep:
         progress:
             Forwarded to the constructor — controls the :mod:`tqdm` bar in
             :meth:`resume`.
+        fsync_each, fsync_batch:
+            Forwarded to the constructor; control the manifest's fsync
+            cadence on the appended resume / extend entries. The on-disk
+            manifest's existing entries are not affected — these knobs
+            govern only the writes the returned sweep performs.
 
         Raises
         ------
@@ -253,7 +288,14 @@ class Sweep:
             parameter_spec=manifest.parameter_spec,
             sweep_seed=manifest.sweep_seed,
             progress=progress,
+            fsync_each=fsync_each,
+            fsync_batch=fsync_batch,
         )
+        # The loaded manifest's cadence knobs default to the on-disk-agnostic
+        # ``True`` / ``50``; align them with the freshly-constructed Sweep so
+        # the next ``append_entry`` honours the caller's choice.
+        manifest.fsync_each = fsync_each
+        manifest.fsync_batch = fsync_batch
         sweep._manifest = manifest
         sweep._loaded_from_manifest = True
         return sweep
@@ -275,8 +317,11 @@ class Sweep:
         manifest = self._manifest
 
         expected_run_ids = [s.run_id for s in self._runs]
-        to_retry: set[int] = set(manifest.find_failed()) | set(
-            manifest.find_missing(expected_run_ids)
+        # Stream the on-disk manifest for the failed/missing scan so a
+        # 10k-run resume doesn't pay 10k JSON parses against an
+        # in-memory entry list it never reads from again.
+        to_retry: set[int] = set(Manifest.find_failed(self._manifest_path)) | set(
+            Manifest.find_missing(self._manifest_path, expected_run_ids)
         )
         specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in self._runs}
         runs_to_submit: list[RunSpec] = [specs_by_run_id[rid] for rid in sorted(to_retry)]
@@ -300,6 +345,7 @@ class Sweep:
                 )
                 manifest.append_entry(entry)
                 progress_bar.update(1)
+            manifest.close()
         finally:
             progress_bar.close()
 
@@ -345,8 +391,8 @@ class Sweep:
 
         # Refuse on a torn base — extending past gaps would mix run_ids in a
         # way the aggregated DataFrame can't recover from.
-        gaps_failed = [rid for rid in manifest.find_failed() if rid < old_n]
-        gaps_missing = manifest.find_missing(range(old_n))
+        gaps_failed = [rid for rid in Manifest.find_failed(self._manifest_path) if rid < old_n]
+        gaps_missing = Manifest.find_missing(self._manifest_path, range(old_n))
         if gaps_failed or gaps_missing:
             details = []
             if gaps_failed:
@@ -397,6 +443,7 @@ class Sweep:
                 )
                 manifest.append_entry(entry)
                 progress_bar.update(1)
+            manifest.close()
         finally:
             progress_bar.close()
 
@@ -601,6 +648,8 @@ class Sweep:
             parameter_spec=self._parameter_spec,
             run_count=len(self._runs),
             backend=self._backend.__class__.__name__,
+            fsync_each=self._fsync_each,
+            fsync_batch=self._fsync_batch,
         )
 
 

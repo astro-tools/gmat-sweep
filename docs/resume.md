@@ -60,10 +60,12 @@ one row per `(run, time-step)` pair, plus a `__status` column.
 
 ## Last-wins entry semantics
 
-The manifest is **append-only with `fsync` after every entry** (see
-[Manifest schema](manifest-schema.md#append-only-invariant)). A resumed
-run appends a new entry with the **same `run_id`** as the original
-failed entry. The on-disk file then carries two lines for that
+The manifest is **append-only** (see
+[Manifest schema](manifest-schema.md#append-only-invariant); fsync
+cadence is configurable, see
+[Fsync cadence and durability](manifest-schema.md#fsync-cadence-and-durability)).
+A resumed run appends a new entry with the **same `run_id`** as the
+original failed entry. The on-disk file then carries two lines for that
 `run_id` — one `failed`, one `ok`.
 
 [`Manifest.load`][gmat_sweep.Manifest.load] folds these last-wins:
@@ -76,6 +78,14 @@ content survives, kept in the position of the first occurrence. So:
 - The on-disk file remains append-only — older entries are never
   rewritten or deleted, so a `Ctrl-C` during resume still leaves a
   parseable file.
+
+Resume itself walks the manifest with
+[`Manifest.find_failed(path)`][gmat_sweep.Manifest.find_failed] and
+[`Manifest.find_missing(path, ...)`][gmat_sweep.Manifest.find_missing] —
+both are streaming classmethods that scan the file lazily, fold per-`run_id`
+last-wins state into a small dict, and never materialise the full entry
+list. A 10k-run resume's failed/missing scan therefore allocates
+proportional to the number of unique `run_id`s, not the file length.
 
 A manifest from a sweep that never resumed has unique `run_id`s per
 entry, so the dedup is a no-op there.
@@ -114,10 +124,11 @@ checkout.
 
 [`resume()`][gmat_sweep.Sweep.resume] submits the union of:
 
-- `manifest.find_failed()` — entries whose latest status is `failed`.
-- `manifest.find_missing(expected_run_ids)` — `run_id`s the rebuilt
-  run iterable carries that have no entry on disk yet (the tail of a
-  `Ctrl-C`'d sweep).
+- `Manifest.find_failed(manifest_path)` — entries whose latest status
+  is `failed`.
+- `Manifest.find_missing(manifest_path, expected_run_ids)` — `run_id`s
+  the rebuilt run iterable carries that have no entry on disk yet (the
+  tail of a `Ctrl-C`'d sweep).
 
 Successful runs are skipped; their Parquet outputs are reused from
 their original `output_paths`. `skipped` runs (worker contract: the
