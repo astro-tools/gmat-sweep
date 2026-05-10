@@ -447,70 +447,76 @@ def test_load_dedup_no_op_when_run_ids_unique(tmp_path: Path) -> None:
     assert reloaded.entries == m.entries
 
 
-def test_find_failed_after_resume_excludes_recovered_run_ids(tmp_path: Path) -> None:
-    """After dedup, find_failed only surfaces run_ids whose LAST entry is failed."""
+def _saved_manifest(tmp_path: Path, entries: list[ManifestEntry]) -> Path:
+    """Write a fresh manifest with ``entries`` to ``tmp_path/manifest.jsonl``, return the path."""
     m = _make_manifest()
     path = tmp_path / "manifest.jsonl"
     m.save(path)
-    m.append_entry(_make_entry(run_id=0, status="failed"))
-    m.append_entry(_make_entry(run_id=1, status="failed"))
-    m.append_entry(_make_entry(run_id=0, status="ok"))  # recovered on resume
-
-    reloaded = Manifest.load(path)
-    assert reloaded.find_failed() == [1]
+    for entry in entries:
+        m.append_entry(entry)
+    return path
 
 
-def test_find_failed_returns_failed_run_ids_in_order() -> None:
-    m = _make_manifest()
-    m.entries = [
-        _make_entry(0, status="ok"),
-        _make_entry(1, status="failed"),
-        _make_entry(2, status="ok"),
-        _make_entry(3, status="failed"),
-        _make_entry(4, status="skipped"),
-    ]
-    assert m.find_failed() == [1, 3]
+def test_find_failed_after_resume_excludes_recovered_run_ids(tmp_path: Path) -> None:
+    """After dedup, find_failed only surfaces run_ids whose LAST entry is failed."""
+    path = _saved_manifest(
+        tmp_path,
+        [
+            _make_entry(run_id=0, status="failed"),
+            _make_entry(run_id=1, status="failed"),
+            _make_entry(run_id=0, status="ok"),  # recovered on resume
+        ],
+    )
+    assert Manifest.find_failed(path) == [1]
 
 
-def test_find_failed_empty_when_all_ok() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(0), _make_entry(1)]
-    assert m.find_failed() == []
+def test_find_failed_returns_failed_run_ids_in_order(tmp_path: Path) -> None:
+    path = _saved_manifest(
+        tmp_path,
+        [
+            _make_entry(0, status="ok"),
+            _make_entry(1, status="failed"),
+            _make_entry(2, status="ok"),
+            _make_entry(3, status="failed"),
+            _make_entry(4, status="skipped"),
+        ],
+    )
+    assert Manifest.find_failed(path) == [1, 3]
 
 
-def test_find_failed_returns_all_when_all_failed() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(i, status="failed") for i in range(3)]
-    assert m.find_failed() == [0, 1, 2]
+def test_find_failed_empty_when_all_ok(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0), _make_entry(1)])
+    assert Manifest.find_failed(path) == []
 
 
-def test_find_failed_skipped_runs_are_not_failed() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(0, status="skipped")]
-    assert m.find_failed() == []
+def test_find_failed_returns_all_when_all_failed(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(i, status="failed") for i in range(3)])
+    assert Manifest.find_failed(path) == [0, 1, 2]
 
 
-def test_find_missing_preserves_input_order() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(0), _make_entry(2), _make_entry(4)]
-    assert m.find_missing([4, 3, 2, 1, 0]) == [3, 1]
+def test_find_failed_skipped_runs_are_not_failed(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0, status="skipped")])
+    assert Manifest.find_failed(path) == []
 
 
-def test_find_missing_empty_input_returns_empty() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(0)]
-    assert m.find_missing([]) == []
+def test_find_missing_preserves_input_order(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0), _make_entry(2), _make_entry(4)])
+    assert Manifest.find_missing(path, [4, 3, 2, 1, 0]) == [3, 1]
 
 
-def test_find_missing_all_present_returns_empty() -> None:
-    m = _make_manifest()
-    m.entries = [_make_entry(0), _make_entry(1)]
-    assert m.find_missing([0, 1]) == []
+def test_find_missing_empty_input_returns_empty(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0)])
+    assert Manifest.find_missing(path, []) == []
 
 
-def test_find_missing_none_present_returns_all() -> None:
-    m = _make_manifest()
-    assert m.find_missing([0, 1, 2]) == [0, 1, 2]
+def test_find_missing_all_present_returns_empty(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0), _make_entry(1)])
+    assert Manifest.find_missing(path, [0, 1]) == []
+
+
+def test_find_missing_none_present_returns_all(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [])
+    assert Manifest.find_missing(path, [0, 1, 2]) == [0, 1, 2]
 
 
 # ---- canonical_script_sha256 --------------------------------------------
@@ -706,3 +712,239 @@ def test_load_drops_unknown_extra_header_fields(tmp_path: Path) -> None:
     assert reloaded.script_sha256 == m.script_sha256
     assert reloaded.run_count == m.run_count
     assert [e.run_id for e in reloaded.entries] == [0]
+
+
+# ---- BOM-stable canonical script hash ------------------------------------
+
+
+def test_canonical_hash_strips_leading_bom(tmp_path: Path) -> None:
+    """A script saved by a BOM-emitting Windows editor must hash equal to the BOM-less copy."""
+    body = b"Create Spacecraft Sat;\nSat.SMA = 7000;\n"
+    plain = _write_script(tmp_path, "plain.script", body)
+    bom = _write_script(tmp_path, "bom.script", b"\xef\xbb\xbf" + body)
+    assert canonical_script_sha256(bom) == canonical_script_sha256(plain)
+
+
+def test_canonical_hash_strips_bom_with_crlf_endings(tmp_path: Path) -> None:
+    """BOM stripping composes with line-ending normalisation."""
+    body = "Sat.SMA = 7000;\nSat.ECC = 0;\n"
+    plain = _write_script(tmp_path, "plain.script", body.encode("utf-8"))
+    bom_crlf = _write_script(
+        tmp_path, "bom_crlf.script", b"\xef\xbb\xbf" + body.replace("\n", "\r\n").encode("utf-8")
+    )
+    assert canonical_script_sha256(bom_crlf) == canonical_script_sha256(plain)
+
+
+# ---- Streaming iter_entries ----------------------------------------------
+
+
+def test_iter_entries_yields_every_entry_in_file_order(tmp_path: Path) -> None:
+    path = _saved_manifest(
+        tmp_path,
+        [_make_entry(0), _make_entry(1, status="failed"), _make_entry(2)],
+    )
+    yielded = list(Manifest.iter_entries(path))
+    assert [e.run_id for e in yielded] == [0, 1, 2]
+    assert [e.status for e in yielded] == ["ok", "failed", "ok"]
+
+
+def test_iter_entries_does_not_dedupe_duplicate_run_ids(tmp_path: Path) -> None:
+    """iter_entries is the streaming primitive — last-wins folding is the caller's job."""
+    path = _saved_manifest(
+        tmp_path,
+        [
+            _make_entry(0, status="failed"),
+            _make_entry(0, status="ok"),  # duplicate run_id
+            _make_entry(1),
+        ],
+    )
+    yielded = list(Manifest.iter_entries(path))
+    assert [(e.run_id, e.status) for e in yielded] == [(0, "failed"), (0, "ok"), (1, "ok")]
+
+
+def test_iter_entries_drops_torn_final_line(tmp_path: Path) -> None:
+    """Same torn-tail tolerance as Manifest.load."""
+    path = _saved_manifest(tmp_path, [_make_entry(0), _make_entry(1)])
+    raw = path.read_bytes()
+    truncated = raw.rstrip(b"\n")[: -len(b'"run_id": 1}') // 2]
+    path.write_bytes(truncated)
+
+    yielded = list(Manifest.iter_entries(path))
+    assert [e.run_id for e in yielded] == [0]
+
+
+def test_iter_entries_empty_file_raises(tmp_path: Path) -> None:
+    path = tmp_path / "empty.jsonl"
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        list(Manifest.iter_entries(path))
+    assert excinfo.value.path == path
+
+
+def test_iter_entries_malformed_entry_raises_with_line_number(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0)])
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("{garbage}\n")
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        list(Manifest.iter_entries(path))
+    assert excinfo.value.line_number == 3  # header=1, entry0=2, garbage=3
+
+
+# ---- ManifestCorruptError.line_number ------------------------------------
+
+
+def test_corrupt_error_line_number_set_on_entry_parse_failure(tmp_path: Path) -> None:
+    path = _saved_manifest(tmp_path, [_make_entry(0)])
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("{not valid json}\n")
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest.load(path)
+    assert excinfo.value.line_number == 3
+    assert excinfo.value.path == path
+
+
+def test_corrupt_error_line_number_set_on_header_failure(tmp_path: Path) -> None:
+    path = tmp_path / "bad.jsonl"
+    path.write_text("{not valid json\n", encoding="utf-8")
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest.load(path)
+    assert excinfo.value.line_number == 1
+
+
+def test_corrupt_error_line_number_none_on_empty_file(tmp_path: Path) -> None:
+    """Empty file has no line to point at — line_number stays None."""
+    path = tmp_path / "empty.jsonl"
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest.load(path)
+    assert excinfo.value.line_number is None
+
+
+# ---- Schema-migration shim -----------------------------------------------
+
+
+def test_migrate_header_v1_to_v1_is_pass_through(tmp_path: Path) -> None:
+    """The shim exists so future bumps have a place to hang per-version steps;
+    today the v1 → v1 path returns the dict unchanged."""
+    m = _make_manifest()
+    header = m._header_dict()
+    migrated = Manifest._migrate_header(header, MANIFEST_SCHEMA_VERSION, tmp_path / "x.jsonl")
+    assert migrated is header  # identity pass-through
+
+
+def test_migrate_header_unknown_lower_version_raises_with_path(tmp_path: Path) -> None:
+    """If a hypothetical v0 manifest reaches the shim with no migration written,
+    we raise ManifestCorruptError with the path (not silently produce a malformed
+    Manifest). Today there are no lower versions, but the guard rail exists for
+    when there are."""
+    path = tmp_path / "manifest.jsonl"
+    with pytest.raises(ManifestCorruptError) as excinfo:
+        Manifest._migrate_header({}, from_version=0, path=path)
+    assert excinfo.value.path == path
+    assert excinfo.value.line_number == 1
+
+
+# ---- fsync cadence knob --------------------------------------------------
+
+
+def test_fsync_each_default_true_fsyncs_every_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os as os_module
+
+    fsynced: list[int] = []
+    real_fsync = os_module.fsync
+
+    def fake_fsync(fd: int) -> None:
+        fsynced.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr("gmat_sweep.manifest.os.fsync", fake_fsync)
+
+    m = _make_manifest()
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    fsynced.clear()
+
+    for i in range(5):
+        m.append_entry(_make_entry(run_id=i))
+    assert len(fsynced) == 5  # one per append
+
+
+def test_fsync_each_false_fsyncs_only_on_batch_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os as os_module
+
+    fsynced: list[int] = []
+    real_fsync = os_module.fsync
+
+    def fake_fsync(fd: int) -> None:
+        fsynced.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr("gmat_sweep.manifest.os.fsync", fake_fsync)
+
+    m = _make_manifest()
+    m.fsync_each = False
+    m.fsync_batch = 3
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    fsynced.clear()
+
+    # 7 appends with batch=3 should fsync at counts 3 and 6: 2 fsyncs total.
+    for i in range(7):
+        m.append_entry(_make_entry(run_id=i))
+    assert len(fsynced) == 2
+
+
+def test_fsync_each_false_close_flushes_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """close() must fsync the file (and parent dir) so the trailing batch
+    becomes durable on normal shutdown."""
+    import os as os_module
+
+    fsynced: list[int] = []
+    real_fsync = os_module.fsync
+
+    def fake_fsync(fd: int) -> None:
+        fsynced.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr("gmat_sweep.manifest.os.fsync", fake_fsync)
+
+    m = _make_manifest()
+    m.fsync_each = False
+    m.fsync_batch = 100  # so no append triggers fsync
+    path = tmp_path / "manifest.jsonl"
+    m.save(path)
+    fsynced.clear()
+
+    for i in range(5):
+        m.append_entry(_make_entry(run_id=i))
+    assert fsynced == []  # batch boundary not reached
+
+    m.close()
+    assert len(fsynced) >= 1  # file fsync; parent dir fsync is best-effort
+
+
+def test_close_no_op_when_unbound() -> None:
+    """close() on a Manifest with no path is a silent no-op."""
+    m = _make_manifest()
+    m.close()  # must not raise
+
+
+def test_load_then_append_with_fsync_each_false_writes_durable_batches(tmp_path: Path) -> None:
+    """End-to-end: load a manifest, opt into batched fsyncs, append, and the
+    on-disk file is still parseable at every point (we just delay durability)."""
+    path = _saved_manifest(tmp_path, [_make_entry(0)])
+    m = Manifest.load(path)
+    m.fsync_each = False
+    m.fsync_batch = 4
+    for i in range(1, 5):
+        m.append_entry(_make_entry(run_id=i))
+    m.close()
+
+    reloaded = Manifest.load(path)
+    assert sorted(e.run_id for e in reloaded.entries) == [0, 1, 2, 3, 4]

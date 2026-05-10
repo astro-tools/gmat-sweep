@@ -68,9 +68,14 @@ class ManifestCorruptError(GmatSweepError):
     """Raised when a sweep manifest cannot be parsed.
 
     The ``path`` attribute points at the offending file so callers can
-    surface it in error messages without re-deriving the path.
+    surface it in error messages without re-deriving the path. The
+    optional ``line_number`` attribute is the 1-indexed line in the file
+    that failed to parse — set by :meth:`gmat_sweep.Manifest.load` when the
+    failure is localised to one line, ``None`` for whole-file failures
+    (e.g. an empty file).
     """
 
-    def __init__(self, message: str, path: Path) -> None:
+    def __init__(self, message: str, path: Path, line_number: int | None = None) -> None:
         self.path = path
+        self.line_number = line_number
         super().__init__(message)

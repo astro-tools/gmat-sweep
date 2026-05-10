@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -58,14 +58,17 @@ compatibility policy that governs future bumps.
 
 
 def canonical_script_sha256(script_path: Path) -> str:
-    """SHA-256 of the script file after line-ending and trailing-newline normalisation.
+    """SHA-256 of the script file after BOM, line-ending, and trailing-newline normalisation.
 
-    Reads the file as bytes, decodes as UTF-8, replaces ``\\r\\n`` and
-    lone ``\\r`` with ``\\n``, and ensures exactly one trailing ``\\n``.
-    The hash is computed over the resulting UTF-8 bytes.
+    Reads the file as bytes, decodes as UTF-8, strips a leading UTF-8
+    byte-order mark (``\\ufeff``), replaces ``\\r\\n`` and lone ``\\r``
+    with ``\\n``, and ensures exactly one trailing ``\\n``. The hash is
+    computed over the resulting UTF-8 bytes — a script saved from a
+    BOM-emitting Windows editor and the same script saved without a
+    BOM produce identical hashes.
     """
     raw = script_path.read_bytes().decode("utf-8")
-    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    text = raw.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
     canonical = text.rstrip("\n") + "\n"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -176,6 +179,23 @@ class Manifest:
     backend: str = "unknown"
     schema_version: int = MANIFEST_SCHEMA_VERSION
     entries: list[ManifestEntry] = field(default_factory=list)
+    fsync_each: bool = field(default=True, compare=False)
+    """When ``True`` (default), every :meth:`append_entry` fsyncs the file.
+
+    Set to ``False`` and tune :attr:`fsync_batch` to amortise the fsync
+    cost across a batch of entries — useful for sub-second runs at large
+    counts where the per-entry fsync dominates the driver's time. The
+    durability tradeoff is documented in ``docs/manifest-schema.md`` and
+    on :meth:`append_entry`. Not serialised — this is a per-process
+    knob, not part of the on-disk format.
+    """
+    fsync_batch: int = field(default=50, compare=False)
+    """Fsync interval (in entries) when :attr:`fsync_each` is ``False``.
+
+    With ``fsync_each=False``, :meth:`append_entry` fsyncs after every
+    ``fsync_batch`` entries (and :meth:`close` fsyncs the tail). Has no
+    effect when ``fsync_each=True``.
+    """
     _path: Path | None = field(default=None, init=False, repr=False, compare=False)
 
     def _header_dict(self) -> dict[str, Any]:
@@ -192,6 +212,31 @@ class Manifest:
             "run_count": self.run_count,
             "backend": self.backend,
         }
+
+    @classmethod
+    def _migrate_header(cls, data: dict[str, Any], from_version: int, path: Path) -> dict[str, Any]:
+        """Migrate a header dict from ``from_version`` to :data:`MANIFEST_SCHEMA_VERSION`.
+
+        Pass-through for ``from_version == MANIFEST_SCHEMA_VERSION``.
+        The ladder exists so a future schema bump has a single place to
+        register a per-version migration step — when v2 lands, the v1 →
+        v2 transformation goes here and :meth:`load` keeps working
+        unchanged on v1 manifests.
+
+        ``path`` is forwarded only for error reporting if the ladder is
+        ever asked for a migration that hasn't been written.
+        """
+        if from_version == MANIFEST_SCHEMA_VERSION:
+            return data
+        # Future v1 → v2 (and beyond) migrations chain here. Reaching this
+        # branch with no path raises so an unimplemented schema bump fails
+        # loudly rather than silently producing a malformed Manifest.
+        raise ManifestCorruptError(
+            f"no migration path from manifest schema_version={from_version} "
+            f"to current version {MANIFEST_SCHEMA_VERSION}",
+            path,
+            line_number=1,
+        )
 
     @classmethod
     def _header_from_dict(cls, data: dict[str, Any]) -> Manifest:
@@ -230,90 +275,223 @@ class Manifest:
         self._path = path
 
     def append_entry(self, entry: ManifestEntry) -> None:
-        """Append one entry to the bound file with fsync, and to the in-memory list."""
+        """Append one entry to the bound file, and to the in-memory list.
+
+        With :attr:`fsync_each` ``True`` (default), every appended entry
+        is fsynced before this method returns — strict per-entry
+        durability, matching the v0.3 behaviour. With ``fsync_each``
+        ``False``, the file is fsynced only on the boundary set by
+        :attr:`fsync_batch` (every Nth entry); the tail is not durable
+        until :meth:`close` is called or the next batch boundary is
+        crossed. A host crash between fsync boundaries can therefore
+        lose up to ``fsync_batch - 1`` recently-appended entries — the
+        Parquet outputs and the runs themselves are unaffected, and the
+        resume flow re-runs only the missing slice.
+        """
         if self._path is None:
             raise RuntimeError(
                 "Manifest.append_entry requires a path — call save() or load() first."
             )
         line = json.dumps(entry.to_dict(), sort_keys=True) + "\n"
+        # Compute durability boundary against the count *after* this append
+        # so the very first entry doesn't trigger a fsync on the
+        # ``len(entries) + 1 == 1`` edge case when ``fsync_batch`` divides 1.
+        new_count = len(self.entries) + 1
+        should_fsync = self.fsync_each or (new_count % max(1, self.fsync_batch) == 0)
         with open(self._path, "a", encoding="utf-8") as f:
             f.write(line)
             f.flush()
-            os.fsync(f.fileno())
+            if should_fsync:
+                os.fsync(f.fileno())
         self.entries.append(entry)
+
+    def close(self) -> None:
+        """Fsync the manifest file and parent directory.
+
+        Idempotent and a no-op when the manifest has no bound path
+        (i.e. neither :meth:`save` nor :meth:`load` has been called).
+        Sweeps that opt into :attr:`fsync_each` ``False`` should call
+        this on successful completion so the trailing batch of entries
+        becomes durable; a ``KeyboardInterrupt`` deliberately skips
+        ``close()`` so the resume flow exercises the
+        ``fsync_batch - 1``-entry recovery window.
+        """
+        if self._path is None:
+            return
+        with open(self._path, "a", encoding="utf-8") as f:
+            os.fsync(f.fileno())
+        _fsync_dir(self._path.parent)
 
     @classmethod
     def load(cls, path: Path) -> Manifest:
-        """Load a manifest from disk, tolerating a single torn final line."""
+        """Load a manifest from disk, tolerating a single torn final line.
+
+        Materialises every entry into the returned :class:`Manifest`'s
+        :attr:`entries` list, deduplicated last-wins per ``run_id``.
+        For tail-only operations on large manifests prefer
+        :meth:`iter_entries`, :meth:`find_failed`, or
+        :meth:`find_missing` — they stream the file without holding
+        every entry in memory.
+        """
         path = Path(path)
-        with open(path, encoding="utf-8") as f:
-            raw = f.read()
-
-        if not raw:
-            raise ManifestCorruptError("manifest file is empty", path)
-
-        # Split on '\n' and drop the last element. For a clean
-        # newline-terminated file this drops the trailing empty string; for a
-        # torn write (missing trailing newline) it drops the partial line.
-        complete_lines = raw.split("\n")[:-1]
-
-        if not complete_lines:
-            raise ManifestCorruptError("manifest header line missing", path)
-
-        try:
-            header_data = json.loads(complete_lines[0])
-        except json.JSONDecodeError as exc:
-            raise ManifestCorruptError(f"manifest header is not valid JSON: {exc}", path) from exc
-
-        # v0.1 manifests omit schema_version; treat as 1. Anything strictly
-        # greater than the running gmat-sweep's supported version is unparseable
-        # by definition — newer schemas may have changed semantics on existing
-        # fields, and we cannot tell from here which fields are still safe.
-        try:
-            schema_version = int(header_data.get("schema_version", 1))
-        except (TypeError, ValueError) as exc:
-            raise ManifestCorruptError(
-                f"manifest schema_version is not an integer: {header_data.get('schema_version')!r}",
-                path,
-            ) from exc
-        if schema_version > MANIFEST_SCHEMA_VERSION:
-            raise ManifestCorruptError(
-                f"manifest schema_version={schema_version} is newer than this gmat-sweep supports",
-                path,
-            )
-
-        try:
-            manifest = cls._header_from_dict(header_data)
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ManifestCorruptError(f"manifest header is missing fields: {exc}", path) from exc
-
+        manifest, entries_iter = cls._load_header_and_entries_iter(path)
         # Last-wins per run_id: a resumed run appends a new entry with the
         # same run_id as the original failed entry. We keep only the last
         # occurrence's content but preserve the position of the first
         # occurrence so unique-run_id manifests load in file order unchanged.
         by_run_id: dict[int, ManifestEntry] = {}
-        for i, line in enumerate(complete_lines[1:], start=2):
-            try:
-                entry_data = json.loads(line)
-                entry = ManifestEntry.from_dict(entry_data)
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-                raise ManifestCorruptError(
-                    f"manifest entry on line {i} is malformed: {exc}", path
-                ) from exc
+        for entry in entries_iter:
             by_run_id[entry.run_id] = entry
         manifest.entries.extend(by_run_id.values())
-
         manifest._path = path
         return manifest
 
-    def find_failed(self) -> list[int]:
-        """Return run_ids of entries with status ``failed``, in arrival order."""
-        return [e.run_id for e in self.entries if e.status == "failed"]
+    @classmethod
+    def iter_entries(cls, path: Path) -> Iterator[ManifestEntry]:
+        """Stream parsed entries from disk, lazily, without folding duplicates.
 
-    def find_missing(self, expected_run_ids: Iterable[int]) -> list[int]:
-        """Return run_ids in ``expected_run_ids`` with no entry recorded, in input order."""
-        present = {e.run_id for e in self.entries}
+        Yields one :class:`ManifestEntry` per non-header line in file
+        order; tolerates a single torn final line the same way
+        :meth:`load` does (a partial trailing line is silently dropped).
+        Validates the header (schema version, required fields) before
+        the first yield, raising :class:`ManifestCorruptError` with
+        ``line_number=1`` on header failures and ``line_number=i`` on
+        per-line failures.
+
+        Use this for tail-only scans (per-``run_id`` last-status folds,
+        membership checks) where holding every entry in memory would be
+        wasteful — :meth:`find_failed` and :meth:`find_missing` are
+        built on top. Use :meth:`load` when you need the
+        deduplicated, fully-materialised entry list.
+        """
+        _, entries_iter = cls._load_header_and_entries_iter(Path(path))
+        yield from entries_iter
+
+    @classmethod
+    def find_failed(cls, path: Path) -> list[int]:
+        """Return ``run_id``s whose latest entry has ``status == "failed"``, in first-seen order.
+
+        Streams ``path`` via :meth:`iter_entries` and folds per-``run_id``
+        last-wins state into a small dict — does not materialise the
+        full entry list. Result matches ``[e.run_id for e in
+        Manifest.load(path).entries if e.status == "failed"]`` while
+        running in O(entries) time and O(unique run_ids) memory.
+        """
+        last_status: dict[int, RunStatus] = {}
+        first_seen_order: list[int] = []
+        for entry in cls.iter_entries(Path(path)):
+            if entry.run_id not in last_status:
+                first_seen_order.append(entry.run_id)
+            last_status[entry.run_id] = entry.status
+        return [rid for rid in first_seen_order if last_status[rid] == "failed"]
+
+    @classmethod
+    def find_missing(cls, path: Path, expected_run_ids: Iterable[int]) -> list[int]:
+        """Return ``run_id``s in ``expected_run_ids`` with no entry on disk, in input order."""
+        present: set[int] = set()
+        for entry in cls.iter_entries(Path(path)):
+            present.add(entry.run_id)
         return [rid for rid in expected_run_ids if rid not in present]
+
+    @classmethod
+    def _load_header_and_entries_iter(cls, path: Path) -> tuple[Manifest, Iterator[ManifestEntry]]:
+        """Parse and migrate the header, then return the manifest plus a lazy entry iterator.
+
+        Shared core of :meth:`load` and :meth:`iter_entries` — the header
+        parse and schema-version handling are identical; only the
+        downstream consumption (dedup-into-memory vs. yield-as-you-go)
+        differs. The entries iterator owns the open file handle and
+        closes it on exhaustion.
+        """
+        path = Path(path)
+        # Header is small; read it eagerly so schema validation can fail
+        # before we hand the iterator to the caller. Entries are read
+        # lazily by ``_iter_entries_from_open_file``.
+        f = open(path, encoding="utf-8")  # noqa: SIM115 — closed by the entries iterator
+        try:
+            first_line = f.readline()
+            if not first_line:
+                raise ManifestCorruptError("manifest file is empty", path)
+            if not first_line.endswith("\n"):
+                # The only line in the file has no trailing \n — torn header.
+                raise ManifestCorruptError("manifest header line missing", path, line_number=1)
+            try:
+                header_data = json.loads(first_line)
+            except json.JSONDecodeError as exc:
+                raise ManifestCorruptError(
+                    f"manifest header is not valid JSON: {exc}", path, line_number=1
+                ) from exc
+
+            # v0.1 manifests omit schema_version; treat as 1. Anything strictly
+            # greater than the running gmat-sweep's supported version is unparseable
+            # by definition — newer schemas may have changed semantics on existing
+            # fields, and we cannot tell from here which fields are still safe.
+            try:
+                schema_version = int(header_data.get("schema_version", 1))
+            except (TypeError, ValueError) as exc:
+                raise ManifestCorruptError(
+                    f"manifest schema_version is not an integer: "
+                    f"{header_data.get('schema_version')!r}",
+                    path,
+                    line_number=1,
+                ) from exc
+            if schema_version > MANIFEST_SCHEMA_VERSION:
+                raise ManifestCorruptError(
+                    f"manifest schema_version={schema_version} "
+                    f"is newer than this gmat-sweep supports",
+                    path,
+                    line_number=1,
+                )
+
+            migrated = cls._migrate_header(header_data, schema_version, path)
+
+            try:
+                manifest = cls._header_from_dict(migrated)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ManifestCorruptError(
+                    f"manifest header is missing fields: {exc}", path, line_number=1
+                ) from exc
+        except BaseException:
+            f.close()
+            raise
+
+        return manifest, cls._iter_entries_from_open_file(f, path)
+
+    @staticmethod
+    def _iter_entries_from_open_file(f: Any, path: Path) -> Iterator[ManifestEntry]:
+        """Yield entries from an open file positioned past the header.
+
+        Buffers one line ahead so a torn final line (no trailing ``\\n``)
+        can be detected and silently dropped — matches :meth:`load`'s
+        ``raw.split("\\n")[:-1]`` torn-tail tolerance. Closes the file on
+        exhaustion or exception.
+        """
+        try:
+            prev_line: str | None = None
+            prev_line_no = 0
+            line_no = 1  # header was line 1
+            for line in f:
+                line_no += 1
+                if prev_line is not None:
+                    yield Manifest._parse_entry_line(prev_line, path, prev_line_no)
+                prev_line = line
+                prev_line_no = line_no
+            if prev_line is not None and prev_line.endswith("\n"):
+                yield Manifest._parse_entry_line(prev_line, path, prev_line_no)
+        finally:
+            f.close()
+
+    @staticmethod
+    def _parse_entry_line(line: str, path: Path, line_no: int) -> ManifestEntry:
+        try:
+            entry_data = json.loads(line)
+            return ManifestEntry.from_dict(entry_data)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise ManifestCorruptError(
+                f"manifest entry on line {line_no} is malformed: {exc}",
+                path,
+                line_number=line_no,
+            ) from exc
 
     @property
     def extension_run_count(self) -> int:

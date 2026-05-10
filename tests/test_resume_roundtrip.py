@@ -102,8 +102,7 @@ def test_16_run_grid_with_3_failures_resumes_to_all_ok(
         progress=False,
     )
 
-    first_pass = Manifest.load(out / "manifest.jsonl")
-    assert sorted(first_pass.find_failed()) == [3, 7, 11]
+    assert sorted(Manifest.find_failed(out / "manifest.jsonl")) == [3, 7, 11]
 
     # Patch the failure source out and resume.
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
@@ -168,8 +167,8 @@ def test_monte_carlo_resume_preserves_bit_equal_draws_for_failed_runs(
         progress=False,
     )
 
+    assert 3 in Manifest.find_failed(out / "manifest.jsonl")
     pre_resume = Manifest.load(out / "manifest.jsonl")
-    assert 3 in pre_resume.find_failed()
     pre_overrides = {e.run_id: e.overrides for e in pre_resume.entries}
 
     # Resume with no failure source.

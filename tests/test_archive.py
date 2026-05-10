@@ -245,8 +245,7 @@ def test_failed_runs_are_packed_without_parquet_with_stderr_intact(
         progress=False,
     )
 
-    pre = Manifest.load(out / "manifest.jsonl")
-    failed = pre.find_failed()
+    failed = Manifest.find_failed(out / "manifest.jsonl")
     assert len(failed) == 1
     failed_run_id = failed[0]
 
