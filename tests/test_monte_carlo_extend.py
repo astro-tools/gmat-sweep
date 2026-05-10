@@ -137,7 +137,7 @@ def test_extension_run_count_is_zero_for_fresh_monte_carlo(
         n=10,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -156,7 +156,7 @@ def test_extension_run_count_is_positive_after_extend(
         n=10,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -164,7 +164,7 @@ def test_extension_run_count_is_positive_after_extend(
         out / "manifest.jsonl",
         script,
         n=15,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         progress=False,
     )
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -186,7 +186,7 @@ def test_extension_run_count_is_zero_for_grid_manifest(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -206,7 +206,7 @@ def test_extend_refuses_grid_manifest(tmp_path: Path, fake_gmat_run: FakeGmatRun
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -215,7 +215,7 @@ def test_extend_refuses_grid_manifest(tmp_path: Path, fake_gmat_run: FakeGmatRun
             out / "manifest.jsonl",
             script,
             n=5,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )
 
@@ -254,7 +254,7 @@ def test_extend_refuses_when_base_has_failed_runs(
         n=10,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -264,7 +264,7 @@ def test_extend_refuses_when_base_has_failed_runs(
             out / "manifest.jsonl",
             script,
             n=5,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )
 
@@ -278,7 +278,7 @@ def test_extend_validates_n_positive(tmp_path: Path, fake_gmat_run: FakeGmatRun)
         n=4,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -287,7 +287,7 @@ def test_extend_validates_n_positive(tmp_path: Path, fake_gmat_run: FakeGmatRun)
             out / "manifest.jsonl",
             script,
             n=0,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )
 
@@ -303,7 +303,7 @@ def test_extend_refuses_on_script_drift(tmp_path: Path, fake_gmat_run: FakeGmatR
         n=4,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -313,7 +313,7 @@ def test_extend_refuses_on_script_drift(tmp_path: Path, fake_gmat_run: FakeGmatR
             out / "manifest.jsonl",
             script,
             n=2,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )
 
@@ -334,7 +334,7 @@ def test_latin_hypercube_extend_refuses_with_clear_message(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -343,6 +343,6 @@ def test_latin_hypercube_extend_refuses_with_clear_message(
             out / "manifest.jsonl",
             script,
             n=4,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )

@@ -68,7 +68,7 @@ def test_each_row_value_observed_via_mission_setitem_before_run(
     fake_gmat_run.module.Mission = SimpleNamespace(load=_load)  # type: ignore[attr-defined]
 
     samples = pd.DataFrame({"Sat.SMA": sma_values})
-    sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=out, progress=False)
+    sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=out, progress=False)
 
     # Every run_id observed exactly its own row's Sat.SMA, set before run().
     assert set(per_run_observations.keys()) == {0, 1, 2, 3}
@@ -100,7 +100,7 @@ def test_manifest_parameter_spec_reconstructs_input_dataframe(
             "Sat.ECC": [0.001, 0.002, 0.003, 0.004],
         }
     )
-    sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=out, progress=False)
+    sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=out, progress=False)
 
     manifest = Manifest.load(out / "manifest.jsonl")
     spec = manifest.parameter_spec

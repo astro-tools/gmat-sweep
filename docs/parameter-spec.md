@@ -335,7 +335,7 @@ core. Pass an explicit pool via `backend=` to:
     df = sweep(
         "mission.script",
         grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-        backend=LocalJoblibPool(workers=4),
+        backend=LocalJoblibPool(max_workers=4),
         out="./sweep",
     )
     ```
@@ -347,7 +347,7 @@ core. Pass an explicit pool via `backend=` to:
     ```python
     from gmat_sweep import LocalJoblibPool, monte_carlo, sweep
 
-    with LocalJoblibPool(workers=8) as pool:
+    with LocalJoblibPool(max_workers=8) as pool:
         baseline = sweep(
             "mission.script",
             grid={"Sat.DryMass": [100.0, 150.0, 200.0]},

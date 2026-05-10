@@ -85,7 +85,7 @@ def build_pool(backend: Backend, workers: int) -> Pool:
     the local-backend benchmark.
     """
     if backend == "local":
-        return LocalJoblibPool(workers=workers)
+        return LocalJoblibPool(max_workers=workers)
     if backend == "dask":
         from gmat_sweep.backends.dask import DaskPool
 

@@ -39,12 +39,23 @@ store. :class:`RunSpec` is :func:`dataclasses.dataclass` with
 JSON-encodable fields, well within Ray's serialisation surface; values
 inside ``overrides`` and ``run_options`` must already be JSON-encodable
 per the v0.1 spec contract.
+
+Transport-failure semantics
+---------------------------
+
+A worker-side exception that escapes the remote task — ``RayTaskError``
+from a worker crash, a serialisation fault, … — is caught at the drain
+site (``ray.get`` in :meth:`as_completed`) and folded into a synthetic
+:meth:`gmat_sweep.spec.RunOutcome.failed` so the parent sweep does not
+abort on a single transport failure.
 """
 
 from __future__ import annotations
 
+import traceback
 from collections.abc import Iterable, Iterator
 from concurrent.futures import Future
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from gmat_sweep.backends._subprocess import run_spec_in_subprocess
@@ -138,6 +149,7 @@ class RayPool(Pool):
 
         wanted = list(futures)
         future_by_run_id: dict[int, Future[RunOutcome]] = {}
+        run_id_by_ref: dict[Any, int] = {}
         object_refs: list[Any] = []
         for f in wanted:
             spec = self._pending.pop(f, None)
@@ -146,15 +158,30 @@ class RayPool(Pool):
                     "Future was not submitted to this pool, or has already been drained"
                 )
             future_by_run_id[spec.run_id] = f
-            object_refs.append(self._remote_run_one.remote(spec))
+            ref = self._remote_run_one.remote(spec)
+            object_refs.append(ref)
+            run_id_by_ref[ref] = spec.run_id
 
         unready: list[Any] = list(object_refs)
         while unready:
-            ready, unready = self._ray.wait(unready, num_returns=1)
-            outcome: RunOutcome = self._ray.get(ready[0])
-            f = future_by_run_id.pop(outcome.run_id)
-            f.set_result(outcome)
-            yield outcome
+            # ``fetch_local=True`` primes the local object store with the
+            # ready refs as part of the wait, so the per-ref ``ray.get``
+            # below is an in-store read rather than a second network
+            # round-trip. The old shape — ``wait(num_returns=1)`` then a
+            # separate ``ray.get(ready[0])`` — paid two trips per outcome.
+            ready, unready = self._ray.wait(unready, num_returns=1, fetch_local=True)
+            for ref in ready:
+                run_id = run_id_by_ref[ref]
+                try:
+                    outcome: RunOutcome = self._ray.get(ref)
+                except Exception as exc:
+                    # ``RayTaskError`` (a remote-side raise that escaped
+                    # ``run_one``) or a Ray transport error — fold into a
+                    # synthetic failed outcome so the sweep does not abort.
+                    outcome = _failed_outcome(run_id, "".join(traceback.format_exception(exc)))
+                f = future_by_run_id.pop(outcome.run_id)
+                f.set_result(outcome)
+                yield outcome
 
     def close(self) -> None:
         if self._closed:
@@ -167,3 +194,8 @@ class RayPool(Pool):
         finally:
             if self._owns_runtime:
                 self._ray.shutdown()
+
+
+def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)

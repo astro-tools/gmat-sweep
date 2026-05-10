@@ -30,7 +30,6 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gmat_sweep.backends._subprocess import run_spec_in_subprocess
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.backends.process_pool import ProcessPoolExecutorPool
 from gmat_sweep.errors import BackendError
@@ -203,10 +202,18 @@ def test_default_dispatches_run_one_directly(
     assert captured[0][0] is run_one
 
 
-def test_reuse_gmat_context_false_dispatches_subprocess_hop(
+def test_reuse_gmat_context_false_still_dispatches_run_one_directly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """``reuse_gmat_context=False`` dispatches ``run_spec_in_subprocess`` per task."""
+    """``reuse_gmat_context=False`` still dispatches ``run_one`` directly.
+
+    The pool hardcodes ``max_tasks_per_child=1``, so every task already
+    runs in a fresh interpreter. Routing through
+    ``run_spec_in_subprocess`` for the ``reuse_gmat_context=False`` mode
+    would just double-pay the subprocess hop without changing the
+    contract; the pool collapses both modes onto the direct ``run_one``
+    path.
+    """
     captured: _StubCapture = []
 
     def _stub_submit(
@@ -226,4 +233,72 @@ def test_reuse_gmat_context_false_dispatches_subprocess_hop(
         list(pool.as_completed([f]))
 
     assert len(captured) == 1
-    assert captured[0][0] is run_spec_in_subprocess
+    assert captured[0][0] is run_one
+
+
+def test_worker_side_exception_folds_into_failed_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A task whose future ``.result()`` raises is folded into ``RunOutcome.failed``.
+
+    Simulates the transport-failure path (e.g. ``BrokenProcessPool``)
+    where the executor's future surfaces an exception instead of the
+    expected outcome. The drain loop must keep the sweep alive and
+    capture the traceback on the synthetic failed outcome's ``stderr``.
+    """
+
+    def _stub_submit(
+        self: ProcessPoolExecutor,
+        fn: Callable[[RunSpec], RunOutcome],
+        spec: RunSpec,
+    ) -> Future[RunOutcome]:
+        f: Future[RunOutcome] = Future()
+        f.set_exception(RuntimeError("worker exploded"))
+        return f
+
+    monkeypatch.setattr(ProcessPoolExecutor, "submit", _stub_submit)
+
+    with ProcessPoolExecutorPool(max_workers=1) as pool:
+        f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+        outcomes = list(pool.as_completed([f]))
+
+    assert len(outcomes) == 1
+    assert outcomes[0].run_id == 0
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].stderr is not None
+    assert "worker exploded" in outcomes[0].stderr
+    assert f.done()
+    assert f.result() is outcomes[0]
+
+
+def test_one_failed_run_does_not_abort_other_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mixed batch: run 1 raises, runs 0 and 2 return outcomes — sweep yields all three."""
+    submitted: list[RunSpec] = []
+
+    def _stub_submit(
+        self: ProcessPoolExecutor,
+        fn: Callable[[RunSpec], RunOutcome],
+        spec: RunSpec,
+    ) -> Future[RunOutcome]:
+        submitted.append(spec)
+        f: Future[RunOutcome] = Future()
+        if spec.run_id == 1:
+            f.set_exception(RuntimeError("rank 1 down"))
+        else:
+            f.set_result(_ok_outcome(spec.run_id))
+        return f
+
+    monkeypatch.setattr(ProcessPoolExecutor, "submit", _stub_submit)
+
+    with ProcessPoolExecutorPool(max_workers=1) as pool:
+        futures = [
+            pool.submit(_make_spec(output_dir=tmp_path / f"run_{i}", run_id=i)) for i in range(3)
+        ]
+        outcomes = sorted(pool.as_completed(futures), key=lambda o: o.run_id)
+
+    assert [o.run_id for o in outcomes] == [0, 1, 2]
+    assert [o.status for o in outcomes] == ["ok", "failed", "ok"]
+    assert outcomes[1].stderr is not None
+    assert "rank 1 down" in outcomes[1].stderr

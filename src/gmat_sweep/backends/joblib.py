@@ -15,9 +15,15 @@ Submission semantics:
   :func:`gmat_sweep.worker.run_one` (when ``reuse_gmat_context=True``) or
   :func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess` (when
   ``reuse_gmat_context=False``), and yields :class:`RunOutcome` values in
-  completion order, marking each future done as it goes.
-- :meth:`close` exits the underlying ``Parallel`` context, terminating loky
-  workers, and cancels any still-pending futures.
+  completion order, marking each future done as it goes. A worker-side
+  exception that escapes the task callable (loky worker death, pickling
+  failure, …) is folded into a synthetic :meth:`RunOutcome.failed` carrying
+  the formatted traceback as ``stderr`` so the parent sweep does not abort
+  on a single transport failure.
+- :meth:`close` cancels any still-pending futures and then exits the
+  underlying ``Parallel`` context. Cancellation runs before the loky exit
+  so a parked future whose outcome loky is about to compute on the way out
+  is not silently dropped.
 
 See :class:`gmat_sweep.backends.base.Pool` for the semantics of
 ``reuse_gmat_context``.
@@ -25,8 +31,11 @@ See :class:`gmat_sweep.backends.base.Pool` for the semantics of
 
 from __future__ import annotations
 
+import traceback
+import warnings
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future
+from datetime import datetime, timezone
 
 import joblib
 
@@ -44,10 +53,14 @@ class LocalJoblibPool(Pool):
 
     Parameters
     ----------
-    workers:
+    max_workers:
         Number of loky worker processes. ``-1`` (the default) uses every
         available core. Any other negative value or ``0`` is rejected with
-        :class:`gmat_sweep.errors.BackendError`.
+        :class:`gmat_sweep.errors.BackendError`. ``workers=`` is accepted as
+        a deprecated alias.
+    workers:
+        Deprecated alias for ``max_workers=``. Emits a
+        :class:`DeprecationWarning`; will be removed in a future release.
     reuse_gmat_context:
         ``True`` (default) dispatches each task as
         :func:`gmat_sweep.worker.run_one`, which imports ``gmat_run`` once
@@ -61,18 +74,38 @@ class LocalJoblibPool(Pool):
         :class:`gmat_sweep.backends.base.Pool` for the contract.
     """
 
-    def __init__(self, workers: int = -1, *, reuse_gmat_context: bool = True) -> None:
-        if workers == 0 or workers < -1:
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        *,
+        workers: int | None = None,
+        reuse_gmat_context: bool = True,
+    ) -> None:
+        if workers is not None and max_workers is not None:
             raise BackendError(
-                f"workers must be -1 (all cores) or a positive integer, got {workers!r}"
+                "pass either workers= or max_workers=, not both (workers= is the deprecated alias)"
             )
-        self._workers = workers
+        if workers is not None:
+            warnings.warn(
+                "LocalJoblibPool(workers=...) is deprecated and will be removed in "
+                "a future release; pass max_workers= instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            resolved = workers
+        else:
+            resolved = -1 if max_workers is None else max_workers
+        if resolved == 0 or resolved < -1:
+            raise BackendError(
+                f"max_workers must be -1 (all cores) or a positive integer, got {resolved!r}"
+            )
+        self._workers = resolved
         self._reuse_gmat_context = reuse_gmat_context
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
         self._parallel = joblib.Parallel(
             backend="loky",
-            n_jobs=workers,
+            n_jobs=resolved,
             return_as="generator_unordered",
         )
         self._parallel.__enter__()
@@ -103,7 +136,29 @@ class LocalJoblibPool(Pool):
         task_fn: Callable[[RunSpec], RunOutcome] = (
             run_one if self._reuse_gmat_context else run_spec_in_subprocess
         )
-        for outcome in self._parallel(joblib.delayed(task_fn)(s) for s in specs):
+        gen = self._parallel(joblib.delayed(task_fn)(s) for s in specs)
+        while future_by_run_id:
+            try:
+                outcome = next(gen)
+            except StopIteration:
+                break
+            except Exception as exc:
+                # Worker-side transport failure (loky worker death, pickling
+                # error, …): the generator has raised before we could match
+                # an outcome to a run_id. Fold synthetic failures for every
+                # remaining run_id, carrying the captured traceback as
+                # ``stderr``. The Parallel context is unrecoverable after
+                # this point in ``generator_unordered`` mode, so we drain
+                # the leftover futures here rather than try to resume.
+                # KeyboardInterrupt deliberately is not caught — Ctrl-C
+                # should reach the driver.
+                stderr = "".join(traceback.format_exception(exc))
+                for run_id in list(future_by_run_id):
+                    f = future_by_run_id.pop(run_id)
+                    folded = _failed_outcome(run_id, stderr)
+                    f.set_result(folded)
+                    yield folded
+                return
             f = future_by_run_id.pop(outcome.run_id)
             f.set_result(outcome)
             yield outcome
@@ -113,8 +168,13 @@ class LocalJoblibPool(Pool):
             return
         self._closed = True
         try:
-            self._parallel.__exit__(None, None, None)
-        finally:
             for f in self._pending:
                 f.cancel()
             self._pending.clear()
+        finally:
+            self._parallel.__exit__(None, None, None)
+
+
+def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)

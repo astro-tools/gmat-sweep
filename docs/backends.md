@@ -38,12 +38,13 @@ from gmat_sweep import LocalJoblibPool, sweep
 df = sweep(
     "mission.script",
     grid={"Sat.SMA": [7000.0, 7100.0, 7200.0, 7300.0]},
-    backend=LocalJoblibPool(workers=4),
+    backend=LocalJoblibPool(max_workers=4),
     out="./sweep",
 )
 ```
 
-`workers=-1` (the default) uses every core. See
+`max_workers=-1` (the default) uses every core. `workers=` is accepted as
+a deprecated alias and emits a `DeprecationWarning`. See
 [Choosing a backend](parameter-spec.md#choosing-a-backend) on the parameter
 spec page for the full set of LocalJoblibPool patterns (capping
 parallelism, sharing one pool across several sweeps).
@@ -74,6 +75,11 @@ That makes this the natural choice when avoiding the `joblib` runtime
 dependency matters; for a sweep where many runs share the same script,
 `LocalJoblibPool`'s reuse path amortises the bootstrap and finishes
 faster.
+
+`reuse_gmat_context` is accepted for `Pool` API parity but has no
+practical effect on this backend — `max_tasks_per_child=1` already gives
+every task a fresh interpreter, so both modes dispatch `run_one`
+directly without nesting through a second subprocess.
 
 ## `DaskPool` — `dask.distributed`
 
@@ -290,6 +296,16 @@ manifest with `status="failed"`, and the aggregated DataFrame gets one
 NaN-filled row with `__status="failed"`. The
 [killed-sweep recovery example](examples/03_killed_sweep_recovery.ipynb)
 shows the resume flow end-to-end.
+
+The same row-not-raise contract holds for *transport-level* failures
+that escape the worker entirely — a loky / Ray / Dask / MPI worker
+process dying mid-task, a `RayTaskError` from a remote-side raise,
+`BrokenProcessPool` from a `ProcessPoolExecutor` worker crash, an MPI
+rank disappearing under a `SIGSEGV`, a Kubernetes Pod evicted before it
+writes its outcome JSON. Every pool catches the exception at the drain
+site and folds it into a synthetic `RunOutcome.failed` whose `stderr`
+carries the captured traceback, so a single bad worker never aborts the
+sweep.
 
 ## Backend equivalence guarantee
 

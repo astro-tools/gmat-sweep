@@ -86,7 +86,7 @@ from gmat_sweep import LocalJoblibPool, sweep
 df = sweep(
     "mission.script",
     grid={"Sat.SMA": [7000, 7100, 7200]},
-    backend=LocalJoblibPool(workers=8),
+    backend=LocalJoblibPool(max_workers=8),
 )
 print(df)
 ```
@@ -109,7 +109,7 @@ df = monte_carlo(
     "mission.script",
     n=1000,
     perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
-    backend=LocalJoblibPool(workers=8),
+    backend=LocalJoblibPool(max_workers=8),
     seed=42,
 )
 ```

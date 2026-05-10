@@ -128,7 +128,7 @@ def sweep(
         (default) constructs a fresh :class:`LocalJoblibPool` over every
         available core for the duration of the call and closes it on the way
         out. Pass an explicit pool to cap parallelism
-        (``LocalJoblibPool(workers=4)``), to use a different execution
+        (``LocalJoblibPool(max_workers=4)``), to use a different execution
         backend (Dask, Ray, a custom subclass), or to share one pool across
         several sweeps — when supplied, the caller owns the pool's lifecycle
         and ``sweep()`` does not call :meth:`Pool.close`.

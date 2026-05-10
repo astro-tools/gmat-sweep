@@ -74,7 +74,7 @@ def _payload_run_hook() -> Any:
 def test_sweep_repr_html_pre_run(tmp_path: Path) -> None:
     script = _write_script(tmp_path)
     runs = _make_runs(script, tmp_path / "out", n=3)
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -103,7 +103,7 @@ def test_sweep_repr_html_post_run(tmp_path: Path, fake_gmat_run: FakeGmatRun) ->
     script = _write_script(tmp_path)
     output_dir = tmp_path / "out"
     runs = _make_runs(script, output_dir, n=2)
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,
@@ -128,7 +128,7 @@ def test_sweep_repr_html_handles_unreadable_script(tmp_path: Path) -> None:
     # The repr should degrade gracefully rather than blow up the notebook cell.
     script = tmp_path / "missing.script"
     runs: list[RunSpec] = []
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         sweep = Sweep(
             runs=runs,
             backend=pool,

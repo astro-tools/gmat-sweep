@@ -80,7 +80,7 @@ def test_invalid_override_yields_failed_status_and_completes_sweep(
     df = gmat_sweep.sweep(
         leo_basic_script,
         grid={"Sat.NotARealField": [1.0, 2.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -102,7 +102,7 @@ def test_one_invalid_override_does_not_abort_other_runs(
     df = gmat_sweep.sweep(
         leo_basic_script,
         grid={"Sat.SMA": [7000.0, 0.0, 7100.0]},
-        backend=LocalJoblibPool(workers=2),
+        backend=LocalJoblibPool(max_workers=2),
         out=out,
     )
 

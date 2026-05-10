@@ -74,7 +74,7 @@ def test_two_calls_same_seed_produce_bit_equal_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-a",
         progress=False,
     )
@@ -83,7 +83,7 @@ def test_two_calls_same_seed_produce_bit_equal_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-b",
         progress=False,
     )
@@ -102,7 +102,7 @@ def test_different_seeds_produce_distinct_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-42",
         progress=False,
     )
@@ -111,7 +111,7 @@ def test_different_seeds_produce_distinct_dataframes(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=43,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-43",
         progress=False,
     )
@@ -140,7 +140,7 @@ def test_adding_a_second_perturbed_parameter_preserves_first_dataframe_draws(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-one",
         progress=False,
     )
@@ -152,7 +152,7 @@ def test_adding_a_second_perturbed_parameter_preserves_first_dataframe_draws(
             "Sat.INC": ("uniform", 0.0, 90.0),
         },
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "out-two",
         progress=False,
     )
@@ -179,7 +179,7 @@ def test_extend_preserves_original_run_ids_bit_for_bit(
         n=100,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -188,7 +188,7 @@ def test_extend_preserves_original_run_ids_bit_for_bit(
         out / "manifest.jsonl",
         script,
         n=200,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         progress=False,
     )
 
@@ -215,7 +215,7 @@ def test_extend_matches_fresh_full_size_sweep_at_overlap(
         n=100,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=base_out,
         progress=False,
     )
@@ -223,7 +223,7 @@ def test_extend_matches_fresh_full_size_sweep_at_overlap(
         base_out / "manifest.jsonl",
         script,
         n=200,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         progress=False,
     )
 
@@ -232,7 +232,7 @@ def test_extend_matches_fresh_full_size_sweep_at_overlap(
         n=300,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=tmp_path / "fresh",
         progress=False,
     )

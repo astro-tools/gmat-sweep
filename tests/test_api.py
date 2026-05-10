@@ -43,7 +43,7 @@ def test_sweep_returns_multiindexed_dataframe(tmp_path: Path, fake_gmat_run: Fak
     df = sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -63,7 +63,7 @@ def test_sweep_writes_manifest_with_grid_in_header(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         seed=42,
     )
@@ -86,7 +86,7 @@ def test_sweep_string_path_is_accepted(tmp_path: Path, fake_gmat_run: FakeGmatRu
     df = sweep(
         str(script),
         grid={"Sat.SMA": [7000.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -102,7 +102,7 @@ def test_sweep_creates_out_directory_when_missing(
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(workers=1), out=out)
+    sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(max_workers=1), out=out)
 
     assert out.is_dir()
     assert (out / "manifest.jsonl").exists()
@@ -121,7 +121,7 @@ def test_sweep_resolves_relative_out_to_absolute(
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(workers=1), out="rel-out")
+    sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(max_workers=1), out="rel-out")
 
     manifest_path = tmp_path / "rel-out" / "manifest.jsonl"
     manifest = Manifest.load(manifest_path)
@@ -145,7 +145,7 @@ def test_sweep_with_no_out_returns_usable_dataframe(
     df = sweep(
         script,
         grid={"Sat.SMA": [7000.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=None,
     )
 
@@ -172,7 +172,7 @@ def test_sweep_with_no_out_cleans_up_temp_dir_after_df_dropped(
     script = _write_script(tmp_path)
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    df = sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(workers=1), out=None)
+    df = sweep(script, grid={"Sat.SMA": [7000.0]}, backend=LocalJoblibPool(max_workers=1), out=None)
 
     assert len(captured_paths) == 1
     sweep_dir = captured_paths[0]
@@ -202,7 +202,7 @@ def test_sweep_with_failing_run_includes_failed_row(
     df = sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -220,7 +220,7 @@ def test_sweep_with_empty_grid_runs_once(tmp_path: Path, fake_gmat_run: FakeGmat
 
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    df = sweep(script, grid={}, backend=LocalJoblibPool(workers=1), out=out)
+    df = sweep(script, grid={}, backend=LocalJoblibPool(max_workers=1), out=out)
 
     run_ids = sorted(df.index.get_level_values("run_id").unique().tolist())
     assert run_ids == [0]
@@ -246,7 +246,7 @@ def test_sweep_progress_false_quiet_on_stderr(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
         progress=False,
     )
@@ -264,12 +264,12 @@ def test_sweep_default_backend_constructs_local_joblib_pool(
 ) -> None:
     """When ``backend=`` is omitted, ``_run_sweep`` builds a LocalJoblibPool
     and dispatches through it. Verified by intercepting the constructor and
-    forcing ``workers=1`` so the fake ``gmat_run`` is visible to the
+    forcing ``max_workers=1`` so the fake ``gmat_run`` is visible to the
     in-process worker."""
     captured: list[LocalJoblibPool] = []
 
     def _intercept(*_args: Any, **_kwargs: Any) -> LocalJoblibPool:
-        instance = LocalJoblibPool(workers=1)
+        instance = LocalJoblibPool(max_workers=1)
         captured.append(instance)
         return instance
 
@@ -298,7 +298,7 @@ def test_sweep_user_supplied_backend_records_pool_class_name_on_manifest(
     class _CustomLabelPool(LocalJoblibPool):
         pass
 
-    with _CustomLabelPool(workers=1) as pool:
+    with _CustomLabelPool(max_workers=1) as pool:
         sweep(script, grid={"Sat.SMA": [7000.0]}, backend=pool, out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
@@ -313,7 +313,7 @@ def test_sweep_user_supplied_backend_is_not_closed_by_sweep(
     script = _write_script(tmp_path)
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    pool = LocalJoblibPool(workers=1)
+    pool = LocalJoblibPool(max_workers=1)
     try:
         sweep(script, grid={"Sat.SMA": [7000.0]}, backend=pool, out=tmp_path / "out-a")
         # If sweep() had closed the pool, this second call would fail.
@@ -329,7 +329,7 @@ def test_monte_carlo_user_backend_records_pool_class_on_manifest(
     out = tmp_path / "out"
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         monte_carlo(
             script,
             n=4,
@@ -349,7 +349,7 @@ def test_latin_hypercube_user_backend_records_pool_class_on_manifest(
     out = tmp_path / "out"
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
-    with LocalJoblibPool(workers=1) as pool:
+    with LocalJoblibPool(max_workers=1) as pool:
         latin_hypercube(
             script,
             n=4,
@@ -394,7 +394,7 @@ def test_sweep_with_samples_returns_one_run_per_row(
     fake_gmat_run.install_loader(setitem_hook=_setitem, run_hook=_payload_run_hook())
 
     samples = pd.DataFrame({"Sat.SMA": [7000, 7100, 7200, 7300]})
-    df = sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=out)
+    df = sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=out)
 
     run_ids = sorted(df.index.get_level_values("run_id").unique().tolist())
     assert run_ids == [0, 1, 2, 3]
@@ -416,7 +416,7 @@ def test_sweep_with_both_grid_and_samples_raises(
             script,
             grid={"Sat.SMA": [7000.0]},
             samples=pd.DataFrame({"Sat.SMA": [7000.0]}),
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             out=tmp_path / "out",
         )
 
@@ -428,7 +428,7 @@ def test_sweep_with_neither_grid_nor_samples_raises(
     fake_gmat_run.install_loader(run_hook=_payload_run_hook())
 
     with pytest.raises(SweepConfigError, match="one of grid= or samples="):
-        sweep(script, backend=LocalJoblibPool(workers=1), out=tmp_path / "out")
+        sweep(script, backend=LocalJoblibPool(max_workers=1), out=tmp_path / "out")
 
 
 def test_sweep_with_samples_non_default_index_raises(
@@ -442,7 +442,7 @@ def test_sweep_with_samples_non_default_index_raises(
         index=pd.RangeIndex(10, 14),
     )
     with pytest.raises(SweepConfigError, match="default RangeIndex"):
-        sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=tmp_path / "out")
+        sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=tmp_path / "out")
 
 
 def test_sweep_with_grid_writes_grid_kind_in_manifest(
@@ -458,7 +458,7 @@ def test_sweep_with_grid_writes_grid_kind_in_manifest(
     sweep(
         script,
         grid={"Sat.SMA": [7000.0, 7100.0], "Sat.ECC": [0.001, 0.002]},
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -485,7 +485,7 @@ def test_sweep_with_samples_writes_explicit_kind_in_manifest(
             "Sat.ECC": [0.001, 0.002],
         }
     )
-    sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=out)
+    sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
     spec = manifest.parameter_spec
@@ -510,7 +510,7 @@ def test_sweep_with_samples_manifest_round_trips_to_dataframe(
             "Sat.ECC": [0.001, 0.002, 0.003],
         }
     )
-    sweep(script, samples=samples, backend=LocalJoblibPool(workers=1), out=out)
+    sweep(script, samples=samples, backend=LocalJoblibPool(max_workers=1), out=out)
 
     manifest = Manifest.load(out / "manifest.jsonl")
     spec = manifest.parameter_spec
@@ -535,7 +535,7 @@ def test_monte_carlo_returns_n_run_dataframe(tmp_path: Path, fake_gmat_run: Fake
         n=100,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -561,7 +561,7 @@ def test_monte_carlo_two_calls_at_same_seed_produce_equal_overrides(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_a,
     )
     monte_carlo(
@@ -569,7 +569,7 @@ def test_monte_carlo_two_calls_at_same_seed_produce_equal_overrides(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_b,
     )
 
@@ -592,7 +592,7 @@ def test_monte_carlo_different_seed_produces_different_overrides(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_a,
     )
     monte_carlo(
@@ -600,7 +600,7 @@ def test_monte_carlo_different_seed_produces_different_overrides(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=43,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_b,
     )
 
@@ -626,7 +626,7 @@ def test_monte_carlo_adding_a_perturbed_parameter_preserves_other_draws(
         n=20,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_one,
     )
     monte_carlo(
@@ -637,7 +637,7 @@ def test_monte_carlo_adding_a_perturbed_parameter_preserves_other_draws(
             "Sat.INC": ("uniform", 0.0, 90.0),
         },
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out_two,
     )
 
@@ -662,7 +662,7 @@ def test_monte_carlo_accepts_pre_frozen_rv(tmp_path: Path, fake_gmat_run: FakeGm
         n=10,
         perturb={"x": stats.beta(2, 5)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
     assert sorted(df.index.get_level_values("run_id").unique().tolist()) == list(range(10))
@@ -691,7 +691,7 @@ def test_monte_carlo_failed_run_lands_as_nan_row(
         n=8,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -713,7 +713,7 @@ def test_monte_carlo_writes_tagged_parameter_spec(
         n=10,
         perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -736,7 +736,7 @@ def test_monte_carlo_rejects_empty_perturb(tmp_path: Path, fake_gmat_run: FakeGm
             n=10,
             perturb={},
             seed=42,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             out=tmp_path / "out",
         )
 
@@ -751,7 +751,7 @@ def test_monte_carlo_rejects_n_less_than_one(tmp_path: Path, fake_gmat_run: Fake
             n=0,
             perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
             seed=42,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             out=tmp_path / "out",
         )
 
@@ -777,7 +777,7 @@ def test_latin_hypercube_returns_n_run_dataframe(
             "Sat.INC": ("uniform", 0.0, 90.0),
         },
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -799,10 +799,10 @@ def test_latin_hypercube_two_calls_at_same_seed_produce_equal_overrides(
         "Sat.INC": ("uniform", 0.0, 90.0),
     }
     latin_hypercube(
-        script, n=16, perturb=perturb, seed=42, backend=LocalJoblibPool(workers=1), out=out_a
+        script, n=16, perturb=perturb, seed=42, backend=LocalJoblibPool(max_workers=1), out=out_a
     )
     latin_hypercube(
-        script, n=16, perturb=perturb, seed=42, backend=LocalJoblibPool(workers=1), out=out_b
+        script, n=16, perturb=perturb, seed=42, backend=LocalJoblibPool(max_workers=1), out=out_b
     )
 
     a = {e.run_id: e.overrides for e in Manifest.load(out_a / "manifest.jsonl").entries}
@@ -828,7 +828,7 @@ def test_latin_hypercube_writes_tagged_parameter_spec(
             "Sat.INC": ("uniform", 0.0, 90.0),
         },
         seed=42,
-        backend=LocalJoblibPool(workers=1),
+        backend=LocalJoblibPool(max_workers=1),
         out=out,
     )
 
@@ -854,7 +854,7 @@ def test_latin_hypercube_rejects_empty_perturb(tmp_path: Path, fake_gmat_run: Fa
             n=10,
             perturb={},
             seed=42,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             out=tmp_path / "out",
         )
 
@@ -871,6 +871,6 @@ def test_latin_hypercube_rejects_n_less_than_one(
             n=0,
             perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
             seed=42,
-            backend=LocalJoblibPool(workers=1),
+            backend=LocalJoblibPool(max_workers=1),
             out=tmp_path / "out",
         )

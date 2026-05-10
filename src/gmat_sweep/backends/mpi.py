@@ -45,13 +45,24 @@ Lifecycle
 ``MPIPool`` always owns the underlying ``MPIPoolExecutor``. :meth:`close`
 calls :meth:`MPIPoolExecutor.shutdown` with ``wait=True`` so worker-rank
 shutdown is bounded by the pool's context-manager exit.
+
+Transport-failure semantics
+---------------------------
+
+A worker-side exception that escapes the task callable — a generic
+``MPIException`` from a rank that ``SIGSEGV``-ed mid-task, a pickling
+failure, etc. — is caught at the drain site and folded into a synthetic
+:meth:`gmat_sweep.spec.RunOutcome.failed` carrying the formatted traceback
+as ``stderr`` so a single rank crash does not abort the sweep.
 """
 
 from __future__ import annotations
 
+import traceback
 from collections.abc import Iterable, Iterator
 from concurrent.futures import Future
 from concurrent.futures import as_completed as _futures_as_completed
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from gmat_sweep.backends._subprocess import run_spec_in_subprocess
@@ -137,6 +148,7 @@ class MPIPool(Pool):
 
         wanted = list(futures)
         future_by_mpi_future: dict[Future[RunOutcome], Future[RunOutcome]] = {}
+        run_id_by_mpi_future: dict[Future[RunOutcome], int] = {}
         task_fn = run_one if self._reuse_gmat_context else _mpi_run_one_impl
         for f in wanted:
             spec = self._pending.pop(f, None)
@@ -146,10 +158,19 @@ class MPIPool(Pool):
                 )
             mpi_future = self._executor.submit(task_fn, spec)
             future_by_mpi_future[mpi_future] = f
+            run_id_by_mpi_future[mpi_future] = spec.run_id
 
         for mpi_future in _futures_as_completed(future_by_mpi_future):
-            outcome: RunOutcome = mpi_future.result()
             user_future = future_by_mpi_future[mpi_future]
+            run_id = run_id_by_mpi_future[mpi_future]
+            try:
+                outcome: RunOutcome = mpi_future.result()
+            except Exception as exc:
+                # Worker-side transport failure (rank crash, ``MPIException``
+                # from a SIGSEGV on a worker, pickling fault, …). Without
+                # this fold the rank-crash exception would propagate from
+                # ``.result()`` and abort the entire sweep.
+                outcome = _failed_outcome(run_id, "".join(traceback.format_exception(exc)))
             user_future.set_result(outcome)
             yield outcome
 
@@ -163,3 +184,8 @@ class MPIPool(Pool):
             self._pending.clear()
         finally:
             self._executor.shutdown(wait=True)
+
+
+def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
+    now = datetime.now(timezone.utc)
+    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)

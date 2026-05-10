@@ -40,20 +40,33 @@ def _ok_outcome(run_id: int) -> RunOutcome:
 
 
 class _ObjectRef:
-    """Stand-in for a Ray ObjectRef carrying a precomputed outcome."""
+    """Stand-in for a Ray ObjectRef carrying a precomputed outcome.
 
-    def __init__(self, value: RunOutcome) -> None:
+    ``exc`` (optional) lets the stub surface a ``ray.get``-time exception
+    — the analogue of a real ``RayTaskError`` from a remote-side raise.
+    """
+
+    def __init__(self, value: RunOutcome | None, *, exc: BaseException | None = None) -> None:
         self.value = value
+        self.exc = exc
 
 
 class _Remote:
-    """Stand-in for a `ray.remote`-decorated function."""
+    """Stand-in for a `ray.remote`-decorated function.
+
+    A remote callable that raises is captured as ``ObjectRef(exc=...)`` so
+    the surfacing happens on ``ray.get``, matching the real Ray contract
+    where remote-side exceptions surface only on retrieval.
+    """
 
     def __init__(self, fn: Any) -> None:
         self._fn = fn
 
     def remote(self, spec: RunSpec) -> _ObjectRef:
-        return _ObjectRef(self._fn(spec))
+        try:
+            return _ObjectRef(self._fn(spec))
+        except Exception as exc:
+            return _ObjectRef(None, exc=exc)
 
 
 def _patch_ray_with_stubs(
@@ -83,13 +96,18 @@ def _patch_ray_with_stubs(
         return _Remote(fn)
 
     def _wait(
-        refs: list[_ObjectRef], *, num_returns: int = 1
+        refs: list[_ObjectRef],
+        *,
+        num_returns: int = 1,
+        fetch_local: bool = True,
     ) -> tuple[list[_ObjectRef], list[_ObjectRef]]:
         ready = refs[:num_returns]
         unready = refs[num_returns:]
         return ready, unready
 
     def _get(ref: _ObjectRef) -> RunOutcome:
+        if ref.exc is not None:
+            raise ref.exc
         return ref.value
 
     monkeypatch.setattr(ray, "is_initialized", _is_initialized, raising=True)
@@ -246,6 +264,97 @@ def test_as_completed_dispatches_via_remote_and_drains(
         assert f.done()
         assert f.result().status == "ok"
     pool.close()
+
+
+def test_as_completed_uses_fetch_local_in_ray_wait(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``ray.wait`` is called with ``fetch_local=True`` to prime the local store.
+
+    The pre-fix shape paid two network round-trips per outcome:
+    ``ray.wait(num_returns=1)`` then a separate ``ray.get(ready[0])``. The
+    ``fetch_local=True`` knob collapses that into one round-trip — pinning
+    the kwarg here guards against a silent regression.
+    """
+    wait_kwargs: list[dict[str, Any]] = []
+
+    _patch_ray_with_stubs(monkeypatch, is_initialized=True)
+
+    def _spying_wait(
+        refs: list[_ObjectRef],
+        *,
+        num_returns: int = 1,
+        fetch_local: bool = False,
+    ) -> tuple[list[_ObjectRef], list[_ObjectRef]]:
+        wait_kwargs.append({"num_returns": num_returns, "fetch_local": fetch_local})
+        return refs[:num_returns], refs[num_returns:]
+
+    monkeypatch.setattr(ray, "wait", _spying_wait, raising=True)
+
+    pool = RayPool()
+    monkeypatch.setattr(pool, "_remote_run_one", _Remote(lambda spec: _ok_outcome(spec.run_id)))
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    list(pool.as_completed([f]))
+    pool.close()
+
+    assert wait_kwargs, "ray.wait was not called"
+    assert all(call["fetch_local"] is True for call in wait_kwargs)
+
+
+def test_worker_side_exception_folds_into_failed_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A remote task that raises is folded into ``RunOutcome.failed``.
+
+    The drain loop wraps ``ray.get`` in ``try/except`` so a ``RayTaskError``
+    from a remote-side raise (or a Ray transport error) folds into a
+    synthetic failed outcome instead of aborting the sweep.
+    """
+
+    def _boom(_spec: RunSpec) -> RunOutcome:
+        raise RuntimeError("remote exploded")
+
+    _patch_ray_with_stubs(monkeypatch, is_initialized=True)
+    pool = RayPool()
+    monkeypatch.setattr(pool, "_remote_run_one", _Remote(_boom))
+
+    f = pool.submit(_make_spec(output_dir=tmp_path / "run_0", run_id=0))
+    outcomes = list(pool.as_completed([f]))
+    pool.close()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].run_id == 0
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].stderr is not None
+    assert "remote exploded" in outcomes[0].stderr
+    assert f.done()
+    assert f.result() is outcomes[0]
+
+
+def test_one_failed_run_does_not_abort_other_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mix one remote-failing task with two successful ones — sweep yields all three."""
+
+    def _maybe_boom(spec: RunSpec) -> RunOutcome:
+        if spec.run_id == 1:
+            raise RuntimeError("remote 1 down")
+        return _ok_outcome(spec.run_id)
+
+    _patch_ray_with_stubs(monkeypatch, is_initialized=True)
+    pool = RayPool()
+    monkeypatch.setattr(pool, "_remote_run_one", _Remote(_maybe_boom))
+
+    futures = [
+        pool.submit(_make_spec(output_dir=tmp_path / f"run_{i}", run_id=i)) for i in range(3)
+    ]
+    outcomes = sorted(pool.as_completed(futures), key=lambda o: o.run_id)
+    pool.close()
+
+    assert [o.run_id for o in outcomes] == [0, 1, 2]
+    assert [o.status for o in outcomes] == ["ok", "failed", "ok"]
+    assert outcomes[1].stderr is not None
+    assert "remote 1 down" in outcomes[1].stderr
 
 
 def test_as_completed_rejects_unknown_future(
