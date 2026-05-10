@@ -1226,8 +1226,12 @@ def sweep_diff(
                 f"index level; got {a_names}"
             )
         if df_a.index.nlevels > 1:
-            df_a = df_a.groupby(level=_RUN_ID_COL).last()
-            df_b = df_b.groupby(level=_RUN_ID_COL).last()
+            # sort_index() before groupby().last() so the "final row per run"
+            # is the row with the largest secondary-index value, not whichever
+            # row happens to come last under the input's storage order. The
+            # raw groupby().last() inherited that order silently.
+            df_a = df_a.sort_index().groupby(level=_RUN_ID_COL).last()
+            df_b = df_b.sort_index().groupby(level=_RUN_ID_COL).last()
 
     a_status = df_a[_STATUS_COL] if _STATUS_COL in df_a.columns else None
     b_status = df_b[_STATUS_COL] if _STATUS_COL in df_b.columns else None

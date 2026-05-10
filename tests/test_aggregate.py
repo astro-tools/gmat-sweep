@@ -1194,6 +1194,28 @@ def test_sweep_diff_on_run_id_collapses_time_level_to_terminal_row() -> None:
     np.testing.assert_array_equal(diff["Sat.SMA__diff"].to_numpy(), 10.0)
 
 
+def test_sweep_diff_on_run_id_stable_under_shuffled_input() -> None:
+    """``on='run_id'`` collapse picks the largest-time row regardless of input order.
+
+    Regression guard for #130: ``groupby(level=run_id).last()`` without a
+    prior ``sort_index()`` returned whichever row happened to come last
+    in storage, so a shuffled input produced different output.
+    """
+    a_sorted = _diff_df(n_runs=4, n_steps=5)
+    b_sorted = _diff_df(n_runs=4, n_steps=5, sma_offset=10.0)
+
+    # Shuffle each side independently. The collapsed terminal-row diff
+    # must be identical to the sorted-input result.
+    rng = np.random.default_rng(20260510)
+    a_shuf = a_sorted.iloc[rng.permutation(len(a_sorted))]
+    b_shuf = b_sorted.iloc[rng.permutation(len(b_sorted))]
+
+    expected = sweep_diff(a_sorted, b_sorted, on="run_id")
+    actual = sweep_diff(a_shuf, b_shuf, on="run_id")
+
+    pd.testing.assert_frame_equal(actual.sort_index(), expected.sort_index())
+
+
 def test_sweep_diff_tolerance_float_masks_below_threshold_diffs() -> None:
     a = _diff_df(n_runs=3, n_steps=2)
     # Shift Sat.X by exactly 1, Sat.SMA by 0.005 (under 0.01 tolerance).
