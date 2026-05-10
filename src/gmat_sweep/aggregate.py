@@ -55,15 +55,18 @@ __all__ = [
     "lazy_fused_reports",
     "lazy_multiindex",
     "mc_convergence",
+    "sweep_diff",
     "sweep_summary",
 ]
 
 _VALID_BY: tuple[str, ...] = ("time", "run_id")
 _VALID_INCLUDE: tuple[str, ...] = ("mean", "std", "min", "max", "count_ok")
+_VALID_HOW: tuple[str, ...] = ("absolute", "relative", "both")
 
 
 _RUN_ID_COL = "run_id"
 _STATUS_COL = "__status"
+_STATUS_DIFF_COL = "__status_diff"
 _TIME_COL = "time"
 _INTERVAL_ID_COL = "interval_id"
 
@@ -864,6 +867,177 @@ def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
             "se_mean": se_mean,
         }
     )
+
+
+def sweep_diff(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    on: str | None = None,
+    how: str = "both",
+    tolerance: float | Callable[[str], float] | None = None,
+) -> pd.DataFrame:
+    """Pairwise compare two same-shape sweep DataFrames into a diff frame.
+
+    Aligns ``df_a`` and ``df_b`` on the intersection of their indexes,
+    picks the numeric columns shared between them, and emits per-column
+    ``<col>__diff = b - a`` and/or ``<col>__rel = (b - a) / a`` columns
+    ready for plotting against the rest of the sweep helpers.
+
+    Parameters
+    ----------
+    df_a, df_b
+        Sweep DataFrames to compare. Both must share the same index level
+        names (e.g. both ``(run_id, time)``); otherwise
+        :class:`gmat_sweep.errors.SweepConfigError` is raised. Index keys
+        present in only one side are silently dropped from the output.
+    on
+        ``None`` (default) compares row-by-row on the existing index.
+        ``"run_id"`` collapses each side via
+        ``groupby(level="run_id").last()`` first — the per-run final-step
+        view, useful for "did the dispersion of the final state change?"
+        comparisons. Other values are not supported.
+    how
+        ``"absolute"`` emits only ``<col>__diff = b - a``. ``"relative"``
+        emits only ``<col>__rel = (b - a) / a`` (entries where ``a == 0``
+        land as NaN). ``"both"`` (default) emits both, interleaved per
+        source column.
+    tolerance
+        ``None`` (default) emits raw diffs. A ``float`` masks every diff
+        whose absolute value is strictly below the cutoff to NaN — both
+        the ``__diff`` and the matching ``__rel`` entry are masked at the
+        same positions, so the output highlights only the meaningful
+        changes. A callable is invoked once per source column as
+        ``tolerance(col_name) -> float`` to produce a per-column cutoff,
+        which is the right shape when the data columns carry mixed units
+        (e.g. ``Sat.X`` in km vs. ``Sat.VX`` in km/s).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Same index as the (aligned) inputs. One column per
+        ``(<source-column>, suffix)`` pair, where suffix is ``__diff`` or
+        ``__rel`` per ``how``. When at least one side carries a
+        ``__status`` column, an extra trailing ``__status_diff`` column
+        encodes the per-row status pair: ``"ok"`` when both sides are
+        ``"ok"``, otherwise ``"<a_status>/<b_status>"`` (e.g.
+        ``"failed/ok"``, ``"ok/skipped"``).
+
+    Raises
+    ------
+    SweepConfigError
+        ``how`` is not one of ``"absolute"``, ``"relative"``, ``"both"``;
+        ``on`` is neither ``None`` nor ``"run_id"``; ``df_a`` and ``df_b``
+        do not share the same index level names; or ``on="run_id"`` was
+        passed against a frame whose index has no ``run_id`` level.
+
+    Examples
+    --------
+    >>> from gmat_sweep import sweep, sweep_diff
+    >>> baseline = sweep("mission.script", grid={"Sat.SMA": [7000.0]}, out=...)  # doctest: +SKIP
+    >>> perturbed = sweep("mission.script", grid={"Sat.SMA": [7050.0]}, out=...)  # doctest: +SKIP
+    >>> diff = sweep_diff(baseline, perturbed, on="run_id")  # doctest: +SKIP
+    >>> diff[["Sat.SMA__diff", "Sat.SMA__rel"]]  # doctest: +SKIP
+    """
+    if how not in _VALID_HOW:
+        raise SweepConfigError(
+            f"sweep_diff: how={how!r} is not supported; pass one of {list(_VALID_HOW)}"
+        )
+
+    if on is not None and on != _RUN_ID_COL:
+        raise SweepConfigError(
+            f"sweep_diff: on={on!r} is not supported in this release; "
+            f"pass on=None or on={_RUN_ID_COL!r}"
+        )
+
+    a_names = list(df_a.index.names or [])
+    b_names = list(df_b.index.names or [])
+    if a_names != b_names:
+        raise SweepConfigError(
+            f"sweep_diff: df_a and df_b must share the same index level names; "
+            f"got {a_names} vs {b_names}"
+        )
+
+    if on == _RUN_ID_COL:
+        if _RUN_ID_COL not in a_names:
+            raise SweepConfigError(
+                f"sweep_diff: on={_RUN_ID_COL!r} requires a {_RUN_ID_COL!r} "
+                f"index level; got {a_names}"
+            )
+        if df_a.index.nlevels > 1:
+            df_a = df_a.groupby(level=_RUN_ID_COL).last()
+            df_b = df_b.groupby(level=_RUN_ID_COL).last()
+
+    a_status = df_a[_STATUS_COL] if _STATUS_COL in df_a.columns else None
+    b_status = df_b[_STATUS_COL] if _STATUS_COL in df_b.columns else None
+    a_data = df_a.drop(columns=[_STATUS_COL], errors="ignore")
+    b_data = df_b.drop(columns=[_STATUS_COL], errors="ignore")
+
+    shared_cols = [c for c in a_data.columns if c in b_data.columns]
+    numeric_cols = [
+        c
+        for c in shared_cols
+        if pd.api.types.is_numeric_dtype(a_data[c]) and pd.api.types.is_numeric_dtype(b_data[c])
+    ]
+
+    common_index = df_a.index.intersection(df_b.index, sort=False)
+    a_data = a_data.loc[common_index, numeric_cols]
+    b_data = b_data.loc[common_index, numeric_cols]
+
+    diff_block = b_data.subtract(a_data)
+    if how in ("relative", "both"):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rel_block = diff_block.divide(a_data)
+        rel_block = rel_block.replace([np.inf, -np.inf], np.nan)
+    else:
+        rel_block = None
+
+    if tolerance is not None:
+        for col in numeric_cols:
+            cutoff = float(tolerance(col)) if callable(tolerance) else float(tolerance)
+            mask = diff_block[col].abs() < cutoff
+            if how in ("absolute", "both"):
+                diff_block.loc[mask, col] = np.nan
+            if rel_block is not None:
+                rel_block.loc[mask, col] = np.nan
+
+    diff_named = diff_block.rename(columns={c: f"{c}__diff" for c in numeric_cols})
+    rel_named = (
+        rel_block.rename(columns={c: f"{c}__rel" for c in numeric_cols})
+        if rel_block is not None
+        else None
+    )
+
+    if how == "absolute":
+        result = diff_named
+    elif how == "relative":
+        assert rel_named is not None
+        result = rel_named
+    else:
+        assert rel_named is not None
+        interleaved: list[str] = []
+        for c in numeric_cols:
+            interleaved.append(f"{c}__diff")
+            interleaved.append(f"{c}__rel")
+        result = pd.concat([diff_named, rel_named], axis=1)[interleaved]
+
+    if a_status is not None or b_status is not None:
+        a_aligned = (
+            a_status.reindex(common_index).fillna("ok").astype(str)
+            if a_status is not None
+            else pd.Series("ok", index=common_index, dtype=object)
+        )
+        b_aligned = (
+            b_status.reindex(common_index).fillna("ok").astype(str)
+            if b_status is not None
+            else pd.Series("ok", index=common_index, dtype=object)
+        )
+        both_ok = (a_aligned == "ok") & (b_aligned == "ok")
+        status_diff = (a_aligned + "/" + b_aligned).astype(object)
+        status_diff[both_ok] = "ok"
+        result[_STATUS_DIFF_COL] = status_diff
+
+    return cast(pd.DataFrame, result.sort_index())
 
 
 def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:

@@ -9,6 +9,7 @@ from gmat_sweep.aggregate import (
     lazy_fused_reports,
     lazy_multiindex,
     mc_convergence,
+    sweep_diff,
     sweep_summary,
 )
 from gmat_sweep.api import (
@@ -92,5 +93,6 @@ __all__ = [
     "monte_carlo",
     "monte_carlo_extend",
     "sweep",
+    "sweep_diff",
     "sweep_summary",
 ]

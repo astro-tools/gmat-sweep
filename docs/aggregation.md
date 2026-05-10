@@ -226,6 +226,101 @@ excluded from every statistic. Pass `dropna=False` to keep them — the
 NaT marker rows from non-ok runs land as a NaT-keyed group in the
 output (mostly NaN, with `count_ok` reflecting the contribution).
 
+## Comparing two sweeps
+
+Once you have two sweep DataFrames of the same shape — baseline vs.
+perturbed, before vs. after a `.script` edit, two backends on the same
+sweep — [`sweep_diff`][gmat_sweep.sweep_diff] turns them into a single
+diff frame ready for plotting.
+
+```python
+from pathlib import Path
+
+from gmat_sweep import Manifest, lazy_multiindex, sweep_diff
+
+baseline = lazy_multiindex(Manifest.load(Path("./baseline/manifest.jsonl")), Path("./baseline"))
+perturbed = lazy_multiindex(Manifest.load(Path("./perturbed/manifest.jsonl")), Path("./perturbed"))
+
+# Per-row absolute and relative diff for every shared numeric column.
+diff = sweep_diff(baseline, perturbed)
+
+# (run_id, time) → Sat.SMA shifted by exactly +50 km, everywhere.
+diff[["Sat.SMA__diff", "Sat.SMA__rel"]].head()
+```
+
+For each numeric column shared between the two inputs, `sweep_diff`
+emits `<col>__diff = b - a` and/or `<col>__rel = (b - a) / a`. Columns
+present on only one side, and shared columns whose dtype is non-numeric,
+are silently dropped — the contract is "compare the comparable".
+
+### Output shape
+
+| Column | Meaning |
+|--------|---------|
+| `<col>__diff` | absolute difference, `b - a` |
+| `<col>__rel` | relative difference, `(b - a) / a` (NaN where `a == 0`) |
+| `__status_diff` | `"ok"` when both sides are `__status="ok"`; otherwise `"<a_status>/<b_status>"` (e.g. `"failed/ok"`). Omitted when neither input has a `__status` column. |
+
+The row index matches the inputs' (aligned) index — typically
+`(run_id, time)` or just `run_id` after the `on="run_id"` collapse below.
+
+### `how` selects which suffixes appear
+
+| `how` | Columns |
+|-------|---------|
+| `"absolute"` | only `<col>__diff` |
+| `"relative"` | only `<col>__rel` |
+| `"both"` (default) | both, interleaved as `<col>__diff`, `<col>__rel`, `<col2>__diff`, `<col2>__rel`, … |
+
+### `on=None` vs `on="run_id"`
+
+- `on=None` (default) — align on the existing index (typically
+  `(run_id, time)`). The diff is per-row, per-time-step.
+- `on="run_id"` — collapse each side to its per-run **final-step row**
+  via `groupby(level="run_id").last()`, then diff. Output is indexed by
+  `run_id`. The natural shape for "did the dispersion of the final
+  state change?" comparisons.
+
+### Tolerance masking
+
+`tolerance=` masks every diff whose absolute value is strictly below
+the cutoff to NaN — both `__diff` and the matching `__rel` are masked
+at the same positions, so the surviving non-NaN entries highlight the
+meaningful changes only.
+
+```python
+# Single cutoff applied to every column.
+diff = sweep_diff(baseline, perturbed, tolerance=1e-6)
+
+# Per-column cutoffs — useful when columns carry mixed units.
+def cutoff(col: str) -> float:
+    return 1e-3 if col.endswith(".SMA") else 1e-6  # km vs. km/s
+
+diff = sweep_diff(baseline, perturbed, tolerance=cutoff)
+```
+
+### Failed and skipped runs
+
+`__status_diff` records the per-row pair so a downstream filter or plot
+can drop or annotate them:
+
+```python
+clean = diff.loc[diff["__status_diff"] == "ok"]
+mismatched = diff.loc[diff["__status_diff"] != "ok"]
+```
+
+A row where one side failed and the other succeeded surfaces as
+`"failed/ok"` (or the symmetric `"ok/failed"`), with the data columns
+NaN — failed runs do not produce numeric outputs to subtract.
+
+### Index alignment
+
+`sweep_diff` aligns the two inputs on the intersection of their
+indexes. Keys present on only one side are silently dropped. The
+function does **not** reshape across `parameter_spec` shapes — diffing a
+grid sweep against a Monte Carlo sweep is the user's responsibility to
+align (e.g. via `df.reset_index().set_index([...])`) before calling.
+
 ## Migrating from v0.1
 
 v0.1 used a bare `<name>.parquet` per-run layout and keyed
