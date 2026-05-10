@@ -35,7 +35,7 @@ for "median +/- 95% band over time" dispersion plots.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -46,8 +46,13 @@ from gmat_sweep.errors import SweepConfigError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import TypeAlias
+
+    import polars as pl
 
     from gmat_sweep.manifest import Manifest, ManifestEntry
+
+    DataFrame: TypeAlias = pd.DataFrame | pl.DataFrame
 
 __all__ = [
     "lazy_contacts",
@@ -62,6 +67,34 @@ __all__ = [
 _VALID_BY: tuple[str, ...] = ("time", "run_id")
 _VALID_INCLUDE: tuple[str, ...] = ("mean", "std", "min", "max", "count_ok")
 _VALID_HOW: tuple[str, ...] = ("absolute", "relative", "both")
+_VALID_ENGINES: tuple[str, ...] = ("pandas", "polars")
+
+
+def _check_engine(engine: str) -> None:
+    if engine not in _VALID_ENGINES:
+        raise SweepConfigError(
+            f"engine={engine!r} is not supported; pass one of {list(_VALID_ENGINES)}"
+        )
+
+
+def _to_polars(df: pd.DataFrame) -> pl.DataFrame:
+    """Flatten a pandas-engine sweep DataFrame into a polars DataFrame.
+
+    The ``(run_id, <secondary>)`` MultiIndex becomes two leading columns;
+    row order is preserved (the input is already ``sort_index``-ed). Polars
+    is imported lazily so the default ``engine="pandas"`` path does not
+    require the ``[polars]`` extra.
+    """
+    try:
+        import polars as pl
+    except ImportError as exc:
+        raise ImportError(
+            "engine='polars' requires the optional polars extra; "
+            "install with: pip install gmat-sweep[polars]"
+        ) from exc
+
+    flat = df.reset_index() if df.index.nlevels > 0 and df.index.names != [None] else df
+    return pl.from_pandas(flat)
 
 
 _RUN_ID_COL = "run_id"
@@ -83,13 +116,41 @@ _SECONDARY_INDEX_MISSING: dict[str, Any] = {
 }
 
 
+@overload
+def lazy_multiindex(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def lazy_multiindex(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def lazy_multiindex(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def lazy_multiindex(
     manifest: Manifest,
     output_dir: Path,
     *,
     name: str | None = None,
     spool: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Assemble the ``(run_id, time)``-indexed report DataFrame from a sweep's outputs.
 
     Iterates ``manifest.entries`` in order. For each ``ok`` entry the
@@ -122,19 +183,29 @@ def lazy_multiindex(
         ``True`` (default) streams each run's record batches into pandas
         one batch at a time. ``False`` reads each run's Parquet eagerly
         in one shot — simpler control flow, higher peak memory.
+    engine
+        ``"pandas"`` (default) returns a ``(run_id, time)``-MultiIndexed
+        :class:`pandas.DataFrame`. ``"polars"`` returns a
+        :class:`polars.DataFrame` whose ``(run_id, time)`` MultiIndex is
+        flattened into two leading sorted columns; row count and the
+        non-index column set match the pandas-engine equivalent. Requires
+        the ``[polars]`` extra; an :class:`ImportError` with the install
+        hint is raised when polars is not importable.
 
     Raises
     ------
     SweepConfigError
         ``name=None`` was passed but the sweep produced more than one
-        report (the exception message lists the available names), or the
-        explicitly-named report does not appear in any ok run's outputs.
+        report (the exception message lists the available names), the
+        explicitly-named report does not appear in any ok run's outputs,
+        or ``engine`` is neither ``"pandas"`` nor ``"polars"``.
     ValueError
         An ``ok`` entry has no ``output_paths`` at all (a run that ran
         successfully must have produced something), or a per-run Parquet
         is missing the ``time`` column required for the index.
     """
-    return _aggregate(
+    _check_engine(engine)
+    df = _aggregate(
         manifest,
         output_dir,
         kind="report",
@@ -142,15 +213,44 @@ def lazy_multiindex(
         name=name,
         spool=spool,
     )
+    return _to_polars(df) if engine == "polars" else df
 
 
+@overload
+def lazy_ephemerides(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def lazy_ephemerides(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def lazy_ephemerides(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    spool: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def lazy_ephemerides(
     manifest: Manifest,
     output_dir: Path,
     *,
     name: str | None = None,
     spool: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Assemble the ``(run_id, time)``-indexed ephemeris DataFrame from a sweep's outputs.
 
     Mirrors :func:`lazy_multiindex` but dispatches on ``ephemeris__<name>``
@@ -159,9 +259,11 @@ def lazy_ephemerides(
     SPK formats) to a column named ``time`` before writing Parquet, so
     the same ``(run_id, time)`` index machinery applies.
 
-    See :func:`lazy_multiindex` for parameter and exception semantics.
+    See :func:`lazy_multiindex` for parameter and exception semantics,
+    including the ``engine`` knob.
     """
-    return _aggregate(
+    _check_engine(engine)
+    df = _aggregate(
         manifest,
         output_dir,
         kind="ephemeris",
@@ -169,14 +271,40 @@ def lazy_ephemerides(
         name=name,
         spool=spool,
     )
+    return _to_polars(df) if engine == "polars" else df
 
 
+@overload
+def lazy_contacts(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def lazy_contacts(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def lazy_contacts(
+    manifest: Manifest,
+    output_dir: Path,
+    *,
+    name: str | None = ...,
+    engine: str,
+) -> DataFrame: ...
 def lazy_contacts(
     manifest: Manifest,
     output_dir: Path,
     *,
     name: str | None = None,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Assemble the ``(run_id, interval_id)``-indexed contact DataFrame from a sweep's outputs.
 
     Mirrors :func:`lazy_multiindex` but dispatches on ``contact__<name>``
@@ -188,12 +316,15 @@ def lazy_contacts(
 
     Failed, skipped, and report-only ``ok`` runs materialise as one row
     with ``interval_id = pd.NA`` (cast as the nullable ``Int64`` dtype so
-    integer interval indices and missing values share one level).
+    integer interval indices and missing values share one level). Under
+    ``engine="polars"`` the nullable ``Int64`` round-trips into a polars
+    ``Int64`` column with ``null`` for the missing slots.
 
     See :func:`lazy_multiindex` for the rest of the parameter and
-    exception semantics.
+    exception semantics, including the ``engine`` knob.
     """
-    return _aggregate(
+    _check_engine(engine)
+    df = _aggregate(
         manifest,
         output_dir,
         kind="contact",
@@ -201,6 +332,7 @@ def lazy_contacts(
         name=name,
         spool=False,
     )
+    return _to_polars(df) if engine == "polars" else df
 
 
 def _aggregate(
@@ -727,12 +859,37 @@ def sweep_summary(
 _RUNNING_COLUMNS: tuple[str, ...] = ("running_mean", "running_std", "se_mean")
 
 
+@overload
+def mc_convergence(
+    df: pd.DataFrame,
+    metric: str | Callable[[pd.DataFrame], float],
+    *,
+    terminal_only: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def mc_convergence(
+    df: pd.DataFrame,
+    metric: str | Callable[[pd.DataFrame], float],
+    *,
+    terminal_only: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def mc_convergence(
+    df: pd.DataFrame,
+    metric: str | Callable[[pd.DataFrame], float],
+    *,
+    terminal_only: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def mc_convergence(
     df: pd.DataFrame,
     metric: str | Callable[[pd.DataFrame], float],
     *,
     terminal_only: bool = False,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Diagnose Monte Carlo convergence: running mean / std / SE of the mean over run-id prefixes.
 
     Reduces ``df`` to a per-run scalar (or per-run-per-time scalar) under
@@ -763,10 +920,15 @@ def mc_convergence(
         the final state converge?" view. ``False`` (default) keeps every
         time step and emits one running curve per ``time``. Ignored for
         callable metrics, which already return one scalar per run.
+    engine
+        ``"pandas"`` (default) returns a :class:`pandas.DataFrame` with a
+        plain :class:`~pandas.RangeIndex`. ``"polars"`` returns the same
+        flat-column frame as a :class:`polars.DataFrame`. Requires the
+        ``[polars]`` extra; same semantics as :func:`lazy_multiindex`.
 
     Returns
     -------
-    pandas.DataFrame
+    pandas.DataFrame or polars.DataFrame
         Long-form frame with columns ``n``, ``running_mean``,
         ``running_std``, ``se_mean``. When ``terminal_only=False`` and
         ``metric`` is a column name, an additional leading ``time``
@@ -777,8 +939,9 @@ def mc_convergence(
     ------
     SweepConfigError
         ``df.index`` is not a MultiIndex with a ``run_id`` level; the
-        column-name ``metric`` is not in ``df``; or the callable
-        ``metric`` does not return a numeric scalar.
+        column-name ``metric`` is not in ``df``; the callable
+        ``metric`` does not return a numeric scalar; or ``engine`` is
+        neither ``"pandas"`` nor ``"polars"``.
 
     Examples
     --------
@@ -788,6 +951,7 @@ def mc_convergence(
             n  running_mean  running_std       se_mean
     995   996      ...           ...           ...
     """
+    _check_engine(engine)
     if df.index.nlevels < 2 or _RUN_ID_COL not in (df.index.names or []):
         raise SweepConfigError(
             f"mc_convergence: df.index must have a {_RUN_ID_COL!r} level "
@@ -801,18 +965,18 @@ def mc_convergence(
 
     if callable(metric):
         per_run = _reduce_callable_metric(working, metric)
-        return _running_stats(per_run.to_numpy(), n_offset=1)
-
-    if metric not in working.columns:
+        result = _running_stats(per_run.to_numpy(), n_offset=1)
+    elif metric not in working.columns:
         raise SweepConfigError(
             f"mc_convergence: metric={metric!r} is not a column of df and is not callable"
         )
-
-    if terminal_only:
+    elif terminal_only:
         per_run_series = working.groupby(level=_RUN_ID_COL)[metric].last().sort_index()
-        return _running_stats(per_run_series.to_numpy(), n_offset=1)
+        result = _running_stats(per_run_series.to_numpy(), n_offset=1)
+    else:
+        result = _running_stats_per_time(working[metric])
 
-    return _running_stats_per_time(working[metric])
+    return _to_polars(result) if engine == "polars" else result
 
 
 def _reduce_callable_metric(
@@ -869,6 +1033,36 @@ def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
     )
 
 
+@overload
+def sweep_diff(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    on: str | None = ...,
+    how: str = ...,
+    tolerance: float | Callable[[str], float] | None = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def sweep_diff(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    on: str | None = ...,
+    how: str = ...,
+    tolerance: float | Callable[[str], float] | None = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def sweep_diff(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    on: str | None = ...,
+    how: str = ...,
+    tolerance: float | Callable[[str], float] | None = ...,
+    engine: str,
+) -> DataFrame: ...
 def sweep_diff(
     df_a: pd.DataFrame,
     df_b: pd.DataFrame,
@@ -876,7 +1070,8 @@ def sweep_diff(
     on: str | None = None,
     how: str = "both",
     tolerance: float | Callable[[str], float] | None = None,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Pairwise compare two same-shape sweep DataFrames into a diff frame.
 
     Aligns ``df_a`` and ``df_b`` on the intersection of their indexes,
@@ -911,11 +1106,18 @@ def sweep_diff(
         ``tolerance(col_name) -> float`` to produce a per-column cutoff,
         which is the right shape when the data columns carry mixed units
         (e.g. ``Sat.X`` in km vs. ``Sat.VX`` in km/s).
+    engine
+        ``"pandas"`` (default) returns a :class:`pandas.DataFrame` with
+        the same index shape as the inputs. ``"polars"`` returns a
+        :class:`polars.DataFrame` whose index levels are flattened into
+        leading columns. Requires the ``[polars]`` extra; same semantics
+        as :func:`lazy_multiindex`.
 
     Returns
     -------
-    pandas.DataFrame
-        Same index as the (aligned) inputs. One column per
+    pandas.DataFrame or polars.DataFrame
+        Same index as the (aligned) inputs (flattened to leading columns
+        under ``engine="polars"``). One column per
         ``(<source-column>, suffix)`` pair, where suffix is ``__diff`` or
         ``__rel`` per ``how``. When at least one side carries a
         ``__status`` column, an extra trailing ``__status_diff`` column
@@ -928,8 +1130,9 @@ def sweep_diff(
     SweepConfigError
         ``how`` is not one of ``"absolute"``, ``"relative"``, ``"both"``;
         ``on`` is neither ``None`` nor ``"run_id"``; ``df_a`` and ``df_b``
-        do not share the same index level names; or ``on="run_id"`` was
-        passed against a frame whose index has no ``run_id`` level.
+        do not share the same index level names; ``on="run_id"`` was
+        passed against a frame whose index has no ``run_id`` level; or
+        ``engine`` is neither ``"pandas"`` nor ``"polars"``.
 
     Examples
     --------
@@ -939,6 +1142,7 @@ def sweep_diff(
     >>> diff = sweep_diff(baseline, perturbed, on="run_id")  # doctest: +SKIP
     >>> diff[["Sat.SMA__diff", "Sat.SMA__rel"]]  # doctest: +SKIP
     """
+    _check_engine(engine)
     if how not in _VALID_HOW:
         raise SweepConfigError(
             f"sweep_diff: how={how!r} is not supported; pass one of {list(_VALID_HOW)}"
@@ -1037,7 +1241,8 @@ def sweep_diff(
         status_diff[both_ok] = "ok"
         result[_STATUS_DIFF_COL] = status_diff
 
-    return cast(pd.DataFrame, result.sort_index())
+    sorted_result = cast(pd.DataFrame, result.sort_index())
+    return _to_polars(sorted_result) if engine == "polars" else sorted_result
 
 
 def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:

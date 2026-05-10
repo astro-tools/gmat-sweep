@@ -19,7 +19,7 @@ import warnings
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from tqdm.auto import tqdm
 
@@ -34,7 +34,9 @@ from gmat_sweep.manifest import Manifest, ManifestEntry, canonical_script_sha256
 
 if TYPE_CHECKING:
     import pandas as pd
+    import polars as pl
 
+    from gmat_sweep.aggregate import DataFrame
     from gmat_sweep.backends.base import Pool
     from gmat_sweep.spec import RunOutcome, RunSpec
 
@@ -453,29 +455,72 @@ class Sweep:
             sweep_version=sweep_version,
         )
 
-    def to_dataframe(self, name: str | None = None) -> pd.DataFrame:
+    @overload
+    def to_dataframe(
+        self, name: str | None = ..., *, engine: Literal["pandas"] = ...
+    ) -> pd.DataFrame: ...
+    @overload
+    def to_dataframe(
+        self, name: str | None = ..., *, engine: Literal["polars"]
+    ) -> pl.DataFrame: ...
+    @overload
+    def to_dataframe(self, name: str | None = ..., *, engine: str) -> DataFrame: ...
+    def to_dataframe(self, name: str | None = None, *, engine: str = "pandas") -> DataFrame:
         """Aggregate the sweep's ``ReportFile`` outputs into one DataFrame.
 
         ``name`` selects which report to aggregate when the sweep produced
         multiple ``ReportFile`` resources per run; ``None`` (default) picks
-        the sole report when exactly one was produced. See
+        the sole report when exactly one was produced. ``engine="polars"``
+        returns a :class:`polars.DataFrame` with the ``(run_id, time)``
+        MultiIndex flattened into two leading columns; the default
+        ``engine="pandas"`` preserves the MultiIndex. See
         :func:`gmat_sweep.aggregate.lazy_multiindex` for the full contract.
         """
-        return lazy_multiindex(self.to_manifest(), self._output_dir, name=name)
+        return lazy_multiindex(self.to_manifest(), self._output_dir, name=name, engine=engine)
 
-    def to_ephemerides(self, name: str | None = None) -> pd.DataFrame:
+    @overload
+    def to_ephemerides(
+        self, name: str | None = ..., *, engine: Literal["pandas"] = ...
+    ) -> pd.DataFrame: ...
+    @overload
+    def to_ephemerides(
+        self, name: str | None = ..., *, engine: Literal["polars"]
+    ) -> pl.DataFrame: ...
+    @overload
+    def to_ephemerides(self, name: str | None = ..., *, engine: str) -> DataFrame: ...
+    def to_ephemerides(self, name: str | None = None, *, engine: str = "pandas") -> DataFrame:
         """Aggregate the sweep's ``EphemerisFile`` outputs into one DataFrame.
 
-        See :func:`gmat_sweep.aggregate.lazy_ephemerides` for the contract.
+        See :func:`gmat_sweep.aggregate.lazy_ephemerides` for the contract,
+        including the ``engine`` knob.
         """
-        return lazy_ephemerides(self.to_manifest(), self._output_dir, name=name)
+        return lazy_ephemerides(self.to_manifest(), self._output_dir, name=name, engine=engine)
 
-    def to_contacts(self, name: str | None = None) -> pd.DataFrame:
+    @overload
+    def to_contacts(
+        self, name: str | None = ..., *, engine: Literal["pandas"] = ...
+    ) -> pd.DataFrame: ...
+    @overload
+    def to_contacts(self, name: str | None = ..., *, engine: Literal["polars"]) -> pl.DataFrame: ...
+    @overload
+    def to_contacts(self, name: str | None = ..., *, engine: str) -> DataFrame: ...
+    def to_contacts(self, name: str | None = None, *, engine: str = "pandas") -> DataFrame:
         """Aggregate the sweep's ``ContactLocator`` outputs into one DataFrame.
 
-        See :func:`gmat_sweep.aggregate.lazy_contacts` for the contract.
+        See :func:`gmat_sweep.aggregate.lazy_contacts` for the contract,
+        including the ``engine`` knob.
         """
-        return lazy_contacts(self.to_manifest(), self._output_dir, name=name)
+        return lazy_contacts(self.to_manifest(), self._output_dir, name=name, engine=engine)
+
+    def to_polars(self, name: str | None = None) -> pl.DataFrame:
+        """Aggregate the sweep's ``ReportFile`` outputs into a polars DataFrame.
+
+        Shortcut for :meth:`to_dataframe` with ``engine="polars"``: returns
+        a :class:`polars.DataFrame` whose ``(run_id, time)`` MultiIndex is
+        flattened into two leading sorted columns. Requires the ``[polars]``
+        extra; raises :class:`ImportError` with the install hint otherwise.
+        """
+        return self.to_dataframe(name, engine="polars")
 
     def to_fused_reports(
         self,

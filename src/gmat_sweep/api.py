@@ -7,7 +7,7 @@ import tempfile
 import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from gmat_sweep.backends.base import Pool
 from gmat_sweep.backends.joblib import LocalJoblibPool
@@ -24,6 +24,9 @@ from gmat_sweep.sweep import Sweep
 
 if TYPE_CHECKING:
     import pandas as pd
+    import polars as pl
+
+    from gmat_sweep.aggregate import DataFrame
 
 __all__ = [
     "latin_hypercube",
@@ -39,6 +42,42 @@ __all__ = [
 _MANIFEST_FILENAME = "manifest.jsonl"
 
 
+@overload
+def sweep(
+    mission: str | Path,
+    *,
+    grid: Mapping[str, Iterable[Any]] | None = ...,
+    samples: pd.DataFrame | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    seed: int | None = ...,
+    progress: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def sweep(
+    mission: str | Path,
+    *,
+    grid: Mapping[str, Iterable[Any]] | None = ...,
+    samples: pd.DataFrame | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    seed: int | None = ...,
+    progress: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def sweep(
+    mission: str | Path,
+    *,
+    grid: Mapping[str, Iterable[Any]] | None = ...,
+    samples: pd.DataFrame | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    seed: int | None = ...,
+    progress: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def sweep(
     mission: str | Path,
     *,
@@ -48,7 +87,8 @@ def sweep(
     out: str | Path | None = None,
     seed: int | None = None,
     progress: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Run a parameter sweep over a GMAT mission.
 
     Two mutually exclusive run-set shapes are accepted: pass ``grid=`` for a
@@ -105,20 +145,32 @@ def sweep(
         runs complete. Set to ``False`` for non-interactive use (CI logs,
         notebooks committed with outputs) where the progress bar would
         otherwise be captured as noisy stderr snapshots.
+    engine:
+        ``"pandas"`` (default) returns a ``(run_id, time)``-MultiIndexed
+        :class:`pandas.DataFrame`. ``"polars"`` returns a
+        :class:`polars.DataFrame` with the MultiIndex flattened into two
+        leading sorted columns; row count and the non-index column set
+        match the pandas-engine equivalent. Requires the ``[polars]``
+        extra; an :class:`ImportError` with the install hint is raised
+        when polars is not importable. See
+        :func:`gmat_sweep.aggregate.lazy_multiindex` for the full
+        engine-knob contract.
 
     Returns
     -------
-    pandas.DataFrame
+    pandas.DataFrame or polars.DataFrame
         ``(run_id, time)``-MultiIndexed frame produced by
-        :func:`gmat_sweep.aggregate.lazy_multiindex`. Failed and skipped runs
-        appear as one NaN-filled row with ``__status`` set accordingly — a
-        single bad run does not abort the sweep or raise from this call.
+        :func:`gmat_sweep.aggregate.lazy_multiindex` (or its polars-engine
+        equivalent). Failed and skipped runs appear as one NaN-filled row
+        with ``__status`` set accordingly — a single bad run does not
+        abort the sweep or raise from this call.
 
     Raises
     ------
     SweepConfigError
-        If both ``grid`` and ``samples`` are passed, if neither is passed, or
-        if either argument fails its own structural validation.
+        If both ``grid`` and ``samples`` are passed, if neither is passed,
+        if either argument fails its own structural validation, or if
+        ``engine`` is neither ``"pandas"`` nor ``"polars"``.
     """
     if grid is not None and samples is not None:
         raise SweepConfigError("sweep() accepts either grid= or samples=, not both")
@@ -164,9 +216,46 @@ def sweep(
         backend=backend,
         out=out,
         progress=progress,
+        engine=engine,
     )
 
 
+@overload
+def monte_carlo(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def monte_carlo(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def monte_carlo(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def monte_carlo(
     mission: str | Path,
     *,
@@ -176,7 +265,8 @@ def monte_carlo(
     backend: Pool | None = None,
     out: str | Path | None = None,
     progress: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Run a Monte Carlo dispersion sweep over a GMAT mission.
 
     Builds an explicit-row run set of ``n`` runs by independently sampling
@@ -209,19 +299,24 @@ def monte_carlo(
     progress:
         Whether to draw the :mod:`tqdm` progress bar; same semantics as
         :func:`sweep`.
+    engine:
+        Output engine; same semantics as :func:`sweep`.
 
     Returns
     -------
-    pandas.DataFrame
-        ``(run_id, time)``-MultiIndexed frame, one row per (run, time-step)
-        pair, with ``run_id`` cardinality ``n``. A failed run lands as one
-        NaN row with ``__status="failed"`` — same contract as :func:`sweep`.
+    pandas.DataFrame or polars.DataFrame
+        ``(run_id, time)``-MultiIndexed frame (or polars flat-key
+        equivalent under ``engine="polars"``), one row per (run,
+        time-step) pair, with ``run_id`` cardinality ``n``. A failed run
+        lands as one NaN row with ``__status="failed"`` — same contract
+        as :func:`sweep`.
 
     Raises
     ------
     SweepConfigError
-        If ``perturb`` is empty, ``n < 1``, or any parameter spec is
-        ill-formed.
+        If ``perturb`` is empty, ``n < 1``, any parameter spec is
+        ill-formed, or ``engine`` is neither ``"pandas"`` nor
+        ``"polars"``.
     """
     mission_path = Path(mission)
     parameter_spec: dict[str, Any] = {
@@ -244,9 +339,46 @@ def monte_carlo(
         backend=backend,
         out=out,
         progress=progress,
+        engine=engine,
     )
 
 
+@overload
+def latin_hypercube(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def latin_hypercube(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def latin_hypercube(
+    mission: str | Path,
+    *,
+    n: int,
+    perturb: Mapping[str, DistSpec],
+    seed: int | None = ...,
+    backend: Pool | None = ...,
+    out: str | Path | None = ...,
+    progress: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def latin_hypercube(
     mission: str | Path,
     *,
@@ -256,7 +388,8 @@ def latin_hypercube(
     backend: Pool | None = None,
     out: str | Path | None = None,
     progress: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Run a Latin hypercube sweep over a GMAT mission.
 
     Backed by :class:`scipy.stats.qmc.LatinHypercube`: draws ``n`` unit-cube
@@ -287,18 +420,22 @@ def latin_hypercube(
         Same semantics as :func:`sweep`.
     progress:
         Same semantics as :func:`sweep`.
+    engine:
+        Same semantics as :func:`sweep`.
 
     Returns
     -------
-    pandas.DataFrame
-        ``(run_id, time)``-MultiIndexed frame with ``run_id`` cardinality
+    pandas.DataFrame or polars.DataFrame
+        ``(run_id, time)``-MultiIndexed frame (or polars flat-key
+        equivalent under ``engine="polars"``) with ``run_id`` cardinality
         ``n``. Same failure-as-row contract as :func:`sweep`.
 
     Raises
     ------
     SweepConfigError
-        If ``perturb`` is empty, ``n < 1``, or any parameter spec is
-        ill-formed.
+        If ``perturb`` is empty, ``n < 1``, any parameter spec is
+        ill-formed, or ``engine`` is neither ``"pandas"`` nor
+        ``"polars"``.
     """
     mission_path = Path(mission)
     parameter_spec: dict[str, Any] = {
@@ -321,9 +458,43 @@ def latin_hypercube(
         backend=backend,
         out=out,
         progress=progress,
+        engine=engine,
     )
 
 
+@overload
+def monte_carlo_extend(
+    manifest: str | Path,
+    script: str | Path,
+    *,
+    n: int,
+    backend: Pool | None = ...,
+    allow_script_drift: bool = ...,
+    progress: bool = ...,
+    engine: Literal["pandas"] = ...,
+) -> pd.DataFrame: ...
+@overload
+def monte_carlo_extend(
+    manifest: str | Path,
+    script: str | Path,
+    *,
+    n: int,
+    backend: Pool | None = ...,
+    allow_script_drift: bool = ...,
+    progress: bool = ...,
+    engine: Literal["polars"],
+) -> pl.DataFrame: ...
+@overload
+def monte_carlo_extend(
+    manifest: str | Path,
+    script: str | Path,
+    *,
+    n: int,
+    backend: Pool | None = ...,
+    allow_script_drift: bool = ...,
+    progress: bool = ...,
+    engine: str,
+) -> DataFrame: ...
 def monte_carlo_extend(
     manifest: str | Path,
     script: str | Path,
@@ -332,7 +503,8 @@ def monte_carlo_extend(
     backend: Pool | None = None,
     allow_script_drift: bool = False,
     progress: bool = True,
-) -> pd.DataFrame:
+    engine: str = "pandas",
+) -> DataFrame:
     """Append ``n`` more bit-deterministic Monte Carlo runs to an existing sweep.
 
     Loads the manifest written by a prior :func:`monte_carlo` call,
@@ -374,11 +546,14 @@ def monte_carlo_extend(
         :meth:`gmat_sweep.Sweep.from_manifest`.
     progress:
         Whether to draw the :mod:`tqdm` progress bar over the new runs.
+    engine:
+        Output engine; same semantics as :func:`sweep`.
 
     Returns
     -------
-    pandas.DataFrame
-        ``(run_id, time)``-MultiIndexed frame whose ``run_id``
+    pandas.DataFrame or polars.DataFrame
+        ``(run_id, time)``-MultiIndexed frame (or polars flat-key
+        equivalent under ``engine="polars"``) whose ``run_id``
         cardinality is ``old_n + n``.
 
     Raises
@@ -386,8 +561,9 @@ def monte_carlo_extend(
     SweepConfigError
         If the manifest's ``parameter_spec._kind`` is not
         ``"monte_carlo"``, ``n < 1``, the script hash drifted with
-        ``allow_script_drift=False``, or the base sweep is incomplete
-        (any ``run_id`` in ``[0, old_n)`` is failed or missing).
+        ``allow_script_drift=False``, the base sweep is incomplete
+        (any ``run_id`` in ``[0, old_n)`` is failed or missing), or
+        ``engine`` is neither ``"pandas"`` nor ``"polars"``.
     """
     # Local import to avoid a Sweep ↔ api import cycle at module load.
     from gmat_sweep.sweep import Sweep
@@ -400,7 +576,7 @@ def monte_carlo_extend(
             allow_script_drift=allow_script_drift,
             progress=progress,
         ).extend(n=n)
-        return sweep_obj.to_dataframe()
+        return sweep_obj.to_dataframe(engine=engine)
 
 
 def latin_hypercube_extend(
@@ -457,7 +633,8 @@ def _run_sweep(
     backend: Pool | None,
     out: str | Path | None,
     progress: bool,
-) -> pd.DataFrame:
+    engine: str,
+) -> DataFrame:
     """Shared orchestration for the public entry points.
 
     Resolves the output directory (creating a sweep-scoped temp dir when
@@ -499,7 +676,7 @@ def _run_sweep(
                 progress=progress,
             )
             .run()
-            .to_dataframe()
+            .to_dataframe(engine=engine)
         )
 
     if tempdir is not None:
