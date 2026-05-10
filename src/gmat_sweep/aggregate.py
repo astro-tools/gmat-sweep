@@ -45,7 +45,7 @@ import pyarrow.dataset as ds
 from gmat_sweep.errors import SweepConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from gmat_sweep.manifest import Manifest, ManifestEntry
 
@@ -54,6 +54,7 @@ __all__ = [
     "lazy_ephemerides",
     "lazy_fused_reports",
     "lazy_multiindex",
+    "mc_convergence",
     "sweep_summary",
 ]
 
@@ -718,3 +719,171 @@ def sweep_summary(
         names=["statistic", "field"],
     )
     return result
+
+
+_RUNNING_COLUMNS: tuple[str, ...] = ("running_mean", "running_std", "se_mean")
+
+
+def mc_convergence(
+    df: pd.DataFrame,
+    metric: str | Callable[[pd.DataFrame], float],
+    *,
+    terminal_only: bool = False,
+) -> pd.DataFrame:
+    """Diagnose Monte Carlo convergence: running mean / std / SE of the mean over run-id prefixes.
+
+    Reduces ``df`` to a per-run scalar (or per-run-per-time scalar) under
+    ``metric`` and reports cumulative statistics across the first
+    ``n = 1..N`` runs in ``run_id`` order. Standard error of the mean is
+    ``running_std / sqrt(n)`` with a sample standard deviation
+    (``ddof=1``); ``n=1`` rows therefore carry ``NaN`` for both
+    ``running_std`` and ``se_mean``. Failed and skipped runs are dropped
+    via ``__status`` before the prefix scan, so the ``n`` axis reflects
+    successful runs only.
+
+    Parameters
+    ----------
+    df
+        ``(run_id, time)``-MultiIndexed DataFrame as returned by
+        :func:`gmat_sweep.sweep`, :func:`gmat_sweep.monte_carlo`, or
+        :func:`gmat_sweep.latin_hypercube`. A ``__status`` column, if
+        present, is used to drop non-ok runs.
+    metric
+        Either a column name in ``df`` or a callable
+        ``(per_run_subframe) -> float``. The callable is invoked once per
+        ``run_id`` with that run's ``time``-indexed slice (``__status``
+        dropped) and must return a single float — useful for derived
+        metrics like final-step miss distance.
+    terminal_only
+        ``True`` collapses the time index by taking ``.last()`` per run
+        for column-name metrics — the canonical "did the dispersion of
+        the final state converge?" view. ``False`` (default) keeps every
+        time step and emits one running curve per ``time``. Ignored for
+        callable metrics, which already return one scalar per run.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-form frame with columns ``n``, ``running_mean``,
+        ``running_std``, ``se_mean``. When ``terminal_only=False`` and
+        ``metric`` is a column name, an additional leading ``time``
+        column carries the per-time grouping. The frame is sorted by
+        ``time`` (when present) then ``n`` ascending.
+
+    Raises
+    ------
+    SweepConfigError
+        ``df.index`` is not a MultiIndex with a ``run_id`` level; the
+        column-name ``metric`` is not in ``df``; or the callable
+        ``metric`` does not return a numeric scalar.
+
+    Examples
+    --------
+    >>> from gmat_sweep import mc_convergence
+    >>> conv = mc_convergence(df, "MissDistance", terminal_only=True)  # doctest: +SKIP
+    >>> conv.tail()  # doctest: +SKIP
+            n  running_mean  running_std       se_mean
+    995   996      ...           ...           ...
+    """
+    if df.index.nlevels < 2 or _RUN_ID_COL not in (df.index.names or []):
+        raise SweepConfigError(
+            f"mc_convergence: df.index must have a {_RUN_ID_COL!r} level "
+            f"(got names={list(df.index.names or [])})"
+        )
+
+    working = df
+    if _STATUS_COL in working.columns:
+        working = working.loc[working[_STATUS_COL] == "ok"]
+    working = working.drop(columns=[_STATUS_COL], errors="ignore")
+
+    if callable(metric):
+        per_run = _reduce_callable_metric(working, metric)
+        return _running_stats(per_run.to_numpy(), n_offset=1)
+
+    if metric not in working.columns:
+        raise SweepConfigError(
+            f"mc_convergence: metric={metric!r} is not a column of df and is not callable"
+        )
+
+    if terminal_only:
+        per_run_series = working.groupby(level=_RUN_ID_COL)[metric].last().sort_index()
+        return _running_stats(per_run_series.to_numpy(), n_offset=1)
+
+    return _running_stats_per_time(working[metric])
+
+
+def _reduce_callable_metric(
+    df: pd.DataFrame,
+    metric: Callable[[pd.DataFrame], float],
+) -> pd.Series[Any]:
+    values: dict[int, float] = {}
+    for run_id, sub in df.groupby(level=_RUN_ID_COL, sort=True):
+        # Drop the run_id index level so the user-facing subframe is
+        # a plain time-indexed DataFrame.
+        sub_local = cast(pd.DataFrame, sub.droplevel(_RUN_ID_COL))
+        result = metric(sub_local)
+        try:
+            values[int(cast(int, run_id))] = float(result)
+        except (TypeError, ValueError) as exc:
+            raise SweepConfigError(
+                f"mc_convergence: callable metric must return a numeric scalar; "
+                f"run_id={run_id} returned {type(result).__name__}"
+            ) from exc
+    return pd.Series(values, name="metric").sort_index()
+
+
+def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
+    """Vectorised running mean/std/SE over the first k entries for k = 1..len(values)."""
+    arr = np.asarray(values, dtype=float)
+    n_total = arr.size
+    if n_total == 0:
+        empty: dict[str, pd.Series[Any]] = {"n": pd.Series([], dtype="int64")}
+        for col in _RUNNING_COLUMNS:
+            empty[col] = pd.Series([], dtype=float)
+        return pd.DataFrame(empty)
+
+    ks = np.arange(n_offset, n_offset + n_total, dtype=np.int64)
+    counts = np.arange(1, n_total + 1, dtype=float)
+    cumsum = np.cumsum(arr)
+    cumsum_sq = np.cumsum(arr * arr)
+    running_mean = cumsum / counts
+    # Sample variance via the cumulative-moments identity. Clip negatives
+    # from float-rounding when all values agree before sqrt.
+    with np.errstate(invalid="ignore"):
+        var = (cumsum_sq - counts * running_mean * running_mean) / np.where(
+            counts > 1, counts - 1, np.nan
+        )
+    var = np.clip(var, 0.0, None)
+    running_std = np.sqrt(var)
+    se_mean = running_std / np.sqrt(counts)
+    return pd.DataFrame(
+        {
+            "n": ks,
+            "running_mean": running_mean,
+            "running_std": running_std,
+            "se_mean": se_mean,
+        }
+    )
+
+
+def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:
+    # series is indexed by (run_id, time). Sort by run_id within each time
+    # group so the prefix scan is well-defined, then apply _running_stats
+    # to each group. pandas-stubs types reorder_levels' first arg as
+    # ``list[int]``, so cast to Any for the level-name path.
+    levels: Any = [_TIME_COL, _RUN_ID_COL]
+    sorted_series = series.reorder_levels(levels).sort_index()
+
+    parts: list[pd.DataFrame] = []
+    for time_value, group in sorted_series.groupby(level=_TIME_COL, sort=True):
+        block = _running_stats(group.to_numpy(), n_offset=1)
+        block.insert(0, _TIME_COL, time_value)
+        parts.append(block)
+
+    if not parts:
+        empty = pd.DataFrame({col: pd.Series([], dtype=float) for col in _RUNNING_COLUMNS})
+        empty.insert(0, "n", pd.Series([], dtype="int64"))
+        empty.insert(0, _TIME_COL, pd.Series([], dtype="datetime64[ns]"))
+        return empty
+
+    return pd.concat(parts, axis=0, ignore_index=True)

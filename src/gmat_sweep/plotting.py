@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
     from gmat_sweep.manifest import Manifest
 
-__all__ = ["sweep_band_plot", "sweep_corner", "sweep_heatmap"]
+__all__ = ["mc_convergence_plot", "sweep_band_plot", "sweep_corner", "sweep_heatmap"]
 
 
 def sweep_corner(
@@ -548,4 +548,85 @@ def sweep_band_plot(
     x_label = summary.index.name or "index"
     ax.set_xlabel(str(x_label))
     ax.set_ylabel(column)
+    return ax
+
+
+def mc_convergence_plot(
+    conv: pd.DataFrame,
+    *,
+    ax: Axes | None = None,
+    **kwargs: Any,
+) -> Axes:
+    """Plot a Monte Carlo convergence curve from :func:`gmat_sweep.mc_convergence` output.
+
+    Renders the running mean as a line and the ``±1·SE`` envelope as a
+    shaded :meth:`matplotlib.axes.Axes.fill_between` band, with ``n``
+    (sample count) on the x-axis. Visualises whether the per-run scalar
+    metric has stabilised: a flattening centre line and a shrinking band
+    indicate convergence.
+
+    Parameters
+    ----------
+    conv
+        Long-form convergence DataFrame as returned by
+        :func:`gmat_sweep.mc_convergence` with ``terminal_only=True``
+        (or with a callable metric). Must carry the columns ``n``,
+        ``running_mean``, and ``se_mean``. The per-time shape returned
+        by ``terminal_only=False`` is not supported in this release —
+        filter to a single ``time`` first or aggregate to terminal-only.
+    ax
+        Optional pre-existing :class:`matplotlib.axes.Axes`. ``None``
+        (default) creates a fresh figure with size ``(8, 4)`` inches.
+    **kwargs
+        Forwarded to the centre :meth:`matplotlib.axes.Axes.plot` call
+        (e.g. ``label=``, ``linestyle=``, ``linewidth=``). The band's
+        ``fill_between`` reuses the line colour at ``alpha=0.25``.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The Axes carrying the convergence plot.
+
+    Raises
+    ------
+    SweepConfigError
+        ``conv`` is missing one of the required columns, or carries the
+        per-time ``time`` column from the ``terminal_only=False`` shape.
+    """
+    import matplotlib.pyplot as plt
+
+    required = {"n", "running_mean", "se_mean"}
+    missing = required - set(conv.columns)
+    if missing:
+        raise SweepConfigError(
+            f"mc_convergence_plot: input is missing required column(s) {sorted(missing)}; "
+            f"got columns {list(conv.columns)}"
+        )
+    if "time" in conv.columns:
+        raise SweepConfigError(
+            "mc_convergence_plot: per-time convergence frames are not supported; "
+            "filter to a single time (e.g. conv[conv['time'] == t]) or rerun "
+            "mc_convergence(terminal_only=True)"
+        )
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 4))
+
+    n = conv["n"].to_numpy()
+    mean = conv["running_mean"].to_numpy()
+    se = conv["se_mean"].to_numpy()
+
+    plot_kwargs: dict[str, Any] = {"label": "running mean", **kwargs}
+    (line,) = ax.plot(n, mean, **plot_kwargs)
+    ax.fill_between(
+        n,
+        mean - se,
+        mean + se,
+        color=line.get_color(),
+        alpha=0.25,
+        label="±1·SE",
+    )
+
+    ax.set_xlabel("n")
+    ax.set_ylabel("running mean")
     return ax

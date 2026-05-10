@@ -70,9 +70,13 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.sweep_summary
 
+::: gmat_sweep.mc_convergence
+
 ## Plotting
 
 ::: gmat_sweep.plotting.sweep_band_plot
+
+::: gmat_sweep.plotting.mc_convergence_plot
 
 ## Exceptions
 
