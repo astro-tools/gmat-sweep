@@ -573,6 +573,12 @@ def lazy_fused_reports(
         ``names`` has fewer than two entries, contains duplicates, or any
         entry does not match a ``ReportFile`` resource in the sweep
         (raised by the underlying :func:`lazy_multiindex` call).
+    AssertionError
+        Anchor frame is not sorted on ``time`` before a tolerance-based
+        ``pandas.merge_asof`` — a defensive guard against future
+        refactors that drop the explicit pre-merge ``sort_values``;
+        users invoking ``lazy_fused_reports`` directly will never trip
+        it.
     """
     if len(names) < 2:
         raise SweepConfigError(
@@ -818,7 +824,8 @@ def sweep_summary(
     SweepConfigError
         ``by`` is not ``"time"`` or ``"run_id"``; any ``q_val`` falls
         outside ``(0, 1)``; ``include`` contains an unknown statistic;
-        or ``by`` is not an index level of ``df``.
+        ``q`` or ``include`` contains duplicate entries; or ``by`` is
+        not an index level of ``df``.
 
     Examples
     --------
