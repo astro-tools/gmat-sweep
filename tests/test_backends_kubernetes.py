@@ -57,14 +57,31 @@ def _ok_outcome_dict(run_id: int) -> dict[str, Any]:
 
 
 class _BatchStub:
-    """Records every Job submission. Real V1Job objects round-trip through it."""
+    """Records every Job submission and deletion. Real V1Job objects round-trip through it."""
 
     def __init__(self) -> None:
         self.created: list[tuple[str, Any]] = []
+        self.deleted: list[dict[str, Any]] = []
+        # If non-None, ``create_namespaced_job`` raises this on every call.
+        self.create_raises: BaseException | None = None
+        # If non-None, ``delete_namespaced_job`` raises this on every call.
+        self.delete_raises: BaseException | None = None
 
     def create_namespaced_job(self, *, namespace: str, body: Any) -> Any:
+        if self.create_raises is not None:
+            raise self.create_raises
         self.created.append((namespace, body))
         return body
+
+    def delete_namespaced_job(
+        self, *, name: str, namespace: str, propagation_policy: str = "Background"
+    ) -> Any:
+        if self.delete_raises is not None:
+            raise self.delete_raises
+        self.deleted.append(
+            {"name": name, "namespace": namespace, "propagation_policy": propagation_policy}
+        )
+        return None
 
     def list_namespaced_job(self, **_kw: Any) -> Any:
         # Reference handed to ``Watch.stream`` — the watch stub never calls it,
@@ -213,6 +230,13 @@ def test_init_rejects_zero_or_negative_parallelism(patch_kube: _BatchStub, tmp_p
         _make_pool(tmp_path=tmp_path, parallelism=0)
     with pytest.raises(BackendError, match="parallelism"):
         _make_pool(tmp_path=tmp_path, parallelism=-2)
+
+
+def test_init_rejects_zero_or_negative_job_deadline(patch_kube: _BatchStub, tmp_path: Path) -> None:
+    with pytest.raises(BackendError, match="job_deadline_seconds"):
+        _make_pool(tmp_path=tmp_path, job_deadline_seconds=0)
+    with pytest.raises(BackendError, match="job_deadline_seconds"):
+        _make_pool(tmp_path=tmp_path, job_deadline_seconds=-1)
 
 
 def test_init_rejects_in_cluster_with_kubeconfig(patch_kube: _BatchStub, tmp_path: Path) -> None:
@@ -701,7 +725,9 @@ def test_iter_completions_yields_completed_job_names(
     monkeypatch.setattr(kubernetes.watch, "Watch", _Stub)
 
     pool = _make_pool(tmp_path=tmp_path)
-    gen = cast(Generator[str, None, None], pool._iter_completions("gmat-sweep/sweep-id=test"))
+    gen = cast(
+        Generator[str | None, None, None], pool._iter_completions("gmat-sweep/sweep-id=test")
+    )
     try:
         assert next(gen) == "job-a"
         assert next(gen) == "job-b"
@@ -709,10 +735,45 @@ def test_iter_completions_yields_completed_job_names(
         gen.close()
 
 
+def test_iter_completions_yields_none_on_natural_reconnect(
+    patch_kube: _BatchStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean ``Watch.stream()`` end (server-side timeout) yields a ``None`` tick.
+
+    The drain loop in :meth:`as_completed` uses the tick to run its
+    deadline scan even when no Job has produced a status event.
+    """
+
+    class _Stub(_WatchStub):
+        @classmethod
+        def _events_for_call(cls, call_n: int) -> list[dict[str, Any]]:
+            if call_n == 1:
+                # Empty stream — natural end (server-side timeout)
+                return []
+            raise AssertionError(f"unexpected Watch reconnect (call_n={call_n})")
+
+    _Stub.instances = []
+    _Stub.call_n = 0
+    monkeypatch.setattr(kubernetes.watch, "Watch", _Stub)
+
+    pool = _make_pool(tmp_path=tmp_path)
+    gen = cast(
+        Generator[str | None, None, None], pool._iter_completions("gmat-sweep/sweep-id=test")
+    )
+    try:
+        assert next(gen) is None
+    finally:
+        gen.close()
+
+
 def test_iter_completions_reconnects_after_api_exception(
     patch_kube: _BatchStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Transient ApiException during stream() triggers a Watch() reconnect."""
+    """Transient ApiException during stream() triggers a Watch() reconnect.
+
+    The reconnect path also yields a ``None`` tick before the next
+    Watch — same contract as the natural-end path.
+    """
 
     class _Stub(_WatchStub):
         @classmethod
@@ -729,13 +790,153 @@ def test_iter_completions_reconnects_after_api_exception(
     monkeypatch.setattr("gmat_sweep.backends.kubernetes.time.sleep", lambda _s: None)
 
     pool = _make_pool(tmp_path=tmp_path)
-    gen = cast(Generator[str, None, None], pool._iter_completions("gmat-sweep/sweep-id=test"))
+    gen = cast(
+        Generator[str | None, None, None], pool._iter_completions("gmat-sweep/sweep-id=test")
+    )
     try:
+        # First yield is the post-ApiException tick
+        assert next(gen) is None
+        # Second yield is the completion from the reconnected stream
         assert next(gen) == "job-x"
         # Two Watch instances — proves a reconnect happened
         assert len(_Stub.instances) >= 2
     finally:
         gen.close()
+
+
+# ---------------------------------------------------------------------------
+# Deadline-driven hang prevention + close()-deletes-in-flight + spec cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_job_exceeding_deadline_folded_into_failed_run(
+    patch_kube: _BatchStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Job that never reaches a terminal status before ``job_deadline_seconds``
+    is deleted by the driver and folded into a synthetic ``RunOutcome.failed``
+    rather than hanging the sweep.
+    """
+
+    # Drive the watch to deliver a single None tick — no completion events
+    # ever arrive, so the only way the drain loop progresses is via the
+    # deadline scan.
+    def _fake_iter(self: KubernetesJobPool, _label_selector: str) -> Iterator[str | None]:
+        yield None
+
+    monkeypatch.setattr(KubernetesJobPool, "_iter_completions", _fake_iter, raising=True)
+
+    # Step monotonic time past the deadline on the second read (after the
+    # spec is recorded in `in_flight`).
+    times = iter([0.0, 1_000_000.0])
+    monkeypatch.setattr(
+        "gmat_sweep.backends.kubernetes.time.monotonic", lambda: next(times, 1_000_000.0)
+    )
+
+    pool = _make_pool(tmp_path=tmp_path, job_deadline_seconds=60)
+    spec = _make_spec(output_dir=tmp_path / "run_0", run_id=0)
+    f = pool.submit(spec)
+
+    outcomes = list(pool.as_completed([f]))
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].stderr is not None
+    assert "job_deadline_seconds=60" in outcomes[0].stderr
+
+    # The driver must have deleted the stuck Job with background propagation.
+    assert len(patch_kube.deleted) == 1
+    deleted_call = patch_kube.deleted[0]
+    assert deleted_call["propagation_policy"] == "Background"
+    # The deleted Job name matches the one we created.
+    expected_name = patch_kube.created[0][1].metadata.name
+    assert deleted_call["name"] == expected_name
+
+
+def test_close_deletes_in_flight_jobs(patch_kube: _BatchStub, tmp_path: Path) -> None:
+    """``close()`` issues a background-propagation delete for every Job
+    still in :attr:`_in_flight_jobs` at close time, so a sweep aborted
+    mid-drain does not orphan Jobs against the namespace quota.
+    Completed Jobs (already removed from the set by the drain loop) are
+    left alone — the TTL controller reaps them.
+    """
+    pool = _make_pool(tmp_path=tmp_path)
+    pool._ensure_io_dirs()
+
+    # Get two Jobs onto the API server (and onto `_in_flight_jobs`) via
+    # direct `_submit_next` — bypasses `as_completed`, so this test can
+    # exercise the close-time delete invariant in isolation.
+    pool._submit_next(
+        iter([_make_spec(output_dir=tmp_path / "run_0", run_id=0)]),
+        {},
+        sweep_id="abcdef12",
+    )
+    pool._submit_next(
+        iter([_make_spec(output_dir=tmp_path / "run_1", run_id=1)]),
+        {},
+        sweep_id="abcdef12",
+    )
+    in_flight_before_close = sorted(pool._in_flight_jobs)
+    assert len(in_flight_before_close) == 2
+
+    # Simulate run_0 having completed during the drain — `as_completed`
+    # is the only place that removes from the set, so we model it here.
+    completed = in_flight_before_close[0]
+    still_in_flight = in_flight_before_close[1]
+    pool._in_flight_jobs.discard(completed)
+
+    pool.close()
+
+    # Exactly one delete — for the Job still in-flight at close time.
+    assert len(patch_kube.deleted) == 1
+    deleted_call = patch_kube.deleted[0]
+    assert deleted_call["name"] == still_in_flight
+    assert deleted_call["propagation_policy"] == "Background"
+
+
+def test_close_swallows_api_exception_on_delete(patch_kube: _BatchStub, tmp_path: Path) -> None:
+    """An ApiException from ``delete_namespaced_job`` (already reaped by TTL,
+    RBAC denied, transient network error) is swallowed per-Job so a single
+    delete failure doesn't propagate out of close.
+    """
+    pool = _make_pool(tmp_path=tmp_path)
+    pool._ensure_io_dirs()
+    # Get two Jobs onto the API server (and onto `_in_flight_jobs`)
+    # without driving as_completed — direct `_submit_next` calls do that.
+    pool._submit_next(
+        iter([_make_spec(output_dir=tmp_path / "run_0", run_id=0)]),
+        {},
+        sweep_id="abcdef12",
+    )
+    pool._submit_next(
+        iter([_make_spec(output_dir=tmp_path / "run_1", run_id=1)]),
+        {},
+        sweep_id="abcdef12",
+    )
+    assert len(pool._in_flight_jobs) == 2
+
+    patch_kube.delete_raises = kubernetes.client.exceptions.ApiException("gone")
+
+    # Must not raise — every per-Job delete failure is swallowed.
+    pool.close()
+    assert pool._in_flight_jobs == set()
+
+
+def test_spec_file_cleaned_up_when_create_namespaced_job_fails(
+    patch_kube: _BatchStub, tmp_path: Path
+) -> None:
+    """If ``create_namespaced_job`` raises, the spec JSON we wrote to the
+    PVC is unlinked before the exception propagates so a retry doesn't
+    see stale data and the disk doesn't accumulate orphaned specs.
+    """
+    pool = _make_pool(tmp_path=tmp_path)
+    patch_kube.create_raises = kubernetes.client.exceptions.ApiException("nope")
+
+    pool._ensure_io_dirs()
+    spec = _make_spec(output_dir=tmp_path / "run_3", run_id=3)
+    with pytest.raises(kubernetes.client.exceptions.ApiException):
+        pool._submit_job(spec, sweep_id="cafef00d")
+
+    spec_path = tmp_path / "_specs" / "3.json"
+    assert not spec_path.exists()
 
 
 # ---------------------------------------------------------------------------
