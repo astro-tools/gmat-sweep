@@ -323,6 +323,13 @@ align (e.g. via `df.reset_index().set_index([...])`) before calling.
 
 ## Polars output engine
 
+!!! warning "Experimental"
+
+    The polars output engine is experimental. The column-naming and
+    dtype rules described below are not yet contractual and may change
+    in a future minor version. Stable production code should pin
+    `engine="pandas"` (the default) or pin the gmat-sweep version.
+
 Pandas is the default and only return type with no extra installed.
 With the `[polars]` extra, every flat-column DataFrame-returning entry
 point in this module accepts an `engine="polars"` keyword that returns

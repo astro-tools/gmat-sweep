@@ -190,7 +190,9 @@ def lazy_multiindex(
         flattened into two leading sorted columns; row count and the
         non-index column set match the pandas-engine equivalent. Requires
         the ``[polars]`` extra; an :class:`ImportError` with the install
-        hint is raised when polars is not importable.
+        hint is raised when polars is not importable. **Experimental:**
+        the polars output shape (column names, dtypes) is not yet
+        contractual and may change in a future minor version.
 
     Raises
     ------
@@ -970,7 +972,8 @@ def mc_convergence(
         ``"pandas"`` (default) returns a :class:`pandas.DataFrame` with a
         plain :class:`~pandas.RangeIndex`. ``"polars"`` returns the same
         flat-column frame as a :class:`polars.DataFrame`. Requires the
-        ``[polars]`` extra; same semantics as :func:`lazy_multiindex`.
+        ``[polars]`` extra; same semantics as :func:`lazy_multiindex` —
+        including the experimental status of the polars output shape.
 
     Returns
     -------
@@ -1168,7 +1171,8 @@ def sweep_diff(
         the same index shape as the inputs. ``"polars"`` returns a
         :class:`polars.DataFrame` whose index levels are flattened into
         leading columns. Requires the ``[polars]`` extra; same semantics
-        as :func:`lazy_multiindex`.
+        as :func:`lazy_multiindex` — including the experimental status
+        of the polars output shape.
 
     Returns
     -------
