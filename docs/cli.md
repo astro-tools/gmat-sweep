@@ -16,6 +16,8 @@ The subcommands:
 - [`explicit`](#explicit) — explicit-row sweep from a CSV or Parquet design.
 - [`resume`](#resume) — re-run only the failed and missing entries from a
   prior manifest.
+- [`extend`](#extend) — append more bit-deterministic Monte Carlo runs to an
+  existing sweep.
 - [`show`](#show) — print a one-line summary of a manifest.
 
 `gmat-sweep --help` lists them. Each subcommand has its own `--help`.
@@ -209,6 +211,42 @@ loaded. Its canonical SHA-256 must equal the manifest's `script_sha256`; see
 
 A missing `MANIFEST` exits with code `3`; a missing `--script` or a hash
 mismatch exits with code `2`.
+
+## `extend`
+
+Append `N` more bit-deterministic Monte Carlo runs to an existing sweep.
+The base manifest's `seed` and `perturb` mapping are reused so the new
+draws are bit-equal to the same indices of a fresh
+`monte_carlo(n=old_n + N)` call.
+
+```bash
+gmat-sweep extend ./mc-out/manifest.jsonl \
+    --n 1000 \
+    --script mission.script \
+    --workers 8
+```
+
+Required positional: `MANIFEST` — an existing Monte Carlo
+`manifest.jsonl`. Grid, explicit-row, and Latin hypercube manifests
+exit with code `2` (their stochastic semantics don't admit clean
+extension).
+
+Required flags:
+
+- `--n N` — number of additional stochastic runs to append, ≥ 1.
+- `--script PATH` — the same GMAT `.script` the original sweep loaded.
+  Same hash-drift contract as `resume`; add `--allow-script-drift` to
+  proceed past a mismatch.
+
+`extend` refuses if the base sweep has any `failed` or missing runs in
+its original `[0, n)` range — the underlying error names them and
+points at `gmat-sweep resume`. Run `resume` first, then `extend`.
+
+A missing `MANIFEST` exits with code `3`; a non-Monte-Carlo manifest,
+an incomplete base sweep, a missing `--script`, or a hash mismatch
+exits with code `2`. See
+[Monte Carlo § Extending an existing sweep](monte-carlo.md#extending-an-existing-sweep)
+for the full determinism contract.
 
 ## `show`
 

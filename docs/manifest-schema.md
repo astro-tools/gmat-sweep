@@ -196,6 +196,30 @@ in-memory `entries` list therefore has exactly one entry per
 the latest status. See [Resume](resume.md) for the resume flow that
 relies on this.
 
+## Monte Carlo extensions
+
+[`monte_carlo_extend()`][gmat_sweep.monte_carlo_extend] appends new
+runs to an existing Monte Carlo manifest at `run_id` range
+`[old_n, old_n + n)`. The header's `parameter_spec.n` is **not**
+rewritten — it stays at the original sweep's size — and no new header
+fields are added on disk. The cumulative count of extension runs is
+recoverable from the entries themselves; the convenience accessor is:
+
+```python
+manifest = Manifest.load("./sweep/manifest.jsonl")
+manifest.extension_run_count  # 0 for fresh sweeps; N after extend(n=N)
+```
+
+The total run count on disk after any number of extensions is
+`max(e.run_id for e in manifest.entries) + 1`, the same expression
+that already covers `Ctrl-C`'d sweeps where `len(entries) <
+parameter_spec["n"]`.
+
+The `_kind` of a Monte Carlo manifest stays `"monte_carlo"` after
+extension; only Monte Carlo manifests support extension at all
+(`latin_hypercube` and grid sweeps refuse — see
+[Monte Carlo § Extending an existing sweep](monte-carlo.md#extending-an-existing-sweep)).
+
 ## Compatibility policy
 
 The on-disk shape is frozen as `schema_version=1`. The exposed constant

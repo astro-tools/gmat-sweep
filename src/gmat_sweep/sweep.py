@@ -306,6 +306,106 @@ class Sweep:
         self._manifest = Manifest.load(self._manifest_path)
         return self
 
+    def extend(self, *, n: int) -> Sweep:
+        """Append ``n`` more bit-deterministic Monte Carlo runs to a loaded sweep.
+
+        Only valid on a :class:`Sweep` produced by :meth:`from_manifest`
+        whose manifest's ``parameter_spec._kind`` is ``"monte_carlo"``.
+        The new runs occupy ``run_id`` range ``[old_n, old_n + n)`` where
+        ``old_n`` is the cumulative high-water mark on disk
+        (``parameter_spec["n"] + manifest.extension_run_count``); their
+        per-parameter draws are bit-equal to the same indices of a fresh
+        ``monte_carlo(n=old_n+n, ...)`` call thanks to the position-
+        determinism of :func:`numpy.random.SeedSequence.spawn`.
+
+        Refuses with :class:`SweepConfigError` if any ``run_id`` in
+        ``[0, old_n)`` is missing on disk or has a ``failed`` latest
+        status — extending across an unfinished base would silently
+        produce a manifest with gaps. Call :meth:`resume` first to fill
+        them in.
+
+        Returns ``self`` for chaining (typical use is
+        ``sweep.extend(n=...).to_dataframe()``).
+        """
+        if not self._loaded_from_manifest or self._manifest is None:
+            raise RuntimeError("Sweep.extend requires a Sweep built via Sweep.from_manifest")
+        manifest = self._manifest
+
+        kind = manifest.parameter_spec.get("_kind")
+        if kind != "monte_carlo":
+            raise SweepConfigError(
+                f"Sweep.extend only applies to Monte Carlo sweeps; "
+                f"this manifest is parameter_spec._kind={kind!r}"
+            )
+
+        original_n = int(manifest.parameter_spec["n"])
+        old_n = original_n + manifest.extension_run_count
+
+        # Refuse on a torn base — extending past gaps would mix run_ids in a
+        # way the aggregated DataFrame can't recover from.
+        gaps_failed = [rid for rid in manifest.find_failed() if rid < old_n]
+        gaps_missing = manifest.find_missing(range(old_n))
+        if gaps_failed or gaps_missing:
+            details = []
+            if gaps_failed:
+                details.append(f"failed: {sorted(gaps_failed)}")
+            if gaps_missing:
+                details.append(f"missing: {sorted(gaps_missing)}")
+            raise SweepConfigError(
+                "Sweep.extend refuses to append onto an incomplete base sweep "
+                f"(run_ids in [0, {old_n}) — {'; '.join(details)}). "
+                "Call .resume() first to fill the gaps, then extend."
+            )
+
+        if n < 1:
+            raise SweepConfigError(f"Sweep.extend requires n >= 1, got {n}")
+
+        # Local imports keep gmat_sweep.sweep cycle-free at import time.
+        from gmat_sweep.distributions import _deserialise_perturb
+        from gmat_sweep.grids import expand_monte_carlo_extension_to_run_specs
+
+        perturb = _deserialise_perturb(manifest.parameter_spec["perturb"])
+        seed = manifest.parameter_spec.get("seed")
+        new_runs = expand_monte_carlo_extension_to_run_specs(
+            perturb,
+            old_n=old_n,
+            n=n,
+            seed=None if seed is None else int(seed),
+            script_path=self._script_path,
+            output_dir=self._output_dir,
+        )
+        self._enforce_debug_pool_single_spec(new_runs)
+
+        specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in new_runs}
+        futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in new_runs]
+
+        progress_bar = tqdm(
+            total=len(new_runs),
+            disable=not self._progress,
+            desc="gmat-sweep extend",
+            unit="run",
+        )
+        try:
+            for outcome in self._backend.as_completed(futures):
+                spec = specs_by_run_id[outcome.run_id]
+                entry = ManifestEntry.from_outcome(
+                    outcome,
+                    overrides=spec.overrides,
+                    log_path=spec.output_dir / _WORKER_LOG_NAME,
+                )
+                manifest.append_entry(entry)
+                progress_bar.update(1)
+        finally:
+            progress_bar.close()
+
+        # Track the new specs on the Sweep so a follow-up resume() (e.g. if
+        # a worker in this batch failed) can find them in self._runs.
+        self._runs.extend(new_runs)
+
+        # Reload to dedupe by run_id last-wins, matching resume().
+        self._manifest = Manifest.load(self._manifest_path)
+        return self
+
     def to_manifest(self) -> Manifest:
         """Return the manifest populated by :meth:`run`."""
         if self._manifest is None:

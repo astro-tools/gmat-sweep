@@ -89,6 +89,73 @@ df_two = monte_carlo("mission.script", n=20, seed=42, perturb={
 This matters when an analysis grows: extending a 1-D `perturb` to a 4-D
 one mid-investigation should not invalidate the 1-D results.
 
+## Extending an existing sweep
+
+A 1000-run dispersion that turned out to need 2000 doesn't have to start
+over. [`monte_carlo_extend()`][gmat_sweep.monte_carlo_extend] runs only
+the new 1000 against the original sweep's manifest and returns the full
+2000-run aggregated DataFrame:
+
+```python
+from gmat_sweep import monte_carlo, monte_carlo_extend
+
+# Original sweep.
+df_1000 = monte_carlo(
+    "mission.script",
+    n=1000,
+    perturb={"Sat.SMA": ("normal", 7100.0, 50.0)},
+    seed=42,
+    out="./dispersion",
+)
+
+# Decide later that 2000 was the right size after all.
+df_2000 = monte_carlo_extend(
+    "./dispersion/manifest.jsonl",
+    "mission.script",
+    n=1000,
+)
+```
+
+The first 1000 `run_id`s in `df_2000` are bit-equal to `df_1000` —
+[`numpy.random.SeedSequence.spawn`][seed-spawn] is position-deterministic,
+so per-run sub-seeds at indices `0..999` are independent of how many
+total samples were requested. Equivalently, `df_2000` is bit-equal to a
+fresh `monte_carlo(n=2000, seed=42, ...)` call: extend on top of `n=1000`
+is indistinguishable from running `n=2000` from scratch.
+
+[seed-spawn]: https://numpy.org/doc/stable/reference/random/parallel.html
+
+The original `perturb` mapping and `seed` are read from the manifest
+header — the caller does not (and cannot) change them. Adding new
+perturbed parameters mid-sweep would break determinism; if the analysis
+needs a different distribution shape, run a fresh sweep instead.
+
+`monte_carlo_extend` refuses if the base sweep has any `failed` or
+missing runs in its original `[0, n)` range, naming them and pointing at
+[`Sweep.resume()`][gmat_sweep.Sweep.resume]. Mixing extension over an
+unfinished base would produce a manifest with gaps in the original
+range that downstream readers couldn't interpret — fill them in first,
+then extend.
+
+The on-disk header's `parameter_spec.n` stays frozen at the original
+sweep's size (manifest headers are append-only). Use
+[`Manifest.extension_run_count`][gmat_sweep.Manifest.extension_run_count]
+to read the cumulative count of extension runs, or the simpler
+`max(e.run_id for e in manifest.entries) + 1` for the total run count
+on disk.
+
+### Why Latin hypercube can't be extended
+
+[`latin_hypercube_extend()`][gmat_sweep.latin_hypercube_extend] exists
+to refuse the operation cleanly. Extending a Latin hypercube sweep
+would change the per-axis stratification of every sample (the `n` bins
+under [`scipy.stats.qmc.LatinHypercube`][scipy-lh] repartition when `n`
+changes), so there is no slice of a larger LH draw that reproduces the
+original `n` samples bit-for-bit. If you need more samples for an LH
+study, run a fresh `latin_hypercube(n=old_n + new)` from scratch.
+
+[scipy-lh]: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html
+
 ## Worked example: launch dispersion
 
 A typical injection-error analysis perturbs the post-burn state vector

@@ -315,6 +315,29 @@ class Manifest:
         present = {e.run_id for e in self.entries}
         return [rid for rid in expected_run_ids if rid not in present]
 
+    @property
+    def extension_run_count(self) -> int:
+        """Cumulative number of extension runs appended beyond the original sweep.
+
+        Derived as ``max(0, max(run_id for entries) + 1 - parameter_spec["n"])``
+        for Monte Carlo manifests; ``0`` for any other ``parameter_spec``
+        kind or for an MC manifest that has not been extended. The on-disk
+        header is not rewritten on extension (manifest headers are
+        append-only), so this is the canonical way to ask "how many
+        :func:`gmat_sweep.monte_carlo_extend` calls have landed on top of
+        this sweep's original ``n``."
+        """
+        kind = self.parameter_spec.get("_kind")
+        if kind != "monte_carlo":
+            return 0
+        original_n_raw = self.parameter_spec.get("n")
+        if not isinstance(original_n_raw, int):
+            return 0
+        if not self.entries:
+            return 0
+        max_run_id = max(e.run_id for e in self.entries)
+        return max(0, max_run_id + 1 - original_n_raw)
+
 
 def _fsync_dir(directory: Path) -> None:
     # Directory fsync ensures the new file's metadata (existence, size) is

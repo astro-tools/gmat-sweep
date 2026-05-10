@@ -25,7 +25,13 @@ from gmat_sweep.sweep import Sweep
 if TYPE_CHECKING:
     import pandas as pd
 
-__all__ = ["latin_hypercube", "monte_carlo", "sweep"]
+__all__ = [
+    "latin_hypercube",
+    "latin_hypercube_extend",
+    "monte_carlo",
+    "monte_carlo_extend",
+    "sweep",
+]
 
 # Manifest filename inside the sweep's output directory. Picked to match the
 # JSON Lines format suffix for grep-friendliness; downstream consumers
@@ -315,6 +321,115 @@ def latin_hypercube(
         backend=backend,
         out=out,
         progress=progress,
+    )
+
+
+def monte_carlo_extend(
+    manifest: str | Path,
+    script: str | Path,
+    *,
+    n: int,
+    backend: Pool | None = None,
+    allow_script_drift: bool = False,
+    progress: bool = True,
+) -> pd.DataFrame:
+    """Append ``n`` more bit-deterministic Monte Carlo runs to an existing sweep.
+
+    Loads the manifest written by a prior :func:`monte_carlo` call,
+    dispatches ``n`` new runs at ``run_id`` range
+    ``[old_n, old_n + n)`` (where ``old_n`` is the cumulative high-water
+    mark including any prior extensions), and returns the aggregated
+    DataFrame over **all** runs (original + every extension applied so
+    far). Per-parameter draws at the new ``run_id``\\ s are bit-equal to
+    the same indices of a fresh ``monte_carlo(n=old_n+n, seed=...)``
+    call thanks to the position-determinism of
+    :func:`numpy.random.SeedSequence.spawn`.
+
+    The original ``perturb`` mapping and ``seed`` are read from the
+    manifest's ``parameter_spec`` — the caller does not (and cannot)
+    change them. Adding new perturbed parameters mid-sweep is not
+    supported and would break determinism.
+
+    Parameters
+    ----------
+    manifest:
+        Path to the existing ``manifest.jsonl``. Its parent is the
+        sweep's ``output_dir`` and must still exist on disk —
+        successful runs' Parquet files are read from there as-is when
+        the aggregated DataFrame is built.
+    script:
+        Path to the same GMAT ``.script`` the original sweep loaded.
+        Its canonical SHA-256 must equal the manifest's
+        ``script_sha256`` unless ``allow_script_drift`` is set —
+        otherwise the original runs and the new ones would have loaded
+        different scripts and the aggregated DataFrame would mix them.
+    n:
+        Number of additional runs to dispatch. Must be ``>= 1``.
+    backend:
+        Execution backend; same semantics as :func:`monte_carlo`.
+    allow_script_drift:
+        ``False`` (default) raises :class:`SweepConfigError` on a hash
+        mismatch with both hashes in the message. ``True`` proceeds
+        anyway and emits a :class:`RuntimeWarning`. Same surface as
+        :meth:`gmat_sweep.Sweep.from_manifest`.
+    progress:
+        Whether to draw the :mod:`tqdm` progress bar over the new runs.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``(run_id, time)``-MultiIndexed frame whose ``run_id``
+        cardinality is ``old_n + n``.
+
+    Raises
+    ------
+    SweepConfigError
+        If the manifest's ``parameter_spec._kind`` is not
+        ``"monte_carlo"``, ``n < 1``, the script hash drifted with
+        ``allow_script_drift=False``, or the base sweep is incomplete
+        (any ``run_id`` in ``[0, old_n)`` is failed or missing).
+    """
+    # Local import to avoid a Sweep ↔ api import cycle at module load.
+    from gmat_sweep.sweep import Sweep
+
+    with _resolve_pool(backend) as pool:
+        sweep_obj = Sweep.from_manifest(
+            manifest,
+            script,
+            backend=pool,
+            allow_script_drift=allow_script_drift,
+            progress=progress,
+        ).extend(n=n)
+        return sweep_obj.to_dataframe()
+
+
+def latin_hypercube_extend(
+    manifest: str | Path,
+    script: str | Path,
+    *,
+    n: int,
+    backend: Pool | None = None,
+    allow_script_drift: bool = False,
+    progress: bool = True,
+) -> pd.DataFrame:
+    """Refuse to extend a Latin hypercube sweep — no bit-equivalence semantics.
+
+    Always raises :class:`SweepConfigError`. Extending an LH sweep
+    changes the per-axis stratification of every existing sample (the
+    ``n`` bins repartition under
+    :class:`scipy.stats.qmc.LatinHypercube`), so there is no slice of
+    a larger LH draw that reproduces the original ``n`` samples
+    bit-for-bit. The function exists to **refuse cleanly** rather than
+    silently produce wrong draws — its signature mirrors
+    :func:`monte_carlo_extend` so a caller writing a generic
+    "extend whatever sweep this is" wrapper gets a clear error rather
+    than an :class:`AttributeError`.
+    """
+    raise SweepConfigError(
+        "latin_hypercube_extend is unsupported: extending a Latin hypercube sweep "
+        "changes the stratification of every existing sample, so the new draws "
+        "would not be bit-equal to the originals. Use monte_carlo_extend on a "
+        "Monte Carlo manifest, or run a fresh latin_hypercube(n=old_n + new) sweep."
     )
 
 

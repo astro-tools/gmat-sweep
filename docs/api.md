@@ -10,7 +10,11 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.monte_carlo
 
+::: gmat_sweep.monte_carlo_extend
+
 ::: gmat_sweep.latin_hypercube
+
+::: gmat_sweep.latin_hypercube_extend
 
 ::: gmat_sweep.Sweep
 
