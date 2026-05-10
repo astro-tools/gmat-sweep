@@ -427,22 +427,30 @@ def _read_ok_runs(
 
     dataset = ds.dataset(paths_str, format="parquet")  # type: ignore[no-untyped-call]
 
-    frames: list[pd.DataFrame] = []
+    # Stay in Arrow for the per-fragment loop and materialise pandas once at
+    # the end. pa.concat_tables shares buffers across input tables, so peak
+    # memory is one pandas frame's worth of the full ok-row set — not two
+    # (the per-fragment frames + the merged frame) as the older
+    # accumulate-and-pd.concat path produced. See #130.
+    tables: list[pa.Table] = []
     for fragment in dataset.get_fragments():
         run_id = path_to_run_id[Path(fragment.path).as_posix()]
         if spool:
             for batch in fragment.to_batches():
-                frames.append(_batch_to_pandas(batch, run_id))
+                tables.append(_augment_with_run_id(pa.Table.from_batches([batch]), run_id))
         else:
-            table = fragment.to_table()
-            frames.append(_batch_to_pandas(table, run_id))
+            tables.append(_augment_with_run_id(fragment.to_table(), run_id))
 
-    merged = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    if secondary_index not in merged.columns:
+    if not tables:
+        return pd.DataFrame()
+
+    merged_table = pa.concat_tables(tables, promote_options="default")
+    if secondary_index not in merged_table.column_names:
         raise ValueError(
             f"per-run Parquet output is missing the {secondary_index!r} column "
             f"required for the (run_id, {secondary_index}) MultiIndex"
         )
+    merged = cast(pd.DataFrame, merged_table.to_pandas())
     # Cast the secondary index to the per-kind canonical dtype: datetime64[ns]
     # for time (so NaT is the missing sentinel for non-ok rows), Int64 nullable
     # for interval_id (so pd.NA can share the same level as ok integer rows).
@@ -461,11 +469,10 @@ def _coerce_secondary_index(series: pd.Series, secondary_index: str) -> pd.Serie
     return series.astype(dtype)
 
 
-def _batch_to_pandas(batch_or_table: Any, run_id: int) -> pd.DataFrame:
-    n_rows = batch_or_table.num_rows
+def _augment_with_run_id(table: pa.Table, run_id: int) -> pa.Table:
+    n_rows = table.num_rows
     run_id_col = pa.array([run_id] * n_rows, type=pa.int64())
-    augmented = batch_or_table.append_column(_RUN_ID_COL, run_id_col)
-    return cast(pd.DataFrame, augmented.to_pandas())
+    return cast(pa.Table, table.append_column(_RUN_ID_COL, run_id_col))
 
 
 def _materialise_nonok(
