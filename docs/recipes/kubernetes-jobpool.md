@@ -258,6 +258,29 @@ Completed Jobs auto-GC after 5 minutes. Long enough for a kubectl
 inspection window, short enough to not leak Job objects across long
 sweeps. Override via `ttl_seconds_after_finished=` if you need more.
 
+### `job_deadline_seconds=3600`
+
+Driver-side wall-clock deadline per Job. A Job that has not reached a
+terminal status (`succeeded` or `failed`) within this many seconds is
+deleted (`propagationPolicy=Background`) and folded into a synthetic
+`RunOutcome.failed`. The check exists to break the otherwise-silent
+hang on Pods stuck in `Pending` / `ImagePullBackOff` / `Unschedulable`,
+which never produce a status event and so never satisfy the watch
+loop. Granularity is bounded by the watch reconnect cadence (~60 s);
+the deadline is a hang preventer, not a tight SLA. Override via
+`job_deadline_seconds=` for shorter (test) or longer (multi-hour
+solver) runs.
+
+### `close()` deletes in-flight Jobs
+
+Calling `close()` (whether from a `with` block exit, a `Ctrl-C`, or
+explicitly mid-sweep) issues a background-propagation delete for
+every Job still in flight at close time. Without this, an aborted
+sweep would leave Pods running until the TTL kicked in *after* they
+finished — burning your namespace quota and your bill. `ApiException`
+on a per-Job delete is swallowed so a Job already reaped by the TTL
+controller (or by a concurrent kubectl) doesn't propagate out.
+
 ### Pod failure modes
 
 A Pod that finished but didn't write outcome JSON (OOMKill, eviction,

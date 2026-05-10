@@ -161,7 +161,12 @@ outcome through a shared `PersistentVolumeClaim` mounted at the same
 path on the driver and the workers. `parallelism=` caps the in-flight
 Job count so a 10000-run sweep doesn't stampede the API server. Per-run
 resource overrides are supported via the `resources=` kwarg in either
-mapping or callable form.
+mapping or callable form. A Job that has not reached a terminal status
+within `job_deadline_seconds` (default 1 h) is deleted by the driver
+and folded into a synthetic `RunOutcome.failed` rather than hanging the
+sweep on a stuck-`Pending` Pod; closing the pool mid-sweep deletes any
+remaining in-flight Jobs so they don't orphan against the namespace
+quota.
 
 See the [`KubernetesJobPool` recipe](recipes/kubernetes-jobpool.md) for
 the full setup: image build, PVC layout, in-cluster vs.
