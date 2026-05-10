@@ -150,11 +150,17 @@ accepted `tolerance` types.
 ## Memory: streaming vs. eager reads
 
 `lazy_multiindex` and `lazy_ephemerides` accept `spool: bool = True`.
-With `spool=True` (default) each per-run Parquet is streamed through
-pandas one record batch at a time, so peak conversion memory is one
-batch rather than one full sweep. `spool=False` reads each Parquet
-eagerly in one shot — simpler control flow, higher peak memory, useful
-on small sweeps. The result frame is identical either way.
+With `spool=True` (default) each per-run Parquet is read one record
+batch at a time; `spool=False` reads each Parquet eagerly in one
+shot — simpler control flow, slightly higher peak per-fragment memory,
+useful on small sweeps. The result frame is identical either way.
+
+Per-fragment batches stay in Arrow and are concatenated buffer-shared
+via `pyarrow.concat_tables` before a single `to_pandas` materialisation
+at the end, so peak driver memory is bounded by the final frame plus a
+small per-fragment overhead — not the sum of one pandas frame per
+fragment. The contract that a 10k-run sweep does not have to fit in
+memory at multiplicative cost holds in both `spool` modes.
 
 `lazy_contacts` does not take a `spool` flag — `ContactLocator` outputs
 are typically tiny (one row per pass) and the streaming overhead is not
@@ -322,6 +328,13 @@ grid sweep against a Monte Carlo sweep is the user's responsibility to
 align (e.g. via `df.reset_index().set_index([...])`) before calling.
 
 ## Polars output engine
+
+!!! warning "Experimental"
+
+    The polars output engine is experimental. The column-naming and
+    dtype rules described below are not yet contractual and may change
+    in a future minor version. Stable production code should pin
+    `engine="pandas"` (the default) or pin the gmat-sweep version.
 
 Pandas is the default and only return type with no extra installed.
 With the `[polars]` extra, every flat-column DataFrame-returning entry

@@ -167,6 +167,40 @@ def test_lazy_multiindex_skipped_run(tmp_path: Path) -> None:
     assert skipped[["x", "y"]].isna().all().all()
 
 
+def test_lazy_multiindex_1000_run_peak_memory_bounded(tmp_path: Path) -> None:
+    """A 1000-run aggregate keeps Python-tracked peak allocation bounded.
+
+    Regression guard for #130: the previous ``_read_ok_runs`` accumulated
+    one ``pandas.DataFrame`` per fragment in a list before
+    ``pd.concat``-ing them, so peak memory scaled linearly with run count.
+    The streaming ``pa.concat_tables`` path materialises pandas once at
+    the end; peak stays on the order of the final frame.
+    """
+    import tracemalloc
+
+    n_runs = 1000
+    paths = [_write_run_parquet(tmp_path, i, n_rows=3) for i in range(n_runs)]
+    manifest = _make_manifest([_ok_entry(i, p) for i, p in enumerate(paths)])
+
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        df = lazy_multiindex(manifest, tmp_path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    final_size = int(df.memory_usage(deep=True).sum())
+    # Measured: the streaming pa.concat_tables path peaks at ~8x the final
+    # frame's pandas memory; the old "append a pandas frame per fragment +
+    # pd.concat at the end" path peaked at ~50-70x on the same workload.
+    # A 20x ceiling separates the two with margin in both directions.
+    assert peak < 20 * final_size, (
+        f"peak tracemalloc allocation = {peak} bytes vs. final frame "
+        f"= {final_size} bytes (ratio {peak / final_size:.1f}x)"
+    )
+
+
 def test_lazy_multiindex_spool_false_matches_spool_true(tmp_path: Path) -> None:
     paths = [_write_run_parquet(tmp_path, i, n_rows=3) for i in range(4)]
     manifest = _make_manifest([_ok_entry(i, p) for i, p in enumerate(paths)])
@@ -804,6 +838,18 @@ def test_sweep_summary_rejects_missing_index_level() -> None:
         sweep_summary(df)
 
 
+def test_sweep_summary_rejects_duplicate_q() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"q must not contain duplicates"):
+        sweep_summary(df, q=(0.5, 0.5))
+
+
+def test_sweep_summary_rejects_duplicate_include() -> None:
+    df = _summary_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"include must not contain duplicates"):
+        sweep_summary(df, include=("mean", "mean"))
+
+
 # ---------------------------------------------------------------------------
 # mc_convergence
 # ---------------------------------------------------------------------------
@@ -904,6 +950,39 @@ def test_mc_convergence_se_curve_matches_sigma_over_sqrt_n() -> None:
 
     ratio = se_at(500) / se_at(2000)
     assert 1.7 < ratio < 2.3
+
+
+def test_mc_convergence_running_std_stable_at_km_scale() -> None:
+    """Welford regression: km-magnitude metrics produce the right std (not 0).
+
+    Older sum-of-squares variance suffered catastrophic cancellation when
+    the mean was large compared to the std — ``arr * arr ~ 1e8`` for
+    km-magnitude samples, the per-step subtraction below the float64 ULP
+    drove variance slightly negative, and ``np.clip(0)`` reported zero.
+    """
+    n_runs = 5000
+    sigma = 50.0
+    mu = 7.1e3
+    rng = np.random.default_rng(20260510)
+    terminal = rng.normal(loc=mu, scale=sigma, size=n_runs)
+    df = pd.DataFrame(
+        {
+            "run_id": range(n_runs),
+            "time": pd.to_datetime(["2026-05-04T00:00:00"] * n_runs),
+            "miss": terminal,
+            "__status": ["ok"] * n_runs,
+        }
+    ).set_index(["run_id", "time"])
+
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    expected_std = float(np.std(terminal, ddof=1))
+    actual_std = float(conv["running_std"].iloc[-1])
+    rel_error = abs(actual_std - expected_std) / expected_std
+    assert rel_error < 1e-6, (
+        f"running_std at n={n_runs} = {actual_std}, expected ~{expected_std} "
+        f"(relative error {rel_error:.3e})"
+    )
 
 
 def test_mc_convergence_drops_failed_and_skipped_runs() -> None:
@@ -1113,6 +1192,28 @@ def test_sweep_diff_on_run_id_collapses_time_level_to_terminal_row() -> None:
 
     # Terminal-row Sat.SMA differs by exactly the offset (constant across runs).
     np.testing.assert_array_equal(diff["Sat.SMA__diff"].to_numpy(), 10.0)
+
+
+def test_sweep_diff_on_run_id_stable_under_shuffled_input() -> None:
+    """``on='run_id'`` collapse picks the largest-time row regardless of input order.
+
+    Regression guard for #130: ``groupby(level=run_id).last()`` without a
+    prior ``sort_index()`` returned whichever row happened to come last
+    in storage, so a shuffled input produced different output.
+    """
+    a_sorted = _diff_df(n_runs=4, n_steps=5)
+    b_sorted = _diff_df(n_runs=4, n_steps=5, sma_offset=10.0)
+
+    # Shuffle each side independently. The collapsed terminal-row diff
+    # must be identical to the sorted-input result.
+    rng = np.random.default_rng(20260510)
+    a_shuf = a_sorted.iloc[rng.permutation(len(a_sorted))]
+    b_shuf = b_sorted.iloc[rng.permutation(len(b_sorted))]
+
+    expected = sweep_diff(a_sorted, b_sorted, on="run_id")
+    actual = sweep_diff(a_shuf, b_shuf, on="run_id")
+
+    pd.testing.assert_frame_equal(actual.sort_index(), expected.sort_index())
 
 
 def test_sweep_diff_tolerance_float_masks_below_threshold_diffs() -> None:

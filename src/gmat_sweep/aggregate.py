@@ -190,7 +190,9 @@ def lazy_multiindex(
         flattened into two leading sorted columns; row count and the
         non-index column set match the pandas-engine equivalent. Requires
         the ``[polars]`` extra; an :class:`ImportError` with the install
-        hint is raised when polars is not importable.
+        hint is raised when polars is not importable. **Experimental:**
+        the polars output shape (column names, dtypes) is not yet
+        contractual and may change in a future minor version.
 
     Raises
     ------
@@ -427,22 +429,30 @@ def _read_ok_runs(
 
     dataset = ds.dataset(paths_str, format="parquet")  # type: ignore[no-untyped-call]
 
-    frames: list[pd.DataFrame] = []
+    # Stay in Arrow for the per-fragment loop and materialise pandas once at
+    # the end. pa.concat_tables shares buffers across input tables, so peak
+    # memory is one pandas frame's worth of the full ok-row set — not two
+    # (the per-fragment frames + the merged frame) as the older
+    # accumulate-and-pd.concat path produced. See #130.
+    tables: list[pa.Table] = []
     for fragment in dataset.get_fragments():
         run_id = path_to_run_id[Path(fragment.path).as_posix()]
         if spool:
             for batch in fragment.to_batches():
-                frames.append(_batch_to_pandas(batch, run_id))
+                tables.append(_augment_with_run_id(pa.Table.from_batches([batch]), run_id))
         else:
-            table = fragment.to_table()
-            frames.append(_batch_to_pandas(table, run_id))
+            tables.append(_augment_with_run_id(fragment.to_table(), run_id))
 
-    merged = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    if secondary_index not in merged.columns:
+    if not tables:
+        return pd.DataFrame()
+
+    merged_table = pa.concat_tables(tables, promote_options="default")
+    if secondary_index not in merged_table.column_names:
         raise ValueError(
             f"per-run Parquet output is missing the {secondary_index!r} column "
             f"required for the (run_id, {secondary_index}) MultiIndex"
         )
+    merged = cast(pd.DataFrame, merged_table.to_pandas())
     # Cast the secondary index to the per-kind canonical dtype: datetime64[ns]
     # for time (so NaT is the missing sentinel for non-ok rows), Int64 nullable
     # for interval_id (so pd.NA can share the same level as ok integer rows).
@@ -461,11 +471,10 @@ def _coerce_secondary_index(series: pd.Series, secondary_index: str) -> pd.Serie
     return series.astype(dtype)
 
 
-def _batch_to_pandas(batch_or_table: Any, run_id: int) -> pd.DataFrame:
-    n_rows = batch_or_table.num_rows
+def _augment_with_run_id(table: pa.Table, run_id: int) -> pa.Table:
+    n_rows = table.num_rows
     run_id_col = pa.array([run_id] * n_rows, type=pa.int64())
-    augmented = batch_or_table.append_column(_RUN_ID_COL, run_id_col)
-    return cast(pd.DataFrame, augmented.to_pandas())
+    return cast(pa.Table, table.append_column(_RUN_ID_COL, run_id_col))
 
 
 def _materialise_nonok(
@@ -564,6 +573,12 @@ def lazy_fused_reports(
         ``names`` has fewer than two entries, contains duplicates, or any
         entry does not match a ``ReportFile`` resource in the sweep
         (raised by the underlying :func:`lazy_multiindex` call).
+    AssertionError
+        Anchor frame is not sorted on ``time`` before a tolerance-based
+        ``pandas.merge_asof`` — a defensive guard against future
+        refactors that drop the explicit pre-merge ``sort_values``;
+        users invoking ``lazy_fused_reports`` directly will never trip
+        it.
     """
     if len(names) < 2:
         raise SweepConfigError(
@@ -606,13 +621,28 @@ def lazy_fused_reports(
         df.reset_index().rename(columns=rename_per_report[i]) for i, df in enumerate(per_report)
     ]
 
+    # One groupby(run_id) per report — O(N) total — instead of a fresh
+    # boolean mask per (report, run_id) pair, which was O(N · runs) and
+    # showed up as a quadratic hot spot on large sweeps (#130). pandas'
+    # group iteration is cheap; we materialise the per-run slice lazily.
+    grouped_per_report: list[dict[int, pd.DataFrame]] = [
+        {
+            cast(int, rid): cast(pd.DataFrame, sub.drop(columns=[_RUN_ID_COL]))
+            for rid, sub in df.groupby(_RUN_ID_COL, sort=False)
+        }
+        for df in flat_per_report
+    ]
+    empty_slices: list[pd.DataFrame] = [
+        flat_per_report[i].iloc[0:0].drop(columns=[_RUN_ID_COL]) for i in range(len(per_report))
+    ]
+
     run_status: dict[int, str] = {e.run_id: e.status for e in manifest.entries}
     run_ids: list[int] = [e.run_id for e in manifest.entries]
 
     parts: list[pd.DataFrame] = []
     for run_id in run_ids:
         per_run = [
-            df[df[_RUN_ID_COL] == run_id].drop(columns=[_RUN_ID_COL]) for df in flat_per_report
+            grouped_per_report[i].get(run_id, empty_slices[i]) for i in range(len(per_report))
         ]
         anchor = per_run[0]
         anchor_has_data = not anchor.empty and bool(anchor[_TIME_COL].notna().any())
@@ -671,6 +701,17 @@ def _merge_run_fused(
             if tolerance is None:
                 anchor = anchor.merge(right_ok, on=_TIME_COL, how="inner")
             else:
+                # pd.merge_asof silently produces wrong answers when its
+                # inputs aren't sorted on the asof key; we sort both sides
+                # explicitly above, but assert the contract so future
+                # refactors here surface as a clear failure rather than
+                # silent data corruption.
+                if not anchor[_TIME_COL].is_monotonic_increasing:
+                    raise AssertionError(
+                        "lazy_fused_reports: anchor frame is not sorted on "
+                        f"{_TIME_COL!r} before pd.merge_asof — required for "
+                        "asof tolerance matching"
+                    )
                 anchor = pd.merge_asof(anchor, right_ok, on=_TIME_COL, tolerance=tolerance)
         else:
             for orig_col, flat in rename_per_report[i].items():
@@ -783,7 +824,8 @@ def sweep_summary(
     SweepConfigError
         ``by`` is not ``"time"`` or ``"run_id"``; any ``q_val`` falls
         outside ``(0, 1)``; ``include`` contains an unknown statistic;
-        or ``by`` is not an index level of ``df``.
+        ``q`` or ``include`` contains duplicate entries; or ``by`` is
+        not an index level of ``df``.
 
     Examples
     --------
@@ -810,6 +852,20 @@ def sweep_summary(
         raise SweepConfigError(
             f"sweep_summary: unknown statistic(s) in include={list(include)}: "
             f"{bad_include}; allowed: {list(_VALID_INCLUDE)}"
+        )
+
+    # Duplicate quantiles or include entries would collide in the
+    # MultiIndex column key built via pd.concat({label: ...}) below and
+    # produce a non-unique columns axis. Reject up front instead.
+    dup_q = sorted({val for val in q if list(q).count(val) > 1})
+    if dup_q:
+        raise SweepConfigError(
+            f"sweep_summary: q must not contain duplicates; got duplicate(s) {dup_q}"
+        )
+    dup_include = sorted({s for s in include if list(include).count(s) > 1})
+    if dup_include:
+        raise SweepConfigError(
+            f"sweep_summary: include must not contain duplicates; got duplicate(s) {dup_include}"
         )
 
     if df.index.nlevels < 2 or by not in (df.index.names or []):
@@ -924,7 +980,8 @@ def mc_convergence(
         ``"pandas"`` (default) returns a :class:`pandas.DataFrame` with a
         plain :class:`~pandas.RangeIndex`. ``"polars"`` returns the same
         flat-column frame as a :class:`polars.DataFrame`. Requires the
-        ``[polars]`` extra; same semantics as :func:`lazy_multiindex`.
+        ``[polars]`` extra; same semantics as :func:`lazy_multiindex` —
+        including the experimental status of the polars output shape.
 
     Returns
     -------
@@ -1000,7 +1057,15 @@ def _reduce_callable_metric(
 
 
 def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
-    """Vectorised running mean/std/SE over the first k entries for k = 1..len(values)."""
+    """Running mean / sample std / SE over the first k entries for k = 1..len(values).
+
+    Uses Welford's online recurrence so the variance update is numerically
+    stable for samples drawn from a distribution whose mean is large
+    relative to its std (e.g. km-magnitude position metrics with
+    metre-magnitude dispersion, where the older cumulative
+    sum-of-squares identity catastrophically cancels and reports zero
+    std).
+    """
     arr = np.asarray(values, dtype=float)
     n_total = arr.size
     if n_total == 0:
@@ -1009,19 +1074,22 @@ def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
             empty[col] = pd.Series([], dtype=float)
         return pd.DataFrame(empty)
 
-    ks = np.arange(n_offset, n_offset + n_total, dtype=np.int64)
+    running_mean = np.empty(n_total, dtype=float)
+    running_std = np.empty(n_total, dtype=float)
+    mean = 0.0
+    m2 = 0.0
+    for i in range(n_total):
+        x = float(arr[i])
+        n = i + 1
+        delta = x - mean
+        mean += delta / n
+        delta2 = x - mean
+        m2 += delta * delta2
+        running_mean[i] = mean
+        running_std[i] = np.sqrt(m2 / (n - 1)) if n > 1 else np.nan
+
     counts = np.arange(1, n_total + 1, dtype=float)
-    cumsum = np.cumsum(arr)
-    cumsum_sq = np.cumsum(arr * arr)
-    running_mean = cumsum / counts
-    # Sample variance via the cumulative-moments identity. Clip negatives
-    # from float-rounding when all values agree before sqrt.
-    with np.errstate(invalid="ignore"):
-        var = (cumsum_sq - counts * running_mean * running_mean) / np.where(
-            counts > 1, counts - 1, np.nan
-        )
-    var = np.clip(var, 0.0, None)
-    running_std = np.sqrt(var)
+    ks = np.arange(n_offset, n_offset + n_total, dtype=np.int64)
     se_mean = running_std / np.sqrt(counts)
     return pd.DataFrame(
         {
@@ -1111,7 +1179,8 @@ def sweep_diff(
         the same index shape as the inputs. ``"polars"`` returns a
         :class:`polars.DataFrame` whose index levels are flattened into
         leading columns. Requires the ``[polars]`` extra; same semantics
-        as :func:`lazy_multiindex`.
+        as :func:`lazy_multiindex` — including the experimental status
+        of the polars output shape.
 
     Returns
     -------
@@ -1169,8 +1238,12 @@ def sweep_diff(
                 f"index level; got {a_names}"
             )
         if df_a.index.nlevels > 1:
-            df_a = df_a.groupby(level=_RUN_ID_COL).last()
-            df_b = df_b.groupby(level=_RUN_ID_COL).last()
+            # sort_index() before groupby().last() so the "final row per run"
+            # is the row with the largest secondary-index value, not whichever
+            # row happens to come last under the input's storage order. The
+            # raw groupby().last() inherited that order silently.
+            df_a = df_a.sort_index().groupby(level=_RUN_ID_COL).last()
+            df_b = df_b.sort_index().groupby(level=_RUN_ID_COL).last()
 
     a_status = df_a[_STATUS_COL] if _STATUS_COL in df_a.columns else None
     b_status = df_b[_STATUS_COL] if _STATUS_COL in df_b.columns else None
@@ -1265,4 +1338,12 @@ def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:
         empty.insert(0, _TIME_COL, pd.Series([], dtype="datetime64[ns]"))
         return empty
 
-    return pd.concat(parts, axis=0, ignore_index=True)
+    # Pin output ordering explicitly — the contract advertised in
+    # mc_convergence's docstring ('sorted by time then n ascending')
+    # should hold under refactors to the upstream groupby/concat path.
+    return cast(
+        pd.DataFrame,
+        pd.concat(parts, axis=0, ignore_index=True).sort_values(
+            [_TIME_COL, "n"], ignore_index=True
+        ),
+    )
