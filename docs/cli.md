@@ -27,8 +27,7 @@ The subcommands:
 ## Common options
 
 The sweep-running subcommands (`run`, `monte-carlo`, `latin-hypercube`,
-`explicit`) and the post-hoc subcommands that drive new runs (`extend`,
-`resume`) share three flags:
+`explicit`) share three flags:
 
 | Flag         | Default | Meaning                                                                      |
 |--------------|---------|------------------------------------------------------------------------------|
@@ -36,9 +35,10 @@ The sweep-running subcommands (`run`, `monte-carlo`, `latin-hypercube`,
 | `--out PATH` | —       | Required. Output directory for per-run artefacts and `manifest.jsonl`.       |
 | `SCRIPT`     | —       | Required positional. Path to the GMAT `.script` every run loads.             |
 
-`extend`, `resume`, and `archive` also accept `SCRIPT` as a positional. The
-older `--script PATH` flag still works on those three subcommands but the
-positional form is canonical — the examples below use it.
+The post-hoc subcommands (`extend`, `resume`, `archive`) take the script as
+a `--script PATH` flag instead — the manifest is the primary positional
+input on those, and the script is a parameter pointing at the previously-
+loaded mission file.
 
 Each of those four subcommands writes a `manifest.jsonl` under `--out` and
 prints a one-line summary to stdout when the sweep finishes:
@@ -225,21 +225,20 @@ Re-run only the failed and never-recorded entries from an existing
 `manifest.jsonl`. Successful runs' Parquet files are reused from disk.
 
 ```bash
-gmat-sweep resume ./sweep-out/manifest.jsonl mission.script \
+gmat-sweep resume ./sweep-out/manifest.jsonl \
+    --script mission.script \
     --workers 4
 ```
 
-Required positionals:
+Required positional: `MANIFEST` — the existing `manifest.jsonl`.
 
-- `MANIFEST` — the existing `manifest.jsonl`.
-- `SCRIPT` — the same GMAT `.script` the original sweep loaded. The older
-  `--script PATH` flag is still accepted. The script's canonical SHA-256
-  must equal the manifest's `script_sha256`; see
-  [Resume § Script drift](resume.md#script-drift) for the full contract.
-  Add `--allow-script-drift` to proceed past a hash mismatch (emits a
-  `RuntimeWarning`).
+Required flag: `--script PATH` — the same GMAT `.script` the original sweep
+loaded. Its canonical SHA-256 must equal the manifest's `script_sha256`; see
+[Resume § Script drift](resume.md#script-drift) for the full contract. Add
+`--allow-script-drift` to proceed past a hash mismatch (emits a
+`RuntimeWarning`).
 
-A missing `MANIFEST` exits with code `3`; a missing `SCRIPT` or a hash
+A missing `MANIFEST` exits with code `3`; a missing `--script` or a hash
 mismatch exits with code `2`.
 
 ## `extend`
@@ -250,30 +249,30 @@ draws are bit-equal to the same indices of a fresh
 `monte_carlo(n=old_n + N)` call.
 
 ```bash
-gmat-sweep extend ./mc-out/manifest.jsonl mission.script \
+gmat-sweep extend ./mc-out/manifest.jsonl \
     --n 1000 \
+    --script mission.script \
     --workers 8
 ```
 
-Required positionals:
+Required positional: `MANIFEST` — an existing Monte Carlo
+`manifest.jsonl`. Grid, explicit-row, and Latin hypercube manifests
+exit with code `2` (their stochastic semantics don't admit clean
+extension).
 
-- `MANIFEST` — an existing Monte Carlo `manifest.jsonl`. Grid, explicit-row,
-  and Latin hypercube manifests exit with code `2` (their stochastic
-  semantics don't admit clean extension).
-- `SCRIPT` — the same GMAT `.script` the original sweep loaded. Same
-  hash-drift contract as `resume`; add `--allow-script-drift` to proceed
-  past a mismatch. The older `--script PATH` flag is still accepted.
-
-Required flag:
+Required flags:
 
 - `--n N` — number of additional stochastic runs to append, ≥ 1.
+- `--script PATH` — the same GMAT `.script` the original sweep loaded.
+  Same hash-drift contract as `resume`; add `--allow-script-drift` to
+  proceed past a mismatch.
 
 `extend` refuses if the base sweep has any `failed` or missing runs in
 its original `[0, n)` range — the underlying error names them and
 points at `gmat-sweep resume`. Run `resume` first, then `extend`.
 
 A missing `MANIFEST` exits with code `3`; a non-Monte-Carlo manifest,
-an incomplete base sweep, a missing `SCRIPT`, or a hash mismatch
+an incomplete base sweep, a missing `--script`, or a hash mismatch
 exits with code `2`. See
 [Monte Carlo § Extending an existing sweep](monte-carlo.md#extending-an-existing-sweep)
 for the full determinism contract.
@@ -351,22 +350,20 @@ single self-describing `.zip` suitable for archival deposit (Zenodo, JOSS
 supplementary material) or internal handoff.
 
 ```bash
-gmat-sweep archive ./sweep-out/manifest.jsonl mission.script \
+gmat-sweep archive ./sweep-out/manifest.jsonl \
+    --script mission.script \
     --out ./sma-scan-2026q2.zip
 ```
 
-Required positionals:
+Required positional: `MANIFEST` — the existing `manifest.jsonl`.
 
-- `MANIFEST` — the existing `manifest.jsonl`.
-- `SCRIPT` — the same GMAT `.script` the sweep loaded. Its canonical SHA-256
-  must equal the manifest's `script_sha256`; same hash-drift contract as
-  `resume` and `extend`. Add `--allow-script-drift` to proceed past a
+Required flags:
+
+- `--script PATH` — the same GMAT `.script` the sweep loaded. Its canonical
+  SHA-256 must equal the manifest's `script_sha256`; same hash-drift contract
+  as `resume` and `extend`. Add `--allow-script-drift` to proceed past a
   mismatch — the bundle still records the manifest's original hash so a
-  downstream verifier can spot the drift. The older `--script PATH` flag is
-  still accepted.
-
-Required flag:
-
+  downstream verifier can spot the drift.
 - `--out PATH` — destination `.zip` path. Parent directories are created on
   demand.
 
@@ -381,5 +378,5 @@ archives of the same manifest produce identical bytes. See
 [Cookbook § Pattern 4 — Archival deposit](cookbook.md#pattern-4-archival-deposit-zenodo-joss)
 for the full layout and the reproduce-from-bundle recipe.
 
-A missing `MANIFEST` exits with code `3`; a missing `SCRIPT`, or a hash
+A missing `MANIFEST` exits with code `3`; a missing `--script`, or a hash
 mismatch without `--allow-script-drift`, exits with code `2`.

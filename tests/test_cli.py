@@ -1212,71 +1212,6 @@ def test_resume_rejects_script_drift(
     assert "script hash mismatch" in capsys.readouterr().err
 
 
-def test_resume_accepts_positional_script(
-    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """``gmat-sweep resume MANIFEST SCRIPT`` works without ``--script``."""
-    script = _write_script(tmp_path)
-    out = tmp_path / "out"
-    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    cli.main(
-        [
-            "run",
-            "--grid",
-            "a=1,2",
-            "--workers",
-            "1",
-            "--out",
-            str(out),
-            str(script),
-        ]
-    )
-    capsys.readouterr()
-
-    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    rc = cli.main(
-        [
-            "resume",
-            str(out / "manifest.jsonl"),
-            str(script),
-            "--workers",
-            "1",
-        ]
-    )
-    assert rc == 0
-
-
-def test_resume_rejects_both_positional_and_flag(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Supplying SCRIPT twice (positional + ``--script``) is a usage error."""
-    script = _write_script(tmp_path)
-    manifest = tmp_path / "manifest.jsonl"
-    manifest.write_text("", encoding="utf-8")
-    rc = cli.main(
-        [
-            "resume",
-            str(manifest),
-            str(script),
-            "--script",
-            str(script),
-        ]
-    )
-    assert rc == cli.EXIT_CONFIG
-    assert "both a positional and --script" in capsys.readouterr().err
-
-
-def test_resume_rejects_missing_script_argument(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Neither a positional SCRIPT nor ``--script`` is a usage error."""
-    manifest = tmp_path / "manifest.jsonl"
-    manifest.write_text("", encoding="utf-8")
-    rc = cli.main(["resume", str(manifest)])
-    assert rc == cli.EXIT_CONFIG
-    assert "SCRIPT is required" in capsys.readouterr().err
-
-
 def test_resume_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(["resume", "--help"])
@@ -1395,47 +1330,6 @@ def test_extend_help_lists_allow_script_drift(capsys: pytest.CaptureFixture[str]
     assert "--allow-script-drift" in out
     assert "--script" in out
     assert "--n" in out
-
-
-def test_extend_accepts_positional_script(
-    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """``gmat-sweep extend MANIFEST SCRIPT --n N`` works without ``--script``."""
-    script = _write_script(tmp_path)
-    out = tmp_path / "out"
-    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    cli.main(
-        [
-            "monte-carlo",
-            "--n",
-            "2",
-            "--perturb",
-            "Sat.SMA=normal:7100:50",
-            "--seed",
-            "0",
-            "--workers",
-            "1",
-            "--out",
-            str(out),
-            str(script),
-        ]
-    )
-    capsys.readouterr()
-
-    rc = cli.main(
-        [
-            "extend",
-            str(out / "manifest.jsonl"),
-            str(script),
-            "--n",
-            "2",
-            "--workers",
-            "1",
-        ]
-    )
-    assert rc == 0
-    summary = capsys.readouterr().out.splitlines()[0]
-    assert "4 runs" in summary  # 2 original + 2 extended
 
 
 # ---- archive subcommand -------------------------------------------------
@@ -1628,41 +1522,6 @@ def test_archive_rejects_script_drift(
     )
     assert rc == cli.EXIT_CONFIG
     assert "script hash mismatch" in capsys.readouterr().err
-
-
-def test_archive_accepts_positional_script(
-    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """``gmat-sweep archive MANIFEST SCRIPT --out ...`` works without ``--script``."""
-    script = _write_script(tmp_path)
-    out = tmp_path / "out"
-    fake_gmat_run.install_loader(run_hook=_payload_run_hook())
-    cli.main(
-        [
-            "run",
-            "--grid",
-            "Sat.SMA=7000:7200:2",
-            "--workers",
-            "1",
-            "--out",
-            str(out),
-            str(script),
-        ]
-    )
-    capsys.readouterr()
-
-    bundle = tmp_path / "bundle.zip"
-    rc = cli.main(
-        [
-            "archive",
-            str(out / "manifest.jsonl"),
-            str(script),
-            "--out",
-            str(bundle),
-        ]
-    )
-    assert rc == 0
-    assert bundle.is_file()
 
 
 def test_archive_help_lists_flags(capsys: pytest.CaptureFixture[str]) -> None:

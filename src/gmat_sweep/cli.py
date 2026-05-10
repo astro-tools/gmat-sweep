@@ -600,7 +600,7 @@ def _cmd_archive(args: argparse.Namespace) -> int:
     if not manifest_path.is_file():
         print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
         return EXIT_MANIFEST
-    script = Path(_resolve_script_arg(args, "archive"))
+    script = Path(args.script)
     if not script.is_file():
         print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
         return EXIT_CONFIG
@@ -629,7 +629,7 @@ def _cmd_extend(args: argparse.Namespace) -> int:
     if not manifest_path.is_file():
         print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
         return EXIT_MANIFEST
-    script = Path(_resolve_script_arg(args, "extend"))
+    script = Path(args.script)
     if not script.is_file():
         print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
         return EXIT_CONFIG
@@ -657,7 +657,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     if not manifest_path.is_file():
         print(f"gmat-sweep: manifest not found: {manifest_path}", file=sys.stderr)
         return EXIT_MANIFEST
-    script = Path(_resolve_script_arg(args, "resume"))
+    script = Path(args.script)
     if not script.is_file():
         print(f"gmat-sweep: script not found: {script}", file=sys.stderr)
         return EXIT_CONFIG
@@ -721,56 +721,6 @@ def _add_workers_flag(subparser: argparse.ArgumentParser) -> None:
         metavar="N",
         help=_WORKERS_HELP,
     )
-
-
-def _add_post_hoc_script_args(subparser: argparse.ArgumentParser, *, hash_clause: str) -> None:
-    """Attach SCRIPT positional + ``--script PATH`` flag to a post-hoc subparser.
-
-    ``extend``, ``resume``, and ``archive`` historically took ``--script PATH``
-    as a required flag, which is asymmetric with the four sweep-running
-    subcommands (``run``, ``monte-carlo``, ``latin-hypercube``, ``explicit``)
-    that take it as a positional. Both forms are accepted so existing scripts
-    keep working; the positional is the canonical form in the docs. Either
-    one must be supplied — :func:`_resolve_script_arg` raises
-    :class:`SweepConfigError` if neither is set or if both are.
-
-    ``hash_clause`` is the trailing sentence of the help text that varies by
-    subcommand (extend/resume mention re-runs; archive mentions the bundle).
-    """
-    subparser.add_argument(
-        "script_positional",
-        nargs="?",
-        default=None,
-        metavar="SCRIPT",
-        help=("Path to the same GMAT .script the original sweep loaded. " + hash_clause),
-    )
-    subparser.add_argument(
-        "--script",
-        dest="script_flag",
-        default=None,
-        metavar="PATH",
-        help="Deprecated synonym for the SCRIPT positional; still accepted.",
-    )
-
-
-def _resolve_script_arg(args: argparse.Namespace, subcommand: str) -> str:
-    """Return the script path from either the positional or the ``--script`` flag.
-
-    Raises :class:`SweepConfigError` if both are set or neither is.
-    """
-    positional: str | None = args.script_positional
-    flag: str | None = args.script_flag
-    if positional is not None and flag is not None:
-        raise SweepConfigError(
-            f"gmat-sweep {subcommand}: SCRIPT given as both a positional and --script PATH; "
-            "use one or the other"
-        )
-    resolved = positional if positional is not None else flag
-    if resolved is None:
-        raise SweepConfigError(
-            f"gmat-sweep {subcommand}: SCRIPT is required (positional or --script PATH)"
-        )
-    return resolved
 
 
 def _add_backend_flag(subparser: argparse.ArgumentParser) -> None:
@@ -1045,10 +995,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Number of additional stochastic runs to append (>= 1).",
     )
-    _add_post_hoc_script_args(
-        extend,
-        hash_clause=(
-            "Its canonical SHA-256 must equal the manifest's script_sha256 unless "
+    extend.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the original sweep loaded. Its "
+            "canonical SHA-256 must equal the manifest's script_sha256 unless "
             "--allow-script-drift is set."
         ),
     )
@@ -1079,11 +1032,14 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="MANIFEST",
         help="Path to a manifest.jsonl produced by a prior sweep.",
     )
-    _add_post_hoc_script_args(
-        resume,
-        hash_clause=(
-            "Its canonical SHA-256 must equal the manifest's script_sha256 unless "
-            "--allow-script-drift is set."
+    resume.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the original sweep loaded. Its canonical "
+            "SHA-256 must equal the manifest's script_sha256 unless --allow-script-drift "
+            "is set."
         ),
     )
     _add_workers_flag(resume)
@@ -1115,10 +1071,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="MANIFEST",
         help="Path to a manifest.jsonl produced by a prior sweep.",
     )
-    _add_post_hoc_script_args(
-        archive,
-        hash_clause=(
-            "Its canonical SHA-256 must equal the manifest's script_sha256 unless "
+    archive.add_argument(
+        "--script",
+        required=True,
+        metavar="PATH",
+        help=(
+            "Path to the same GMAT .script the sweep loaded. Its canonical "
+            "SHA-256 must equal the manifest's script_sha256 unless "
             "--allow-script-drift is set."
         ),
     )
