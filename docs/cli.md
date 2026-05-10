@@ -81,6 +81,27 @@ exit with code `4` and a "pip install gmat-sweep[…]" message on stderr.
 Unknown kwargs surface the same way — they reach the pool constructor and
 are rejected there.
 
+## Manifest fsync cadence
+
+Every sweep-running subcommand (`run`, `monte-carlo`, `latin-hypercube`,
+`explicit`, `extend`, `resume`) accepts two flags that control how often
+the manifest is fsynced:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--fsync-each` / `--no-fsync-each` | `--fsync-each` | When set, the manifest is fsynced after every appended entry — strict per-run durability. Pass `--no-fsync-each` to amortise the fsync cost across batches. |
+| `--fsync-batch N` | `50` | Fsync interval (in entries) when `--no-fsync-each` is set. Ignored otherwise. |
+
+`--no-fsync-each` is a measurable speedup for sub-second runs at large
+counts (Monte Carlo dispersion sweeps, parameter scans where each run
+takes <100 ms) where the per-entry fsync would otherwise dominate the
+driver thread. The tradeoff: a host crash between fsync boundaries can
+leave up to `--fsync-batch - 1` recently-completed entries missing from
+the on-disk manifest. The per-run Parquet outputs and the script hash
+are unaffected, and `gmat-sweep resume` re-runs only the missing slice.
+See [Manifest schema § Fsync cadence and durability](manifest-schema.md#fsync-cadence-and-durability)
+for the full contract.
+
 ## Exit codes
 
 | Code | Meaning                                                                        |
@@ -309,7 +330,12 @@ manifest` message on stderr.
 ### Exit codes
 
 A missing or unparseable manifest, or a `--run N` for an `N` not in the
-manifest, exits with code `3`.
+manifest, exits with code `3`. An unparseable manifest's error message
+includes the file path and the 1-indexed line number that failed to
+parse — e.g. `gmat-sweep: manifest entry on line 42 is malformed: ...
+(./sweep/manifest.jsonl:42)` — so the offending line can be located
+without re-parsing the file by hand. Whole-file failures (empty file,
+header-line truncation) print just the path.
 
 ## `archive`
 
