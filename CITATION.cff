@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use gmat-sweep in academic work, please cite it using the metadata below."
+title: gmat-sweep
+abstract: >-
+  gmat-sweep is a Python library that runs parameter sweeps and Monte Carlo
+  dispersions over NASA General Mission Analysis Tool (GMAT) missions in
+  parallel. It fans a working .script across subprocess workers, aggregates
+  each run's outputs into multi-indexed pandas DataFrames, and writes a
+  reproducible JSON Lines manifest so any sweep can be resumed or re-run
+  bit-for-bit.
+type: software
+authors:
+  - given-names: Dimitrije
+    family-names: Jankovic
+version: 0.3.0
+date-released: "2026-05-08"
+license: MIT
+repository-code: "https://github.com/astro-tools/gmat-sweep"
+url: "https://github.com/astro-tools/gmat-sweep"
+keywords:
+  - gmat
+  - astrodynamics
+  - orbital-mechanics
+  - mission-analysis
+  - monte-carlo
+  - parameter-sweep
+  - parallel
