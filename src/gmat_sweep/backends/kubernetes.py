@@ -41,8 +41,19 @@ Job lifecycle
 Each Job is created with ``backoffLimit=0`` so a Pod failure maps 1:1 to a
 ``RunOutcome.failed`` (silent retries break determinism), and
 ``ttlSecondsAfterFinished=300`` so completed Jobs auto-GC after 5 minutes.
-:meth:`close` cancels parked futures but does not delete in-flight Jobs —
-the TTL is what reaps them.
+
+A Job that exceeds ``job_deadline_seconds`` (default 1 hour) without
+producing a terminal status is deleted by the driver and folded into a
+synthetic :meth:`RunOutcome.failed`. The check fires between watch
+reconnects, so deadline granularity is roughly the watch timeout
+(~60 s) — fine for hour-scale defaults, intended as a hang preventer
+rather than a tight SLA.
+
+:meth:`close` cancels parked futures and deletes every Job still
+in-flight at close time (``propagationPolicy=Background``), so a
+sweep aborted mid-drain does not orphan Jobs against the namespace
+quota. ``ApiException`` from a per-Job delete is swallowed so a Job
+already reaped by the TTL controller does not propagate out of close.
 """
 
 from __future__ import annotations
@@ -77,6 +88,7 @@ _WATCH_TIMEOUT_SECONDS = 60
 _DEFAULT_PARALLELISM = 64
 _DEFAULT_BACKOFF_LIMIT = 0
 _DEFAULT_TTL_SECONDS = 300
+_DEFAULT_JOB_DEADLINE_SECONDS = 3600
 _INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 
@@ -126,6 +138,16 @@ class KubernetesJobPool(Pool):
         Forwarded to ``V1JobSpec.ttl_seconds_after_finished``. Defaults
         to ``300`` (5 min) — enough for a kubectl-window for inspection
         before the cluster GCs.
+    job_deadline_seconds:
+        Driver-side wall-clock deadline per Job. A Job that has not
+        reached a terminal status (``succeeded`` or ``failed``) within
+        this many seconds is deleted (``propagationPolicy=Background``)
+        and folded into a synthetic :meth:`RunOutcome.failed`, instead
+        of letting the driver hang forever on Pods stuck in
+        ``Pending`` / ``ImagePullBackOff`` / ``Unschedulable``.
+        Granularity is bounded by the watch reconnect cadence
+        (~60 s); the deadline is a hang preventer, not a hard SLA.
+        Defaults to ``3600`` (1 h). Must be a positive integer.
     resources:
         Per-run resource overrides keyed by ``RunSpec.run_id``, or a
         callable taking the spec and returning a resources dict. The
@@ -164,6 +186,7 @@ class KubernetesJobPool(Pool):
         parallelism: int | None = _DEFAULT_PARALLELISM,
         backoff_limit: int = _DEFAULT_BACKOFF_LIMIT,
         ttl_seconds_after_finished: int = _DEFAULT_TTL_SECONDS,
+        job_deadline_seconds: int = _DEFAULT_JOB_DEADLINE_SECONDS,
         resources: _ResourcesArg = None,
         default_resources: Mapping[str, Any] | None = None,
         kubeconfig: str | Path | None = None,
@@ -185,6 +208,10 @@ class KubernetesJobPool(Pool):
             raise BackendError(
                 f"parallelism must be a positive integer or None, got {parallelism!r}"
             )
+        if job_deadline_seconds < 1:
+            raise BackendError(
+                f"job_deadline_seconds must be a positive integer, got {job_deadline_seconds!r}"
+            )
         if not image:
             raise BackendError("image is required")
         if not pvc_name:
@@ -201,6 +228,7 @@ class KubernetesJobPool(Pool):
         self._parallelism = parallelism
         self._backoff_limit = backoff_limit
         self._ttl_seconds_after_finished = ttl_seconds_after_finished
+        self._job_deadline_seconds = job_deadline_seconds
         self._resources = resources
         self._default_resources = dict(default_resources) if default_resources is not None else None
         self._reuse_gmat_context = reuse_gmat_context
@@ -211,6 +239,11 @@ class KubernetesJobPool(Pool):
         self._core_api = _kubernetes.client.CoreV1Api()
 
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
+        # Job names that have been created on the API server but have not yet
+        # produced an outcome (or had one synthesised by the deadline scan or
+        # transport-failure path). `close()` deletes whatever is left here so
+        # an aborted sweep does not orphan Jobs against the namespace quota.
+        self._in_flight_jobs: set[str] = set()
         self._closed = False
 
     def _load_kube_config(self, *, in_cluster: bool | None, kubeconfig: str | Path | None) -> None:
@@ -266,7 +299,11 @@ class KubernetesJobPool(Pool):
 
         self._ensure_io_dirs()
 
-        in_flight: dict[str, tuple[RunSpec, datetime]] = {}
+        # `started_mono` (third tuple element) is `time.monotonic()` at submit
+        # time, used by the deadline scan so an NTP step does not move the
+        # cutoff. `started_wall` is kept separately so the audit-trail
+        # `started_at` on the resulting `RunOutcome` is wall-clock.
+        in_flight: dict[str, tuple[RunSpec, datetime, float]] = {}
         submit_iter = iter(specs)
         cap = self._parallelism if self._parallelism is not None else len(specs)
 
@@ -277,21 +314,35 @@ class KubernetesJobPool(Pool):
 
         completion_stream = self._iter_completions(label_selector)
         while in_flight:
-            completed_name = next(completion_stream, None)
-            if completed_name is None:
-                # stream exhausted unexpectedly; surface remaining as transport failures
-                for stuck_name, (stuck_spec, started) in list(in_flight.items()):
-                    outcome = self._fold_unknown_failure(stuck_spec, stuck_name, started)
-                    future_by_run_id[stuck_spec.run_id].set_result(outcome)
-                    yield outcome
-                    in_flight.pop(stuck_name)
-                break
+            event = next(completion_stream, None)
 
+            # Deadline scan runs on every iteration — both real completions
+            # and natural-reconnect ticks. Granularity is bounded by the
+            # watch reconnect cadence (~_WATCH_TIMEOUT_SECONDS), but a Job
+            # exceeding the deadline is the failure mode the scan exists
+            # to break; ~60 s tail latency is acceptable.
+            for stuck_name in self._collect_expired(in_flight):
+                stuck_spec, stuck_wall, _ = in_flight.pop(stuck_name)
+                self._delete_job_best_effort(stuck_name)
+                outcome = self._fold_deadline_failure(stuck_spec, stuck_name, stuck_wall)
+                self._in_flight_jobs.discard(stuck_name)
+                future_by_run_id[stuck_spec.run_id].set_result(outcome)
+                yield outcome
+                # Keep the cap full when a deadline expiry frees a slot.
+                self._submit_next(submit_iter, in_flight, sweep_id)
+
+            if event is None:
+                # Natural watch reconnect tick — deadline scan above was the
+                # work; loop back and resume waiting for completions.
+                continue
+
+            completed_name = event
             entry = in_flight.pop(completed_name, None)
             if entry is None:
                 continue
-            spec, started = entry
-            outcome = self._read_outcome(spec, completed_name, started_at=started)
+            spec, started_wall, _ = entry
+            outcome = self._read_outcome(spec, completed_name, started_at=started_wall)
+            self._in_flight_jobs.discard(completed_name)
             future_by_run_id[spec.run_id].set_result(outcome)
             yield outcome
 
@@ -304,6 +355,13 @@ class KubernetesJobPool(Pool):
         for f in self._pending:
             f.cancel()
         self._pending.clear()
+        # Delete any Job we created that has not yet produced an outcome.
+        # Best-effort per Job — an ApiException (already reaped by TTL,
+        # 403 from RBAC, transient network blip) is swallowed so a
+        # single delete failure doesn't leave the rest orphaned.
+        for job_name in list(self._in_flight_jobs):
+            self._delete_job_best_effort(job_name)
+        self._in_flight_jobs.clear()
 
     def _ensure_io_dirs(self) -> None:
         (self._driver_mount_path / _SPEC_SUBDIR).mkdir(parents=True, exist_ok=True)
@@ -312,14 +370,15 @@ class KubernetesJobPool(Pool):
     def _submit_next(
         self,
         submit_iter: Iterator[RunSpec],
-        in_flight: dict[str, tuple[RunSpec, datetime]],
+        in_flight: dict[str, tuple[RunSpec, datetime, float]],
         sweep_id: str,
     ) -> bool:
         spec = next(submit_iter, None)
         if spec is None:
             return False
         job_name = self._submit_job(spec, sweep_id)
-        in_flight[job_name] = (spec, datetime.now(timezone.utc))
+        in_flight[job_name] = (spec, datetime.now(timezone.utc), time.monotonic())
+        self._in_flight_jobs.add(job_name)
         return True
 
     def _submit_job(self, spec: RunSpec, sweep_id: str) -> str:
@@ -379,7 +438,18 @@ class KubernetesJobPool(Pool):
             spec=job_spec,
         )
 
-        self._batch_api.create_namespaced_job(namespace=self._namespace, body=job)
+        # If `create_namespaced_job` doesn't succeed, the spec file we wrote
+        # above is orphaned on the PVC. Clean it up on every failure path
+        # (typed `ApiException`, network/transport errors, KeyboardInterrupt,
+        # …) via a `finally` guarded on a success flag — `try/except` would
+        # have to enumerate every reachable exception type to be correct.
+        job_created = False
+        try:
+            self._batch_api.create_namespaced_job(namespace=self._namespace, body=job)
+            job_created = True
+        finally:
+            if not job_created:
+                spec_path_driver.unlink(missing_ok=True)
         return job_name
 
     def _job_name(self, sweep_id: str, run_id: int) -> str:
@@ -412,11 +482,20 @@ class KubernetesJobPool(Pool):
             return resolved
         return self._default_resources
 
-    def _iter_completions(self, label_selector: str) -> Iterator[str]:
+    def _iter_completions(self, label_selector: str) -> Iterator[str | None]:
+        """Yield Job names for terminally-completed Jobs; ``None`` on each reconnect.
+
+        ``None`` is a tick the drain loop in :meth:`as_completed` uses to run
+        its deadline scan even when no Job has produced a status event for
+        the full ``_WATCH_TIMEOUT_SECONDS``. Tick fires after both natural
+        watch ends and ApiException reconnects, so the deadline check
+        runs once per reconnect cycle regardless of which path we took.
+        """
         watch_module = self._kubernetes.watch
         rest_exc = self._kubernetes.client.exceptions.ApiException
         while True:
             watch = watch_module.Watch()
+            saw_api_exception = False
             try:
                 for event in watch.stream(
                     self._batch_api.list_namespaced_job,
@@ -433,13 +512,55 @@ class KubernetesJobPool(Pool):
                     if succeeded >= 1 or failed >= 1:
                         yield job.metadata.name
             except rest_exc:
-                # transient API failure: brief backoff and reconnect
-                time.sleep(0.5)
-                continue
+                saw_api_exception = True
             finally:
                 with contextlib.suppress(Exception):
                     watch.stop()
-            # Natural end of stream is a server-side timeout — reconnect.
+            if saw_api_exception:
+                # transient API failure: brief backoff before reconnecting
+                time.sleep(0.5)
+            yield None
+            # loop reconnects on the next iteration
+
+    def _collect_expired(self, in_flight: dict[str, tuple[RunSpec, datetime, float]]) -> list[str]:
+        deadline = self._job_deadline_seconds
+        now = time.monotonic()
+        return [
+            name
+            for name, (_spec, _wall, started_mono) in in_flight.items()
+            if (now - started_mono) >= deadline
+        ]
+
+    def _delete_job_best_effort(self, job_name: str) -> None:
+        """Delete a Job with background propagation, swallowing ApiException.
+
+        Used by the deadline scan and by :meth:`close`. A delete may race
+        the TTL controller (Job already reaped) or hit a transient RBAC /
+        network error; in either case the right move is to drop the entry
+        and continue rather than abort the rest of the sweep teardown.
+        """
+        rest_exc = self._kubernetes.client.exceptions.ApiException
+        with contextlib.suppress(rest_exc):
+            self._batch_api.delete_namespaced_job(
+                name=job_name,
+                namespace=self._namespace,
+                propagation_policy="Background",
+            )
+
+    def _fold_deadline_failure(
+        self, spec: RunSpec, job_name: str, started_at: datetime
+    ) -> RunOutcome:
+        ended_at = datetime.now(timezone.utc)
+        return RunOutcome.failed(
+            run_id=spec.run_id,
+            stderr=(
+                f"Job {job_name} exceeded job_deadline_seconds="
+                f"{self._job_deadline_seconds} without producing a terminal "
+                f"status; deleted by the driver before it could hang the sweep."
+            ),
+            started_at=started_at,
+            ended_at=ended_at,
+        )
 
     def _read_outcome(self, spec: RunSpec, job_name: str, *, started_at: datetime) -> RunOutcome:
         outcome_path = self._driver_mount_path / _OUTCOME_SUBDIR / f"{spec.run_id}.json"
