@@ -940,6 +940,39 @@ def test_mc_convergence_se_curve_matches_sigma_over_sqrt_n() -> None:
     assert 1.7 < ratio < 2.3
 
 
+def test_mc_convergence_running_std_stable_at_km_scale() -> None:
+    """Welford regression: km-magnitude metrics produce the right std (not 0).
+
+    Older sum-of-squares variance suffered catastrophic cancellation when
+    the mean was large compared to the std — ``arr * arr ~ 1e8`` for
+    km-magnitude samples, the per-step subtraction below the float64 ULP
+    drove variance slightly negative, and ``np.clip(0)`` reported zero.
+    """
+    n_runs = 5000
+    sigma = 50.0
+    mu = 7.1e3
+    rng = np.random.default_rng(20260510)
+    terminal = rng.normal(loc=mu, scale=sigma, size=n_runs)
+    df = pd.DataFrame(
+        {
+            "run_id": range(n_runs),
+            "time": pd.to_datetime(["2026-05-04T00:00:00"] * n_runs),
+            "miss": terminal,
+            "__status": ["ok"] * n_runs,
+        }
+    ).set_index(["run_id", "time"])
+
+    conv = mc_convergence(df, "miss", terminal_only=True)
+
+    expected_std = float(np.std(terminal, ddof=1))
+    actual_std = float(conv["running_std"].iloc[-1])
+    rel_error = abs(actual_std - expected_std) / expected_std
+    assert rel_error < 1e-6, (
+        f"running_std at n={n_runs} = {actual_std}, expected ~{expected_std} "
+        f"(relative error {rel_error:.3e})"
+    )
+
+
 def test_mc_convergence_drops_failed_and_skipped_runs() -> None:
     df = _conv_df(n_runs=8, statuses={2: "failed", 5: "skipped"})
     conv = mc_convergence(df, "miss", terminal_only=True)

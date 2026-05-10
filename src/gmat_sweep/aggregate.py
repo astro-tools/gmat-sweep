@@ -1031,7 +1031,15 @@ def _reduce_callable_metric(
 
 
 def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
-    """Vectorised running mean/std/SE over the first k entries for k = 1..len(values)."""
+    """Running mean / sample std / SE over the first k entries for k = 1..len(values).
+
+    Uses Welford's online recurrence so the variance update is numerically
+    stable for samples drawn from a distribution whose mean is large
+    relative to its std (e.g. km-magnitude position metrics with
+    metre-magnitude dispersion, where the older cumulative
+    sum-of-squares identity catastrophically cancels and reports zero
+    std).
+    """
     arr = np.asarray(values, dtype=float)
     n_total = arr.size
     if n_total == 0:
@@ -1040,19 +1048,22 @@ def _running_stats(values: Any, *, n_offset: int) -> pd.DataFrame:
             empty[col] = pd.Series([], dtype=float)
         return pd.DataFrame(empty)
 
-    ks = np.arange(n_offset, n_offset + n_total, dtype=np.int64)
+    running_mean = np.empty(n_total, dtype=float)
+    running_std = np.empty(n_total, dtype=float)
+    mean = 0.0
+    m2 = 0.0
+    for i in range(n_total):
+        x = float(arr[i])
+        n = i + 1
+        delta = x - mean
+        mean += delta / n
+        delta2 = x - mean
+        m2 += delta * delta2
+        running_mean[i] = mean
+        running_std[i] = np.sqrt(m2 / (n - 1)) if n > 1 else np.nan
+
     counts = np.arange(1, n_total + 1, dtype=float)
-    cumsum = np.cumsum(arr)
-    cumsum_sq = np.cumsum(arr * arr)
-    running_mean = cumsum / counts
-    # Sample variance via the cumulative-moments identity. Clip negatives
-    # from float-rounding when all values agree before sqrt.
-    with np.errstate(invalid="ignore"):
-        var = (cumsum_sq - counts * running_mean * running_mean) / np.where(
-            counts > 1, counts - 1, np.nan
-        )
-    var = np.clip(var, 0.0, None)
-    running_std = np.sqrt(var)
+    ks = np.arange(n_offset, n_offset + n_total, dtype=np.int64)
     se_mean = running_std / np.sqrt(counts)
     return pd.DataFrame(
         {
