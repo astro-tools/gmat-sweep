@@ -38,3 +38,15 @@ notebooks run on a laptop too).
 - [Ray autoscaling recipe](07_ray_autoscaling_recipe.ipynb) — 100-run Monte
   Carlo against the notebook 04 fixture, dispatched through `RayPool` against
   a local `ray.init()`. Same task model as a real autoscaling Ray cluster.
+- [Sobol sensitivity](08_sobol_sensitivity.ipynb) — Saltelli/Sobol design
+  built by `sobol_sample`, dispatched through `sweep(samples=...)` against
+  the notebook 04 fixture, then reduced to first/total-order indices via
+  `sobol_analyze` with bootstrap confidence intervals.
+- [Archive bundle](09_archive_bundle.ipynb) — pack a finished sweep
+  (script, manifest, per-run Parquet files) into a single `.zip` via
+  `Sweep.archive()`, inspect the bundle's layout, and re-aggregate the
+  per-run DataFrame from the unzipped tree without re-running.
+- [Extending a Monte Carlo](10_extending_monte_carlo.ipynb) — anchor a
+  100-run `monte_carlo` with `out=`, append 200 more runs via
+  `monte_carlo_extend(n=200)`, and assert that the original 100 `run_id`s
+  are preserved bit-for-bit in the 300-run aggregated frame.

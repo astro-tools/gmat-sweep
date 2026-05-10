@@ -207,6 +207,15 @@ Runnable example notebooks:
 - [Ray autoscaling recipe](https://astro-tools.github.io/gmat-sweep/examples/07_ray_autoscaling_recipe/) —
   100-run Monte Carlo dispatched through `RayPool` against a local `ray.init()`, same
   task model as a real autoscaling Ray cluster.
+- [Sobol sensitivity](https://astro-tools.github.io/gmat-sweep/examples/08_sobol_sensitivity/) —
+  Saltelli design via `sobol_sample`, run through `sweep(samples=...)`, reduced to
+  first/total-order Sobol indices via `sobol_analyze` with 95 % bootstrap CIs.
+- [Archive bundle](https://astro-tools.github.io/gmat-sweep/examples/09_archive_bundle/) —
+  pack a finished sweep into a self-describing `.zip` via `Sweep.archive()`, inspect
+  the layout, and re-aggregate the per-run DataFrame from the unzipped tree.
+- [Extending a Monte Carlo](https://astro-tools.github.io/gmat-sweep/examples/10_extending_monte_carlo/) —
+  anchor a 100-run `monte_carlo`, append 200 more via `monte_carlo_extend(n=200)`,
+  and assert that the original 100 `run_id`s are preserved bit-for-bit.
 
 ## Roadmap
 

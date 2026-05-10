@@ -54,6 +54,9 @@ nav:
       - Latin hypercube vs Monte Carlo: examples/05_latin_hypercube.ipynb
       - Dask cluster recipe: examples/06_dask_cluster_recipe.ipynb
       - Ray autoscaling recipe: examples/07_ray_autoscaling_recipe.ipynb
+      - Sobol sensitivity: examples/08_sobol_sensitivity.ipynb
+      - Archive bundle: examples/09_archive_bundle.ipynb
+      - Extending a Monte Carlo: examples/10_extending_monte_carlo.ipynb
   - Cookbook: cookbook.md
   - Recipes:
       - recipes/index.md
