@@ -389,12 +389,3 @@ plf_summary = pl.from_pandas(flat.reset_index())
 ```
 
 [polars-df]: https://docs.pola.rs/api/python/stable/reference/dataframe/index.html
-
-## Migrating from v0.1
-
-v0.1 used a bare `<name>.parquet` per-run layout and keyed
-`output_paths` by `<name>`; v0.2 prepends the kind prefix
-(`report__<name>.parquet`, key `report__<name>`). v0.1 manifests are not
-readable by v0.2 aggregators — the aggregator dispatch is keyed on the
-prefix and v0.1 entries lack one. Re-run any sweep you need to
-re-aggregate under v0.2.

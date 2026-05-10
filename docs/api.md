@@ -34,6 +34,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.backends.ProcessPoolExecutorPool
 
+::: gmat_sweep.backends.DebugPool
+
 ## Specs and outcomes
 
 ::: gmat_sweep.RunSpec
@@ -47,6 +49,16 @@ auto-generated from docstrings via
 ::: gmat_sweep.full_factorial
 
 ::: gmat_sweep.expand_grid_to_run_specs
+
+::: gmat_sweep.expand_samples_to_run_specs
+
+::: gmat_sweep.expand_monte_carlo_to_run_specs
+
+::: gmat_sweep.expand_monte_carlo_extension_to_run_specs
+
+::: gmat_sweep.expand_latin_hypercube_to_run_specs
+
+::: gmat_sweep.latin_hypercube_samples
 
 ## Manifest
 
@@ -85,6 +97,10 @@ auto-generated from docstrings via
 ::: gmat_sweep.plotting.sweep_band_plot
 
 ::: gmat_sweep.plotting.mc_convergence_plot
+
+::: gmat_sweep.plotting.sweep_corner
+
+::: gmat_sweep.plotting.sweep_heatmap
 
 ## Exceptions
 

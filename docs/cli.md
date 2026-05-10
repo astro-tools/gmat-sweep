@@ -19,6 +19,8 @@ The subcommands:
 - [`extend`](#extend) — append more bit-deterministic Monte Carlo runs to an
   existing sweep.
 - [`show`](#show) — print a one-line summary of a manifest.
+- [`archive`](#archive) — pack a finished sweep into a portable `.zip` for
+  archival deposit.
 
 `gmat-sweep --help` lists them. Each subcommand has its own `--help`.
 
@@ -308,3 +310,41 @@ manifest` message on stderr.
 
 A missing or unparseable manifest, or a `--run N` for an `N` not in the
 manifest, exits with code `3`.
+
+## `archive`
+
+Pack a finished sweep — script, manifest, per-run Parquet outputs — into a
+single self-describing `.zip` suitable for archival deposit (Zenodo, JOSS
+supplementary material) or internal handoff.
+
+```bash
+gmat-sweep archive ./sweep-out/manifest.jsonl \
+    --script mission.script \
+    --out ./sma-scan-2026q2.zip
+```
+
+Required positional: `MANIFEST` — the existing `manifest.jsonl`.
+
+Required flags:
+
+- `--script PATH` — the same GMAT `.script` the sweep loaded. Its canonical
+  SHA-256 must equal the manifest's `script_sha256`; same hash-drift contract
+  as `resume` and `extend`. Add `--allow-script-drift` to proceed past a
+  mismatch — the bundle still records the manifest's original hash so a
+  downstream verifier can spot the drift.
+- `--out PATH` — destination `.zip` path. Parent directories are created on
+  demand.
+
+`--include-logs` bundles every per-run `worker.log` and keeps the manifest's
+`log_path` field pointing at it (rewritten to bundle-relative form). The
+default drops the logs and sets `log_path` to `null` in the bundled manifest,
+keeping the archive small.
+
+The bundled manifest's `output_paths` are rewritten to be bundle-relative
+(`runs/run-<id>/<basename>`), and the bundle is byte-deterministic — two
+archives of the same manifest produce identical bytes. See
+[Cookbook § Pattern 4 — Archival deposit](cookbook.md#pattern-4-archival-deposit-zenodo-joss)
+for the full layout and the reproduce-from-bundle recipe.
+
+A missing `MANIFEST` exits with code `3`; a missing `--script`, or a hash
+mismatch without `--allow-script-drift`, exits with code `2`.

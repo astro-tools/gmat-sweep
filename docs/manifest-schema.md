@@ -119,7 +119,7 @@ checked out under different line-ending settings produce identical hashes.
 |----------------|--------------------------------------------------------------------------------------------------------------|
 | `run_id`       | Sequential integer assigned at grid-expansion time, starting at `0`. Unique within a sweep.                  |
 | `overrides`    | The override dict applied for this run — exactly the slice of the grid that produced it.                     |
-| `status`       | One of `"ok"`, `"failed"`, `"skipped"`. v0.1 only emits `"ok"` and `"failed"`.                                |
+| `status`       | One of `"ok"`, `"failed"`, `"skipped"`.                                                                      |
 | `output_paths` | Map from the prefixed output basename (`report__<name>`, `ephemeris__<name>`, `contact__<name>`) to the per-run Parquet path. Empty `{}` for non-`ok` runs. The prefix encodes the GMAT output kind so [`lazy_multiindex`][gmat_sweep.lazy_multiindex] / [`lazy_ephemerides`][gmat_sweep.lazy_ephemerides] / [`lazy_contacts`][gmat_sweep.lazy_contacts] can dispatch without reading the file. |
 | `started_at`   | UTC `datetime` the worker began this run, ISO-8601 with tz offset.                                           |
 | `ended_at`     | UTC `datetime` the worker returned its outcome, ISO-8601.                                                    |
