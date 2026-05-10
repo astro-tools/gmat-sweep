@@ -31,12 +31,14 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import pandas as pd
 
 from gmat_sweep.errors import SweepConfigError
+
+_HEXBIN_AUTO_THRESHOLD = 2000
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -54,6 +56,7 @@ def sweep_corner(
     *,
     manifest: Manifest | None = None,
     axes: NDArray[Any] | None = None,
+    kind: Literal["scatter", "hexbin", "auto"] = "auto",
     **kwargs: Any,
 ) -> NDArray[Any]:
     """Render a corner/pair plot of ``params`` coloured by ``metric``.
@@ -91,9 +94,17 @@ def sweep_corner(
         (shape ``(N, N)`` where ``N == len(params)``). ``None`` (default)
         creates a fresh figure and axes grid sized
         ``(2.5 * N, 2.5 * N)`` inches.
+    kind:
+        Off-diagonal panel kind: ``"scatter"`` (one point per run, coloured
+        by ``metric``), ``"hexbin"`` (2-D histogram with cells coloured by
+        the mean of ``metric``), or ``"auto"`` (default — picks
+        ``"hexbin"`` when more than 2000 runs survive the failed/skipped
+        filter, else ``"scatter"``). Hexbin avoids the silent overplot
+        problem on large dispersions: a 10⁴-run scatter saturates every
+        pixel and hides the metric variation.
     **kwargs:
-        Forwarded to :meth:`matplotlib.axes.Axes.scatter` for the
-        off-diagonal panels (e.g. ``s=12``, ``alpha=0.6``, ``cmap=...``).
+        Forwarded to :meth:`matplotlib.axes.Axes.scatter` (or
+        :meth:`~matplotlib.axes.Axes.hexbin`) for the off-diagonal panels.
 
     Returns
     -------
@@ -151,11 +162,20 @@ def sweep_corner(
                 f"sweep_corner: axes shape {axes_arr.shape} does not match len(params)=({n}, {n})"
             )
 
+    if kind not in ("scatter", "hexbin", "auto"):
+        raise SweepConfigError(
+            f"sweep_corner: kind must be 'scatter', 'hexbin', or 'auto'; got {kind!r}"
+        )
+    resolved_kind: Literal["scatter", "hexbin"] = (
+        ("hexbin" if len(joined) > _HEXBIN_AUTO_THRESHOLD else "scatter")
+        if kind == "auto"
+        else kind
+    )
+
     metric_arr = joined["__metric"].to_numpy()
     cmap = kwargs.pop("cmap", "viridis")
-    scatter_kwargs: dict[str, Any] = {"s": 16, "alpha": 0.7, **kwargs}
 
-    last_scatter = None
+    last_mappable = None
     for i, p_row in enumerate(resolved_params):
         for j, p_col in enumerate(resolved_params):
             ax = axes_arr[i, j]
@@ -166,13 +186,28 @@ def sweep_corner(
                 if j == 0:
                     ax.set_ylabel("count")
             elif i > j:
-                last_scatter = ax.scatter(
-                    joined[p_col].to_numpy(),
-                    joined[p_row].to_numpy(),
-                    c=metric_arr,
-                    cmap=cmap,
-                    **scatter_kwargs,
-                )
+                if resolved_kind == "scatter":
+                    scatter_kwargs: dict[str, Any] = {"s": 16, "alpha": 0.7, **kwargs}
+                    last_mappable = ax.scatter(
+                        joined[p_col].to_numpy(),
+                        joined[p_row].to_numpy(),
+                        c=metric_arr,
+                        cmap=cmap,
+                        **scatter_kwargs,
+                    )
+                else:
+                    # hexbin colours each cell by the mean of `metric_arr`
+                    # over the runs landing in that cell — the same colour
+                    # story as scatter without the overplot saturation.
+                    hexbin_kwargs: dict[str, Any] = {"gridsize": 30, "mincnt": 1, **kwargs}
+                    last_mappable = ax.hexbin(
+                        joined[p_col].to_numpy(),
+                        joined[p_row].to_numpy(),
+                        C=metric_arr,
+                        reduce_C_function=np.mean,
+                        cmap=cmap,
+                        **hexbin_kwargs,
+                    )
                 if i == n - 1:
                     ax.set_xlabel(p_col)
                 if j == 0:
@@ -180,10 +215,10 @@ def sweep_corner(
             else:
                 ax.set_visible(False)
 
-    if last_scatter is not None:
+    if last_mappable is not None:
         fig = axes_arr[0, 0].figure
         metric_label = metric if isinstance(metric, str) else "metric"
-        fig.colorbar(last_scatter, ax=axes_arr.ravel().tolist(), label=metric_label)
+        fig.colorbar(last_mappable, ax=axes_arr.ravel().tolist(), label=metric_label)
 
     return cast("NDArray[Any]", axes_arr)
 
@@ -268,6 +303,14 @@ def sweep_heatmap(
             f"requested (x={x!r}, y={y!r}) axes"
         )
 
+    for axis_name, level in (("x", x), ("y", y)):
+        index = pivot.columns if axis_name == "x" else pivot.index
+        if not pd.api.types.is_numeric_dtype(index.dtype):
+            raise SweepConfigError(
+                f"sweep_heatmap requires numeric grid axes; got dtype={index.dtype!r} "
+                f"for {axis_name}={level!r}. Use sweep_corner for categorical axes."
+            )
+
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 5))
 
@@ -325,15 +368,60 @@ def _gather_param_values(
 ) -> pd.DataFrame:
     """Build a ``run_id``-indexed DataFrame of per-run values for ``params``.
 
-    Per-param resolution order: prefer the column already in ``df``
-    (reduced via ``.first()`` since perturbed values are constant per
-    run); fall back to ``manifest.entries[i].overrides[param]``; raise
-    if neither path resolves.
+    Per-param resolution order:
+
+    1. If the param appears in ``manifest.parameter_spec``, prefer the
+       manifest override — those are the *design* values the run was
+       configured with. A perturbed dotted-path that happens to collide
+       with a ``ReportFile`` channel name (e.g. ``Sat.SMA`` reported for
+       diagnostics) used to silently take the report column, painting
+       the *measured* value instead of the *commanded* one.
+    2. Otherwise, fall back to the column already in ``df`` (reduced via
+       ``.first()`` since perturbed values are constant per run).
+    3. If neither resolves, raise.
+
+    When both a manifest override and a ``df`` column exist for a
+    manifest-listed param, the override wins. A :class:`RuntimeWarning`
+    fires if the two sources disagree, so a column-vs-design mismatch is
+    surfaced instead of silently masked.
     """
+    spec_params: set[str] = set()
+    if manifest is not None:
+        try:
+            spec_params = set(_params_from_parameter_spec(manifest.parameter_spec))
+        except SweepConfigError:
+            # Unknown _kind tag — keep the old resolution order rather
+            # than failing here; the caller's own validation will surface
+            # the underlying problem.
+            spec_params = set()
+
     columns: dict[str, pd.Series[Any]] = {}
     missing: list[str] = []
     for p in params:
-        if p in df.columns:
+        prefer_override = manifest is not None and p in spec_params
+        if prefer_override:
+            assert manifest is not None  # narrowed by prefer_override
+            try:
+                override_series = pd.Series(
+                    {e.run_id: e.overrides[p] for e in manifest.entries},
+                    name=p,
+                )
+            except KeyError:
+                missing.append(p)
+                continue
+            if p in df.columns:
+                df_series = df.groupby(level="run_id")[p].first()
+                aligned = df_series.reindex(override_series.index)
+                if not aligned.equals(override_series):
+                    warnings.warn(
+                        f"sweep_corner/sweep_heatmap: param {p!r} appears in both "
+                        "manifest.parameter_spec and df.columns and the two sources "
+                        "disagree; using manifest overrides (design values).",
+                        RuntimeWarning,
+                        stacklevel=3,
+                    )
+            columns[p] = override_series
+        elif p in df.columns:
             columns[p] = df.groupby(level="run_id")[p].first()
         elif manifest is not None:
             try:

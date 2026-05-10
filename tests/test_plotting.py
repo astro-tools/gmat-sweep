@@ -234,6 +234,147 @@ def test_sweep_corner_callable_metric_must_index_by_run_id() -> None:
         sweep_corner(df, metric=bad_metric, manifest=manifest)
 
 
+def test_sweep_corner_prefers_manifest_override_on_collision() -> None:
+    """When a perturbed dotted-path also appears as a df ReportFile column,
+    the design values (manifest overrides) take precedence over the measured
+    values, and a RuntimeWarning surfaces the disagreement."""
+    # df reports Sat.SMA per-run (e.g., diagnostics) — but those are
+    # *measured* values, slightly off from the commanded ones in the
+    # manifest. The plot should colour by the design values.
+    df = _multiindex_df(
+        {
+            0: [{"time": _ts(0), "Sat.SMA": 7005.0, "value": 1.0}],
+            1: [{"time": _ts(0), "Sat.SMA": 7105.0, "value": 2.0}],
+        }
+    )
+    manifest = _make_manifest(
+        [
+            _make_entry(0, {"Sat.SMA": 7000.0, "Sat.ECC": 0.001}),
+            _make_entry(1, {"Sat.SMA": 7100.0, "Sat.ECC": 0.002}),
+        ],
+        parameter_spec={
+            "_kind": "monte_carlo",
+            "perturb": {
+                "Sat.SMA": ("normal", 7050.0, 50.0),
+                "Sat.ECC": ("uniform", 0.001, 0.002),
+            },
+            "n": 2,
+            "seed": 0,
+        },
+    )
+
+    with pytest.warns(RuntimeWarning, match="manifest.parameter_spec and df.columns"):
+        axes = sweep_corner(df, metric="value", manifest=manifest)
+    scatter = next(c for c in axes[1, 0].collections if isinstance(c, PathCollection))
+    offsets = np.asarray(scatter.get_offsets())
+    # The x-axis on bottom_left is the second param (Sat.SMA, since panels are
+    # ordered as resolved_params = ["Sat.ECC", "Sat.SMA"] from _params_from_parameter_spec
+    # → keys in dict order). Either way, the SMA values must be the design
+    # ones (7000, 7100), never the measured (7005, 7105).
+    sma_values = sorted(
+        {float(offsets[i, 0]) for i in range(offsets.shape[0])}
+        | {float(offsets[i, 1]) for i in range(offsets.shape[0])}
+    )
+    assert 7000.0 in sma_values
+    assert 7100.0 in sma_values
+    assert 7005.0 not in sma_values
+    assert 7105.0 not in sma_values
+
+
+def test_sweep_corner_no_warning_when_override_and_column_agree() -> None:
+    """If the manifest override and df column carry the same per-run values,
+    no warning fires — only a genuine mismatch is noisy."""
+    df = _multiindex_df(
+        {
+            0: [{"time": _ts(0), "Sat.SMA": 7000.0, "value": 1.0}],
+            1: [{"time": _ts(0), "Sat.SMA": 7100.0, "value": 2.0}],
+        }
+    )
+    manifest = _make_manifest(
+        [
+            _make_entry(0, {"Sat.SMA": 7000.0, "Sat.ECC": 0.001}),
+            _make_entry(1, {"Sat.SMA": 7100.0, "Sat.ECC": 0.002}),
+        ],
+        parameter_spec={
+            "_kind": "monte_carlo",
+            "perturb": {
+                "Sat.SMA": ("normal", 7050.0, 50.0),
+                "Sat.ECC": ("uniform", 0.001, 0.002),
+            },
+            "n": 2,
+            "seed": 0,
+        },
+    )
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", RuntimeWarning)
+        sweep_corner(df, metric="value", manifest=manifest)
+
+
+def test_sweep_corner_auto_picks_hexbin_above_threshold() -> None:
+    """``kind="auto"`` defaults to hexbin once more than 2000 runs survive."""
+    n = 2050
+    rng = np.random.default_rng(0)
+    a = rng.normal(0.0, 1.0, size=n)
+    b = rng.normal(0.0, 1.0, size=n)
+    rows_per_run: dict[int, list[dict[str, Any]]] = {
+        rid: [{"time": _ts(0), "value": float(a[rid] + b[rid])}] for rid in range(n)
+    }
+    df = _multiindex_df(rows_per_run)
+    manifest = _make_manifest(
+        [_make_entry(rid, {"a": float(a[rid]), "b": float(b[rid])}) for rid in range(n)],
+        parameter_spec={
+            "_kind": "monte_carlo",
+            "perturb": {"a": ("normal", 0.0, 1.0), "b": ("normal", 0.0, 1.0)},
+            "n": n,
+            "seed": 0,
+        },
+    )
+
+    axes = sweep_corner(df, metric="value", manifest=manifest)
+    bottom_left = axes[1, 0]
+    # hexbin renders a PolyCollection, scatter renders a PathCollection.
+    assert any(isinstance(c, PolyCollection) for c in bottom_left.collections)
+    assert not any(isinstance(c, PathCollection) for c in bottom_left.collections)
+
+
+def test_sweep_corner_explicit_scatter_overrides_auto() -> None:
+    """``kind="scatter"`` keeps the old behaviour even at large N."""
+    n = 2050
+    rng = np.random.default_rng(0)
+    a = rng.normal(0.0, 1.0, size=n)
+    b = rng.normal(0.0, 1.0, size=n)
+    rows_per_run: dict[int, list[dict[str, Any]]] = {
+        rid: [{"time": _ts(0), "value": float(a[rid] + b[rid])}] for rid in range(n)
+    }
+    df = _multiindex_df(rows_per_run)
+    manifest = _make_manifest(
+        [_make_entry(rid, {"a": float(a[rid]), "b": float(b[rid])}) for rid in range(n)],
+        parameter_spec={
+            "_kind": "monte_carlo",
+            "perturb": {"a": ("normal", 0.0, 1.0), "b": ("normal", 0.0, 1.0)},
+            "n": n,
+            "seed": 0,
+        },
+    )
+
+    axes = sweep_corner(df, metric="value", manifest=manifest, kind="scatter")
+    bottom_left = axes[1, 0]
+    assert any(isinstance(c, PathCollection) for c in bottom_left.collections)
+    assert not any(isinstance(c, PolyCollection) for c in bottom_left.collections)
+
+
+def test_sweep_corner_rejects_unknown_kind() -> None:
+    df = _multiindex_df({0: [{"time": _ts(0), "value": 1.0}], 1: [{"time": _ts(0), "value": 2.0}]})
+    manifest = _make_manifest(
+        [_make_entry(0, {"a": 1.0, "b": 10.0}), _make_entry(1, {"a": 2.0, "b": 20.0})],
+        parameter_spec={"_kind": "grid", "a": [1.0, 2.0], "b": [10.0, 20.0]},
+    )
+    with pytest.raises(SweepConfigError, match="kind must be"):
+        sweep_corner(df, metric="value", manifest=manifest, kind="bubbles")  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # sweep_heatmap
 # ---------------------------------------------------------------------------
@@ -330,6 +471,31 @@ def test_sweep_heatmap_rejects_wrong_dimensionality() -> None:
     )
     with pytest.raises(SweepConfigError, match="exactly 2 grid axes"):
         sweep_heatmap(df, x="a", y="b", z="value", manifest=manifest)
+
+
+def test_sweep_heatmap_rejects_string_axis() -> None:
+    """A string-typed grid axis used to crash inside ``np.asarray(..., dtype=float)``;
+    sweep_heatmap now raises ``SweepConfigError`` with a typed message before
+    attempting the conversion, pointing users at ``sweep_corner`` instead."""
+    rows_per_run: dict[int, list[dict[str, Any]]] = {}
+    entries: list[ManifestEntry] = []
+    rid = 0
+    for mode in ("Cartesian", "Keplerian"):
+        for speed in (1.0, 2.0):
+            rows_per_run[rid] = [{"time": _ts(0), "value": float(rid)}]
+            entries.append(_make_entry(rid, {"mode": mode, "speed": speed}))
+            rid += 1
+    df = _multiindex_df(rows_per_run)
+    manifest = _make_manifest(
+        entries,
+        parameter_spec={
+            "_kind": "grid",
+            "mode": ["Cartesian", "Keplerian"],
+            "speed": [1.0, 2.0],
+        },
+    )
+    with pytest.raises(SweepConfigError, match=r"numeric grid axes.*dtype="):
+        sweep_heatmap(df, x="mode", y="speed", z="value", manifest=manifest)
 
 
 def test_sweep_heatmap_callable_z() -> None:
