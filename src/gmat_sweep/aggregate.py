@@ -1326,4 +1326,9 @@ def _running_stats_per_time(series: pd.Series[Any]) -> pd.DataFrame:
         empty.insert(0, _TIME_COL, pd.Series([], dtype="datetime64[ns]"))
         return empty
 
-    return pd.concat(parts, axis=0, ignore_index=True)
+    # Pin output ordering explicitly — the contract advertised in
+    # mc_convergence's docstring ('sorted by time then n ascending')
+    # should hold under refactors to the upstream groupby/concat path.
+    return pd.concat(parts, axis=0, ignore_index=True).sort_values(
+        [_TIME_COL, "n"], ignore_index=True
+    )
