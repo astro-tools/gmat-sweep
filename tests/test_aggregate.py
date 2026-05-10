@@ -16,6 +16,7 @@ from gmat_sweep.aggregate import (
     lazy_fused_reports,
     lazy_multiindex,
     mc_convergence,
+    sweep_diff,
     sweep_summary,
 )
 from gmat_sweep.errors import SweepConfigError
@@ -983,3 +984,249 @@ def test_mc_convergence_works_without_status_column() -> None:
     conv = mc_convergence(df, "miss", terminal_only=True)
     assert len(conv) == 4
     assert list(conv["n"]) == [1, 2, 3, 4]
+
+
+# ---------------------------------------------------------------------------
+# sweep_diff
+# ---------------------------------------------------------------------------
+
+
+def _diff_df(
+    *,
+    n_runs: int = 3,
+    n_steps: int = 2,
+    sma_offset: float = 0.0,
+    statuses: dict[int, str] | None = None,
+    include_status: bool = True,
+) -> pd.DataFrame:
+    """A ``(run_id, time)``-MultiIndexed sweep frame with two numeric columns.
+
+    Each ok run carries ``Sat.SMA = 7000 + run_id + sma_offset + step*0.01``
+    and ``Sat.X = (run_id + 1) * 10.0 + step`` (kept strictly positive so
+    self-diff of `__rel` is well-defined — ``0/0`` is NaN, not zero).
+    Non-ok runs collapse to one NaT-time, NaN-data marker row, matching
+    the rest of this test module's convention.
+    """
+    statuses = statuses or {}
+    rows: list[dict[str, object]] = []
+    times = pd.to_datetime([f"2026-05-09T00:00:0{i}" for i in range(n_steps)])
+    for run_id in range(n_runs):
+        status = statuses.get(run_id, "ok")
+        if status != "ok":
+            row: dict[str, object] = {
+                "run_id": run_id,
+                "time": pd.NaT,
+                "Sat.SMA": float("nan"),
+                "Sat.X": float("nan"),
+            }
+            if include_status:
+                row["__status"] = status
+            rows.append(row)
+            continue
+        for step, t in enumerate(times):
+            row = {
+                "run_id": run_id,
+                "time": t,
+                "Sat.SMA": 7000.0 + run_id + sma_offset + step * 0.01,
+                "Sat.X": float(run_id + 1) * 10.0 + step,
+            }
+            if include_status:
+                row["__status"] = "ok"
+            rows.append(row)
+    return cast(pd.DataFrame, pd.DataFrame(rows).set_index(["run_id", "time"]))
+
+
+def test_sweep_diff_self_diff_is_zero_everywhere() -> None:
+    """DoD criterion 1: a sweep diffed against a copy of itself is zero."""
+    df = _diff_df(n_runs=4, n_steps=3)
+    diff = sweep_diff(df, df.copy())
+
+    # Every numeric column gets a __diff and a __rel under how="both".
+    assert set(diff.columns) >= {"Sat.SMA__diff", "Sat.SMA__rel", "Sat.X__diff", "Sat.X__rel"}
+    np.testing.assert_array_equal(diff["Sat.SMA__diff"].to_numpy(), 0.0)
+    np.testing.assert_array_equal(diff["Sat.X__diff"].to_numpy(), 0.0)
+    np.testing.assert_array_equal(diff["Sat.SMA__rel"].to_numpy(), 0.0)
+    np.testing.assert_array_equal(diff["Sat.X__rel"].to_numpy(), 0.0)
+
+
+def test_sweep_diff_perturbed_sma_produces_nonzero_diff() -> None:
+    """DoD criterion 2: SMA=7000 vs SMA=7050 produces a non-zero __diff column."""
+    a = _diff_df(n_runs=3, n_steps=2)
+    b = _diff_df(n_runs=3, n_steps=2, sma_offset=50.0)
+    diff = sweep_diff(a, b)
+
+    # Sat.SMA shifted by exactly +50 per row; Sat.X unchanged.
+    np.testing.assert_array_equal(diff["Sat.SMA__diff"].to_numpy(), 50.0)
+    np.testing.assert_array_equal(diff["Sat.X__diff"].to_numpy(), 0.0)
+
+
+def test_sweep_diff_default_how_is_both_with_interleaved_columns() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=1.0)
+    diff = sweep_diff(a, b)
+
+    # Default how="both" interleaves diff/rel per source column.
+    cols = [c for c in diff.columns if c != "__status_diff"]
+    assert cols == ["Sat.SMA__diff", "Sat.SMA__rel", "Sat.X__diff", "Sat.X__rel"]
+
+
+def test_sweep_diff_how_absolute_emits_only_diff_columns() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=1.0)
+    diff = sweep_diff(a, b, how="absolute")
+
+    cols = [c for c in diff.columns if c != "__status_diff"]
+    assert cols == ["Sat.SMA__diff", "Sat.X__diff"]
+
+
+def test_sweep_diff_how_relative_emits_only_rel_columns() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=1.0)
+    diff = sweep_diff(a, b, how="relative")
+
+    cols = [c for c in diff.columns if c != "__status_diff"]
+    assert cols == ["Sat.SMA__rel", "Sat.X__rel"]
+
+
+def test_sweep_diff_relative_division_by_zero_is_nan() -> None:
+    """``a == 0`` rows in the baseline produce NaN in __rel, not inf."""
+    times = pd.to_datetime(["2026-05-09T00:00:00"])
+    a = pd.DataFrame({"run_id": [0], "time": times, "x": [0.0], "__status": ["ok"]}).set_index(
+        ["run_id", "time"]
+    )
+    b = pd.DataFrame({"run_id": [0], "time": times, "x": [5.0], "__status": ["ok"]}).set_index(
+        ["run_id", "time"]
+    )
+
+    diff = sweep_diff(a, b, how="relative")
+    assert pd.isna(diff["x__rel"].iloc[0])
+
+
+def test_sweep_diff_on_run_id_collapses_time_level_to_terminal_row() -> None:
+    a = _diff_df(n_runs=3, n_steps=4)
+    b = _diff_df(n_runs=3, n_steps=4, sma_offset=10.0)
+    diff = sweep_diff(a, b, on="run_id")
+
+    # Output is indexed by run_id only.
+    assert diff.index.name == "run_id"
+    assert list(diff.index) == [0, 1, 2]
+
+    # Terminal-row Sat.SMA differs by exactly the offset (constant across runs).
+    np.testing.assert_array_equal(diff["Sat.SMA__diff"].to_numpy(), 10.0)
+
+
+def test_sweep_diff_tolerance_float_masks_below_threshold_diffs() -> None:
+    a = _diff_df(n_runs=3, n_steps=2)
+    # Shift Sat.X by exactly 1, Sat.SMA by 0.005 (under 0.01 tolerance).
+    b = _diff_df(n_runs=3, n_steps=2, sma_offset=0.005)
+    b = b.assign(**{"Sat.X": b["Sat.X"] + 1.0})
+
+    diff = sweep_diff(a, b, tolerance=0.01)
+
+    # Sat.SMA diff (0.005) is below the cutoff → masked to NaN everywhere.
+    assert diff["Sat.SMA__diff"].isna().all()
+    assert diff["Sat.SMA__rel"].isna().all()
+    # Sat.X diff (1.0) is above the cutoff → preserved.
+    np.testing.assert_array_equal(diff["Sat.X__diff"].to_numpy(), 1.0)
+
+
+def test_sweep_diff_tolerance_callable_applies_per_column_cutoff() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=2.0)
+    b = b.assign(**{"Sat.X": b["Sat.X"] + 2.0})
+
+    # Mask Sat.SMA below 5.0 (so diff=2 is masked) but only mask Sat.X below
+    # 1.0 (so diff=2 survives).
+    cutoffs = {"Sat.SMA": 5.0, "Sat.X": 1.0}
+    diff = sweep_diff(a, b, tolerance=lambda col: cutoffs[col])
+
+    assert diff["Sat.SMA__diff"].isna().all()
+    np.testing.assert_array_equal(diff["Sat.X__diff"].to_numpy(), 2.0)
+
+
+def test_sweep_diff_status_diff_encodes_pair_when_either_side_not_ok() -> None:
+    a = _diff_df(n_runs=4, n_steps=2, statuses={1: "failed"})
+    b = _diff_df(n_runs=4, n_steps=2, statuses={2: "skipped"})
+    diff = sweep_diff(a, b, on="run_id")
+
+    # run 0 / 3 are ok on both sides → "ok"
+    # run 1 failed on a, ok on b → "failed/ok"
+    # run 2 ok on a, skipped on b → "ok/skipped"
+    assert diff.loc[0, "__status_diff"] == "ok"
+    assert diff.loc[1, "__status_diff"] == "failed/ok"
+    assert diff.loc[2, "__status_diff"] == "ok/skipped"
+    assert diff.loc[3, "__status_diff"] == "ok"
+
+
+def test_sweep_diff_status_diff_omitted_when_neither_side_has_status() -> None:
+    a = _diff_df(n_runs=2, n_steps=2, include_status=False)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=1.0, include_status=False)
+    diff = sweep_diff(a, b)
+
+    assert "__status_diff" not in diff.columns
+
+
+def test_sweep_diff_status_diff_treats_missing_side_as_ok() -> None:
+    a = _diff_df(n_runs=3, n_steps=2, statuses={1: "failed"})
+    b = _diff_df(n_runs=3, n_steps=2, sma_offset=1.0, include_status=False)
+    diff = sweep_diff(a, b, on="run_id")
+
+    # b has no __status — treat its side as "ok" for every run.
+    assert diff.loc[0, "__status_diff"] == "ok"
+    assert diff.loc[1, "__status_diff"] == "failed/ok"
+    assert diff.loc[2, "__status_diff"] == "ok"
+
+
+def test_sweep_diff_drops_non_shared_and_non_numeric_columns() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    b = _diff_df(n_runs=2, n_steps=2, sma_offset=1.0)
+    # Add an a-only numeric column and a shared non-numeric column.
+    a = a.assign(extra=1.0, label="aaa")
+    b = b.assign(label="bbb")
+
+    diff = sweep_diff(a, b)
+
+    # extra is a-only → dropped. label is shared but non-numeric → dropped.
+    cols = [c for c in diff.columns if c != "__status_diff"]
+    assert all("extra" not in c and "label" not in c for c in cols)
+    assert "Sat.SMA__diff" in cols
+    assert "Sat.X__diff" in cols
+
+
+def test_sweep_diff_index_intersection_drops_keys_present_on_only_one_side() -> None:
+    a = _diff_df(n_runs=4, n_steps=1)
+    # Drop run_id=3 from b — sweep_diff should align on the intersection.
+    b = _diff_df(n_runs=4, n_steps=1, sma_offset=1.0).drop(index=3, level="run_id")
+
+    diff = sweep_diff(a, b)
+
+    surviving_run_ids = sorted({rid for rid, _ in diff.index})
+    assert surviving_run_ids == [0, 1, 2]
+
+
+def test_sweep_diff_rejects_unknown_how() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"how=.*not supported"):
+        sweep_diff(a, a.copy(), how="median")
+
+
+def test_sweep_diff_rejects_unsupported_on() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"on=.*not supported"):
+        sweep_diff(a, a.copy(), on="time")
+
+
+def test_sweep_diff_rejects_mismatched_index_level_names() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    # Rename b's secondary level to break the index-level-name match.
+    b = a.copy()
+    b.index = b.index.set_names(["run_id", "interval_id"])
+
+    with pytest.raises(SweepConfigError, match=r"same index level names"):
+        sweep_diff(a, b)
+
+
+def test_sweep_diff_rejects_on_run_id_when_index_has_no_run_id_level() -> None:
+    df = _diff_df(n_runs=2, n_steps=2).reset_index().set_index("time")
+    with pytest.raises(SweepConfigError, match=r"requires a 'run_id' index level"):
+        sweep_diff(df, df.copy(), on="run_id")
