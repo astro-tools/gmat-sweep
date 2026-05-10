@@ -245,6 +245,44 @@ def test_sweep_to_dataframe_returns_multiindexed_frame(
     assert (df["__status"] == "ok").all()
 
 
+def test_sweep_to_dataframe_engine_polars_returns_polars_frame(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun
+) -> None:
+    """Smoke-test the engine="polars" plumbing through Sweep.to_dataframe and to_polars."""
+    pl = pytest.importorskip("polars")
+
+    script = _write_script(tmp_path)
+    output_dir = tmp_path / "out"
+    runs = _make_runs(script, output_dir, n=3)
+
+    fake_gmat_run.install_loader(run_hook=_payload_run_hook(rows=2))
+
+    with LocalJoblibPool(workers=1) as pool:
+        sweep = Sweep(
+            runs=runs,
+            backend=pool,
+            manifest_path=output_dir / "manifest.jsonl",
+            output_dir=output_dir,
+            script_path=script,
+            parameter_spec={"Sat.SMA": [7000.0, 7001.0, 7002.0]},
+            progress=False,
+        ).run()
+
+    pdf = sweep.to_dataframe()
+    plf = sweep.to_dataframe(engine="polars")
+    plf_shortcut = sweep.to_polars()
+
+    assert isinstance(plf, pl.DataFrame)
+    assert isinstance(plf_shortcut, pl.DataFrame)
+    # Both polars paths agree.
+    assert plf.equals(plf_shortcut)
+    # Index becomes two leading columns; row count and the non-index column
+    # set match the pandas-engine equivalent.
+    assert plf.columns[:2] == ["run_id", "time"]
+    assert plf.height == len(pdf)
+    assert set(plf.columns) == set(pdf.reset_index().columns)
+
+
 def test_sweep_to_dataframe_marks_failed_run(tmp_path: Path, fake_gmat_run: FakeGmatRun) -> None:
     script = _write_script(tmp_path)
     output_dir = tmp_path / "out"

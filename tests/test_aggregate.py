@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -1230,3 +1230,173 @@ def test_sweep_diff_rejects_on_run_id_when_index_has_no_run_id_level() -> None:
     df = _diff_df(n_runs=2, n_steps=2).reset_index().set_index("time")
     with pytest.raises(SweepConfigError, match=r"requires a 'run_id' index level"):
         sweep_diff(df, df.copy(), on="run_id")
+
+
+# ---------------------------------------------------------------------------
+# engine="polars" — opt-in polars output across the DataFrame-returning surface
+# ---------------------------------------------------------------------------
+
+# pytest.importorskip skips this section's tests when the [polars] extra is not
+# installed; the TYPE_CHECKING import gives mypy something to resolve when the
+# typecheck CI cell runs without the extra (the polars override in pyproject
+# treats the symbol as Any).
+if TYPE_CHECKING:
+    import polars as pl
+else:
+    pl = pytest.importorskip("polars")
+
+
+def _assert_polars_matches_pandas_flat(
+    pdf: pd.DataFrame,
+    plf: pl.DataFrame,
+    *,
+    numeric_check_col: str,
+) -> None:
+    """Assert a polars-engine result matches its pandas-engine equivalent.
+
+    The MultiIndex (if any) is flattened to leading columns under the polars
+    engine, so we compare row count, column set (after the flatten), and at
+    least one numeric column to text precision — the issue's stated DoD.
+    Pandas ``NaN``/``NaT``/``pd.NA`` and polars ``null`` all collapse to
+    ``None`` for the per-element comparison.
+    """
+    import math
+
+    def _normalise(v: Any) -> Any:
+        if v is None or v is pd.NaT or v is pd.NA:
+            return None
+        if isinstance(v, float) and math.isnan(v):
+            return None
+        return v
+
+    flat = pdf.reset_index() if pdf.index.nlevels > 1 or pdf.index.name else pdf
+    assert plf.height == len(flat)
+    assert set(plf.columns) == set(flat.columns)
+    pl_col = [_normalise(v) for v in plf.get_column(numeric_check_col).to_list()]
+    pd_col = [_normalise(v) for v in flat[numeric_check_col].tolist()]
+    assert pl_col == pd_col
+
+
+def test_lazy_multiindex_engine_polars_flattens_index_and_matches_pandas(
+    tmp_path: Path,
+) -> None:
+    paths = [_write_run_parquet(tmp_path, i, n_rows=2) for i in range(4)]
+    entries: list[ManifestEntry] = [_ok_entry(i, p) for i, p in enumerate(paths)]
+    entries.append(_nonok_entry(4, "failed"))
+    manifest = _make_manifest(entries)
+
+    pdf = lazy_multiindex(manifest, tmp_path)
+    plf = lazy_multiindex(manifest, tmp_path, engine="polars")
+
+    assert isinstance(plf, pl.DataFrame)
+    assert plf.columns[:2] == ["run_id", "time"]
+    _assert_polars_matches_pandas_flat(pdf, plf, numeric_check_col="x")
+
+
+def test_lazy_ephemerides_engine_polars_matches_pandas(tmp_path: Path) -> None:
+    paths = [
+        _write_run_parquet(tmp_path, i, n_rows=2, basename="ephemeris__Eph1") for i in range(3)
+    ]
+    manifest = _make_manifest([_ok_entry(i, p, key="ephemeris__Eph1") for i, p in enumerate(paths)])
+
+    pdf = lazy_ephemerides(manifest, tmp_path)
+    plf = lazy_ephemerides(manifest, tmp_path, engine="polars")
+
+    assert isinstance(plf, pl.DataFrame)
+    _assert_polars_matches_pandas_flat(pdf, plf, numeric_check_col="y")
+
+
+def test_lazy_contacts_engine_polars_preserves_int64_nullable_interval_id(
+    tmp_path: Path,
+) -> None:
+    p0 = _write_contact_parquet(tmp_path, 0, n_intervals=2)
+    p1 = _write_contact_parquet(tmp_path, 1, n_intervals=1)
+    entries: list[ManifestEntry] = [
+        _ok_entry(0, p0, key="contact__GroundContact"),
+        _ok_entry(1, p1, key="contact__GroundContact"),
+        _nonok_entry(2, "failed"),
+    ]
+    manifest = _make_manifest(entries)
+
+    pdf = lazy_contacts(manifest, tmp_path)
+    plf = lazy_contacts(manifest, tmp_path, engine="polars")
+
+    assert isinstance(plf, pl.DataFrame)
+    assert plf.columns[:2] == ["run_id", "interval_id"]
+    # The failed run's interval_id must be null in polars (round-tripped from
+    # pandas Int64 + pd.NA), not 0 or some other sentinel.
+    failed_row = plf.filter(pl.col("run_id") == 2)
+    assert failed_row.height == 1
+    assert failed_row["interval_id"][0] is None
+    _assert_polars_matches_pandas_flat(pdf, plf, numeric_check_col="Duration")
+
+
+def test_mc_convergence_engine_polars_matches_pandas() -> None:
+    df = _conv_df(n_runs=12)
+    pdf = mc_convergence(df, "miss", terminal_only=True)
+    plf = mc_convergence(df, "miss", terminal_only=True, engine="polars")
+
+    assert isinstance(plf, pl.DataFrame)
+    _assert_polars_matches_pandas_flat(pdf, plf, numeric_check_col="running_mean")
+
+
+def test_sweep_diff_engine_polars_matches_pandas() -> None:
+    a = _diff_df(n_runs=3, n_steps=2)
+    b = _diff_df(n_runs=3, n_steps=2, sma_offset=50.0)
+    pdf = sweep_diff(a, b)
+    plf = sweep_diff(a, b, engine="polars")
+
+    assert isinstance(plf, pl.DataFrame)
+    assert plf.columns[:2] == ["run_id", "time"]
+    _assert_polars_matches_pandas_flat(pdf, plf, numeric_check_col="Sat.SMA__diff")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda m, d: lazy_multiindex(m, d, engine="bogus"),
+        lambda m, d: lazy_ephemerides(m, d, engine="bogus"),
+        lambda m, d: lazy_contacts(m, d, engine="bogus"),
+    ],
+)
+def test_lazy_aggregators_reject_unknown_engine(
+    tmp_path: Path,
+    call: Any,
+) -> None:
+    manifest = _make_manifest([])
+    with pytest.raises(SweepConfigError, match=r"engine='bogus' is not supported"):
+        call(manifest, tmp_path)
+
+
+def test_mc_convergence_rejects_unknown_engine() -> None:
+    df = _conv_df(n_runs=2)
+    with pytest.raises(SweepConfigError, match=r"engine='bogus' is not supported"):
+        mc_convergence(df, "miss", engine="bogus")
+
+
+def test_sweep_diff_rejects_unknown_engine() -> None:
+    a = _diff_df(n_runs=2, n_steps=2)
+    with pytest.raises(SweepConfigError, match=r"engine='bogus' is not supported"):
+        sweep_diff(a, a.copy(), engine="bogus")
+
+
+def test_polars_missing_extra_raises_install_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When polars is not importable, the ImportError carries the install hint."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "polars":
+            raise ImportError("No module named 'polars'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    p = _write_run_parquet(tmp_path, 0, n_rows=1)
+    manifest = _make_manifest([_ok_entry(0, p)])
+    with pytest.raises(ImportError, match=r"pip install gmat-sweep\[polars\]"):
+        lazy_multiindex(manifest, tmp_path, engine="polars")
