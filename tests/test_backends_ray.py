@@ -108,6 +108,7 @@ def _patch_ray_with_stubs(
     def _get(ref: _ObjectRef) -> RunOutcome:
         if ref.exc is not None:
             raise ref.exc
+        assert ref.value is not None
         return ref.value
 
     monkeypatch.setattr(ray, "is_initialized", _is_initialized, raising=True)
