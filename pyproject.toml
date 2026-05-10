@@ -54,6 +54,7 @@ k8s = ["kubernetes>=29,<33"]
 mpi = ["mpi4py>=3.1"]
 plot = ["matplotlib>=3.8"]
 polars = ["polars>=1.0"]
+sensitivity = ["salib>=1.5"]
 examples = ["matplotlib>=3.8", "distributed>=2024.1", "ray[default]>=2.10"]
 
 [project.scripts]
@@ -191,6 +192,15 @@ follow_imports = "skip"
 # does not install the extra.
 [[tool.mypy.overrides]]
 module = ["polars", "polars.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# SALib is an optional [sensitivity]-extra dependency; sensitivity.py imports
+# SALib.sample.sobol / SALib.analyze.sobol lazily inside each function. SALib
+# ships partial type information that trips strict-mode rejection, so
+# `follow_imports = "skip"` accompanies the missing-imports tolerance.
+[[tool.mypy.overrides]]
+module = ["SALib", "SALib.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
