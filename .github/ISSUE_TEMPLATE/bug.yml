@@ -28,7 +28,7 @@ body:
     id: gmat_sweep_version
     attributes:
       label: gmat-sweep version
-      placeholder: "e.g. 0.1.0, or git sha"
+      placeholder: "e.g. 0.4.0, or git sha"
     validations:
       required: true
   - type: input
@@ -58,8 +58,12 @@ body:
       label: Backend
       options:
         - LocalJoblibPool (default)
+        - ProcessPoolExecutorPool
         - DaskPool
         - RayPool
+        - KubernetesJobPool
+        - MPIPool
+        - DebugPool
         - Other / unsure
     validations:
       required: true

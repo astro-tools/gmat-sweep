@@ -155,6 +155,7 @@ gmat-sweep run         --grid Sat.SMA=7000:7200:3 --backend dask --workers 8 --o
 gmat-sweep monte-carlo --n 1000 --perturb 'Sat.SMA=normal:7100:50' --seed 42 --out ./mc mission.script
 gmat-sweep resume      --script mission.script --workers 8 ./mc/manifest.jsonl
 gmat-sweep show        ./sweep/manifest.jsonl
+gmat-sweep archive     --out ./sweep.zip ./sweep/manifest.jsonl
 ```
 
 See the [CLI reference in the docs](https://astro-tools.github.io/gmat-sweep/cli/)
