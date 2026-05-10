@@ -70,6 +70,8 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.sweep_summary
 
+::: gmat_sweep.sweep_diff
+
 ::: gmat_sweep.mc_convergence
 
 ## Plotting
