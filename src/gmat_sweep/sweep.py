@@ -144,16 +144,19 @@ class Sweep:
         #   :meth:`resume`/:meth:`extend`/:meth:`_repr_html_` lookups that
         #   need the full list. ``run()`` still streams through
         #   :meth:`Pool.imap` for the bounded-in-flight benefit.
-        # * Iterable (non-Sequence) in → keep as ``self._runs_stream``;
-        #   ``run()`` is the only path that consumes it. resume/extend
-        #   are not valid in this mode (they need the spec lookup).
+        # * Iterable (non-Sequence) in → ``self._runs`` is an empty list
+        #   and ``_materialised`` is False. ``run()`` consumes the
+        #   provided iterator via ``self._runs_stream``; resume/extend
+        #   refuse, since they need the spec lookup.
         if isinstance(runs, Sequence):
-            self._runs: list[RunSpec] | None = list(runs)
+            self._runs: list[RunSpec] = list(runs)
             self._runs_stream: Iterable[RunSpec] = self._runs
+            self._materialised: bool = True
             derived_count = len(self._runs)
         else:
-            self._runs = None
+            self._runs = []
             self._runs_stream = runs
+            self._materialised = False
             derived_count = -1  # sentinel — must be supplied via expected_run_count
         if expected_run_count is None:
             if derived_count < 0:
@@ -204,7 +207,7 @@ class Sweep:
         # DebugPool requires a known finite count of exactly 1; defer the
         # check to the materialised-list path (it can't run a streaming
         # iterator anyway).
-        if self._runs is not None:
+        if self._materialised:
             self._enforce_debug_pool_single_spec(self._runs)
         elif self._backend.subprocess_isolated == "debug":
             raise BackendError(
@@ -363,7 +366,7 @@ class Sweep:
         """
         if not self._loaded_from_manifest or self._manifest is None:
             raise RuntimeError("Sweep.resume requires a Sweep built via Sweep.from_manifest")
-        if self._runs is None:
+        if not self._materialised:
             raise RuntimeError(
                 "Sweep.resume requires a materialised runs list — streaming "
                 "Sweep(runs=<iterator>) is incompatible with resume."
@@ -428,7 +431,7 @@ class Sweep:
         """
         if not self._loaded_from_manifest or self._manifest is None:
             raise RuntimeError("Sweep.extend requires a Sweep built via Sweep.from_manifest")
-        if self._runs is None:
+        if not self._materialised:
             raise RuntimeError(
                 "Sweep.extend requires a materialised runs list — streaming "
                 "Sweep(runs=<iterator>) is incompatible with extend."
