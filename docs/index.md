@@ -9,7 +9,7 @@ missions in parallel from Python.
 different parameter overrides, in parallel subprocesses, then aggregates the
 per-run reports into a single multi-indexed `pandas.DataFrame`. The single
 public entry point is [`sweep()`][gmat_sweep.sweep]: pass it a script, a
-parameter grid, and (optionally) a worker count.
+parameter grid, and (optionally) an execution `backend`.
 
 ```python
 from gmat_sweep import sweep
@@ -60,6 +60,8 @@ order-independence contracts.
   contract, and the backend-equivalence guarantee.
 - **[Monte Carlo](monte-carlo.md)** — stochastic dispersion sweeps with
   named distributions and a determinism contract.
+- **[Sensitivity](sensitivity.md)** — Sobol first / total / second-order
+  indices via SALib, with bootstrap confidence intervals.
 - **[CLI reference](cli.md)** — the `gmat-sweep` console script: every
   Python entry point exposed as a subcommand.
 - **[Manifest schema](manifest-schema.md)** — the JSON Lines manifest each
@@ -69,7 +71,8 @@ order-independence contracts.
   single-machine backends on a 1000-run reference sweep.
 - **[Cookbook](cookbook.md)** — patterns for turning a sweep's outputs into
   the inputs downstream consumers need: visualisation export (CCSDS-OEM,
-  CZML), cross-tool validation, and external-tool wrapping.
+  CZML), cross-tool validation, external-tool wrapping, and archival
+  deposit (Zenodo / JOSS via `Sweep.archive`).
 - **[Cluster recipes](recipes/index.md)** — Slurm with `srun`, Kubernetes
   pod-per-worker, Kubernetes Job-per-run, and Ray autoscaling — wiring
   `DaskPool`, `KubernetesJobPool`, and `RayPool` into shared infrastructure.

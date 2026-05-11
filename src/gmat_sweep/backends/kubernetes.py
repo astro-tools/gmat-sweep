@@ -103,8 +103,8 @@ class KubernetesJobPool(Pool):
     image:
         Fully-qualified container image with ``gmat-sweep[k8s]`` plus a
         working GMAT install. Pods run ``python -m
-        gmat_sweep._run_subprocess`` inside this image. **Required** in
-        v0.4 — a published default may follow in a later release.
+        gmat_sweep._run_subprocess`` inside this image. **Required** —
+        no published default image is shipped today.
     pvc_name:
         Name of an existing :class:`PersistentVolumeClaim` in
         ``namespace`` that the Pods will mount. Must be visible to the

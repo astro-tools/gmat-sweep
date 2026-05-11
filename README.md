@@ -155,6 +155,7 @@ gmat-sweep run         --grid Sat.SMA=7000:7200:3 --backend dask --workers 8 --o
 gmat-sweep monte-carlo --n 1000 --perturb 'Sat.SMA=normal:7100:50' --seed 42 --out ./mc mission.script
 gmat-sweep resume      --script mission.script --workers 8 ./mc/manifest.jsonl
 gmat-sweep show        ./sweep/manifest.jsonl
+gmat-sweep archive     --out ./sweep.zip ./sweep/manifest.jsonl
 ```
 
 See the [CLI reference in the docs](https://astro-tools.github.io/gmat-sweep/cli/)
@@ -216,15 +217,6 @@ Runnable example notebooks:
 - [Extending a Monte Carlo](https://astro-tools.github.io/gmat-sweep/examples/10_extending_monte_carlo/) —
   anchor a 100-run `monte_carlo`, append 200 more via `monte_carlo_extend(n=200)`,
   and assert that the original 100 `run_id`s are preserved bit-for-bit.
-
-## Roadmap
-
-| Release | Scope |
-|---|---|
-| **v0.3** *(current)* | `DaskPool` (extra `[dask]`) and `RayPool` (extra `[ray]`) join `LocalJoblibPool` behind a single `Pool` ABC. CLI `--backend {local,dask,ray}` flag and rich `gmat-sweep show --detail` / `--run` modes. Three cluster-recipe pages (Slurm with `srun`, Kubernetes pod-per-worker, Ray autoscaling). Benchmark page comparing backends on a 1000-run reference sweep, with a per-backend throughput floor enforced in CI. Manifest header gains a `backend` field; `reuse_gmat_context` exposes the bootstrap-amortisation choice on every pool. |
-| **v0.4** *(next)* | `KubernetesJobPool` (extra `[k8s]`) — every run becomes one `batch/v1` Job, no Dask or Ray middleware. Notebook-friendly `__repr_html__` for `Sweep` / `RunOutcome`. Optional plotting helpers (`sweep_corner`, `sweep_heatmap`) behind a `[plot]` extra pulling matplotlib. Sobol sensitivity indices via SALib (extra `[sensitivity]`) — `sobol_sample` builds the Saltelli design, `sobol_analyze` returns first/total/second-order indices with confidence intervals. A docs cookbook page on integrating sweep outputs into downstream consumers. Smoke-canary cell against the canonical `ghcr.io/astro-tools/gmat` image. |
-
-Past releases live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Development
 
