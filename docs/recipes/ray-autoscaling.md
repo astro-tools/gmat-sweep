@@ -152,13 +152,16 @@ profile a small sweep first, then size for the real one.
 
 ### Subprocess hop inside each Ray task
 
-Each `gmat-sweep` task runs as a Ray actor task. Inside that task, the
-sweep still does its per-run subprocess hop — `_worker_entrypoint`
-spawns a child Python that bootstraps GMAT and exits. Ray's worker
-processes themselves are long-lived (the autoscaler manages them at
-node granularity, not per task), but the subprocess hop is per task,
-not per worker. This is by design — it's the same isolation contract
-that protects sweeps on every other backend.
+Each `gmat-sweep` task runs as a Ray actor task. Under the default
+`reuse_gmat_context=True`, the task imports `gmat_run` once per worker
+and dispatches every subsequent task through
+`gmat_sweep.worker.run_one` in the same interpreter. Under
+`reuse_gmat_context=False`, the task spawns a child Python via
+`gmat_sweep.backends._subprocess.run_spec_in_subprocess` that
+bootstraps GMAT fresh and exits — per task, not per worker. Ray's
+worker processes themselves are long-lived (the autoscaler manages them
+at node granularity, not per task); the isolation contract is the same
+one that protects sweeps on every other backend.
 
 The `reuse_gmat_context=True` default still amortises bootstrap across
 the runs assigned to a single Ray worker process, so worker-level

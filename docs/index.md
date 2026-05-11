@@ -54,8 +54,9 @@ order-independence contracts.
   vision snippet.
 - **[Parameter spec](parameter-spec.md)** — how grids, dotted-path overrides,
   and the CLI's mini-grammar work.
-- **[Backends](backends.md)** — the three pool implementations
-  (`LocalJoblibPool`, `DaskPool`, `RayPool`), the `reuse_gmat_context`
+- **[Backends](backends.md)** — the shipped pool implementations
+  (`LocalJoblibPool`, `ProcessPoolExecutorPool`, `DaskPool`, `RayPool`,
+  `KubernetesJobPool`, `MPIPool`, `DebugPool`), the `reuse_gmat_context`
   contract, and the backend-equivalence guarantee.
 - **[Monte Carlo](monte-carlo.md)** — stochastic dispersion sweeps with
   named distributions and a determinism contract.
@@ -65,13 +66,13 @@ order-independence contracts.
   sweep writes alongside its outputs.
 - **[Supported versions](supported-versions.md)** — GMAT × Python × OS matrix.
 - **[Benchmarks](benchmarks.md)** — wall-clock and throughput numbers for the
-  three backends on a 1000-run reference sweep.
+  single-machine backends on a 1000-run reference sweep.
 - **[Cookbook](cookbook.md)** — patterns for turning a sweep's outputs into
   the inputs downstream consumers need: visualisation export (CCSDS-OEM,
   CZML), cross-tool validation, and external-tool wrapping.
 - **[Cluster recipes](recipes/index.md)** — Slurm with `srun`, Kubernetes
-  pod-per-worker, and Ray autoscaling — wiring `DaskPool` and `RayPool`
-  into shared infrastructure.
+  pod-per-worker, Kubernetes Job-per-run, and Ray autoscaling — wiring
+  `DaskPool`, `KubernetesJobPool`, and `RayPool` into shared infrastructure.
 - **[FAQ](faq.md)** — subprocess isolation, the `gmat-run` dependency, and
   where to get GMAT.
 - **[API reference](api.md)** — auto-generated from docstrings.

@@ -43,14 +43,14 @@ changes.
 
 ## When none of these fits
 
-The three orchestrators above are the ones with one-shot recipes. For
+The orchestrators above are the ones with one-shot recipes. For
 anything else — AWS Batch, GCP Batch, custom MPI launchers, in-house
 schedulers — write a custom `Pool` against the
 [`Pool`][gmat_sweep.backends.Pool] ABC. Its contract is small: accept
 [`RunSpec`][gmat_sweep.spec.RunSpec]s, route each through the per-task
 subprocess hop, and yield [`RunOutcome`][gmat_sweep.spec.RunOutcome]s as
-they complete. The three shipped pools are exactly that pattern, three
-different ways.
+they complete. The shipped pools are exactly that pattern, in different
+shapes.
 
 ## Looking for the other side?
 

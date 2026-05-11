@@ -88,7 +88,8 @@ gmat-sweep run --grid Sat.SMA=7000:7200:3 --out ./sweep mission.script
 
 - [Parameter spec](parameter-spec.md) — what overrides are valid and how
   the cartesian product is laid out.
-- [Backends](backends.md) — `LocalJoblibPool`, `DaskPool`, `RayPool`, and
+- [Backends](backends.md) — `LocalJoblibPool`, `ProcessPoolExecutorPool`,
+  `DaskPool`, `RayPool`, `KubernetesJobPool`, `MPIPool`, `DebugPool`, and
   the `reuse_gmat_context` knob that picks how the GMAT bootstrap is
   amortised across runs.
 - [Cluster recipes](recipes/index.md) — Slurm, Kubernetes, and Ray

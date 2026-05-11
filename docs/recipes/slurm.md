@@ -114,12 +114,15 @@ gmat_run"` before launching the sweep.
 
 ### Subprocess isolation still applies inside each worker
 
-Each Dask worker is one Python process. The sweep's per-run subprocess
-hop runs **inside** that worker — `_worker_entrypoint` spawns a child
-Python that bootstraps GMAT, runs the script, and exits. No special
-Slurm-side configuration is needed; the per-task fresh GMAT context
-that protects sweeps on a laptop protects them on Slurm in exactly the
-same way.
+Each Dask worker is one Python process. Under
+`reuse_gmat_context=True` (the default) each worker imports `gmat_run`
+once and dispatches each task through `gmat_sweep.worker.run_one` in
+the same interpreter. Under `reuse_gmat_context=False` each task spawns
+a child Python via `gmat_sweep.backends._subprocess.run_spec_in_subprocess`
+that bootstraps GMAT fresh, runs the script, and exits. No special
+Slurm-side configuration is needed in either mode; the per-task fresh
+GMAT context that protects sweeps on a laptop protects them on Slurm
+in exactly the same way.
 
 The `reuse_gmat_context=True` default still amortises bootstrap across
 the runs assigned to a single worker, so worker-level reuse remains the

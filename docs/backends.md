@@ -1,8 +1,9 @@
 # Backends
 
 Every gmat-sweep run is dispatched through a `Pool` — the abstraction that
-takes a `RunSpec`, runs it, and returns a `RunOutcome`. Five concrete
-pools ship in the box:
+takes a `RunSpec`, runs it, and returns a `RunOutcome`. Seven concrete
+pools ship in the box (six listed below; `DebugPool` is the off-spec
+single-spec backend documented [further down](#debugpool-in-process-single-run-debugger-friendly)):
 
 | Pool | Install | When to pick it |
 |---|---|---|
