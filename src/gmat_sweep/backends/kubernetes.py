@@ -560,6 +560,7 @@ class KubernetesJobPool(Pool):
             ),
             started_at=started_at,
             ended_at=ended_at,
+            duration_s=max(0.0, (ended_at - started_at).total_seconds()),
         )
 
     def _read_outcome(self, spec: RunSpec, job_name: str, *, started_at: datetime) -> RunOutcome:
@@ -574,6 +575,7 @@ class KubernetesJobPool(Pool):
                     stderr=f"unreadable outcome JSON at {outcome_path}: {exc}",
                     started_at=started_at,
                     ended_at=ended_at,
+                    duration_s=max(0.0, (ended_at - started_at).total_seconds()),
                 )
         return self._fold_unknown_failure(spec, job_name, started_at)
 
@@ -590,6 +592,7 @@ class KubernetesJobPool(Pool):
             ).rstrip(),
             started_at=started_at,
             ended_at=ended_at,
+            duration_s=max(0.0, (ended_at - started_at).total_seconds()),
         )
 
     def _fetch_pod_logs(self, job_name: str) -> str:

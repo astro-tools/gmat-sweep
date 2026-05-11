@@ -35,6 +35,8 @@ __all__ = [
     "expand_monte_carlo_to_run_specs",
     "expand_samples_to_run_specs",
     "full_factorial",
+    "full_factorial_size",
+    "iter_grid_run_specs",
     "latin_hypercube_samples",
 ]
 
@@ -85,13 +87,39 @@ def expand_grid_to_run_specs(
     :func:`full_factorial` carries through unchanged: ``specs[i].run_id == i``
     and the override dicts appear in cartesian-product order.
 
+    Materialises the full cartesian product up front — fine for small
+    grids but spends O(N) memory on the spec list before the first
+    worker starts. Prefer :func:`iter_grid_run_specs` when the
+    cartesian product is large (10⁴+ runs): the streaming variant
+    yields the same specs one at a time.
+
     Raises :class:`SweepConfigError` for the same reasons as
     :func:`full_factorial`.
     """
+    return list(iter_grid_run_specs(grid, script_path, output_dir))
+
+
+def iter_grid_run_specs(
+    grid: Mapping[str, Iterable[Any]],
+    script_path: str | Path,
+    output_dir: str | Path,
+) -> Iterator[RunSpec]:
+    """Stream :class:`RunSpec` instances from a full-factorial expansion of ``grid``.
+
+    Same per-spec shape as :func:`expand_grid_to_run_specs` (sequential
+    ``run_id``, per-run ``output_dir``, ``seed=None``, ``run_options={}``)
+    but yields lazily — for a 10⁵-row factorial the driver never holds
+    more than one :class:`RunSpec` plus :func:`full_factorial`'s
+    iterator state in memory.
+
+    Validation (string keys, non-empty values) still runs eagerly at
+    the start of iteration via :func:`full_factorial`, so malformed
+    grids fail loudly before any spec is yielded.
+    """
     script_path_obj = Path(script_path)
     base_output_dir = Path(output_dir)
-    return [
-        RunSpec(
+    for run_id, overrides in enumerate(full_factorial(grid)):
+        yield RunSpec(
             script_path=script_path_obj,
             overrides=overrides,
             output_dir=base_output_dir / f"run-{run_id}",
@@ -99,8 +127,31 @@ def expand_grid_to_run_specs(
             seed=None,
             run_options={},
         )
-        for run_id, overrides in enumerate(full_factorial(grid))
-    ]
+
+
+def full_factorial_size(grid: Mapping[str, Iterable[Any]]) -> int:
+    """Return the number of runs a :func:`full_factorial` expansion of ``grid`` produces.
+
+    ``prod(len(list(v)) for v in grid.values())`` — but tolerant of
+    generators (materialises each axis once) and aware that the empty
+    mapping is the identity (one empty-override run, matching
+    :func:`full_factorial`).
+
+    Used by :func:`gmat_sweep.sweep` to size the manifest header's
+    ``run_count`` and the progress bar without materialising the
+    cartesian product itself.
+    """
+    materialised: list[tuple[Any, ...]] = []
+    for key, values in grid.items():
+        if not isinstance(key, str):
+            raise SweepConfigError(f"grid keys must be strings, got {type(key).__name__}: {key!r}")
+        materialised.append(tuple(values))
+        if not materialised[-1]:
+            raise SweepConfigError(f"grid value for {key!r} is empty")
+    n = 1
+    for axis in materialised:
+        n *= len(axis)
+    return n
 
 
 def expand_samples_to_run_specs(

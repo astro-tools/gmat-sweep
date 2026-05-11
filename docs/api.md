@@ -14,8 +14,6 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.latin_hypercube
 
-::: gmat_sweep.latin_hypercube_extend
-
 ::: gmat_sweep.Sweep
 
 ## Execution backend
@@ -48,7 +46,11 @@ auto-generated from docstrings via
 
 ::: gmat_sweep.full_factorial
 
+::: gmat_sweep.full_factorial_size
+
 ::: gmat_sweep.expand_grid_to_run_specs
+
+::: gmat_sweep.iter_grid_run_specs
 
 ::: gmat_sweep.expand_samples_to_run_specs
 

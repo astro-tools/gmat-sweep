@@ -171,6 +171,10 @@ def test_extension_run_count_is_positive_after_extend(
     assert manifest.extension_run_count == 15
     # parameter_spec.n stays frozen at the original value — header is append-only.
     assert manifest.parameter_spec["n"] == 10
+    # Header run_count is stale (it reports the original size) but
+    # total_run_count reflects the live total. Issue #134 item 3.
+    assert manifest.run_count == 10
+    assert manifest.total_run_count == 25
 
 
 def test_extension_run_count_is_zero_for_grid_manifest(
@@ -346,3 +350,20 @@ def test_latin_hypercube_extend_refuses_with_clear_message(
             backend=LocalJoblibPool(max_workers=1),
             progress=False,
         )
+
+
+def test_latin_hypercube_extend_is_not_in_public_api() -> None:
+    """The typed-refusal sentinel is intentionally hidden from the top-level
+    namespace and ``__all__`` so the user-facing API doesn't advertise an
+    "extend" capability for LH sweeps. Generic wrappers that need the typed
+    refusal import it directly from :mod:`gmat_sweep.api`."""
+    import gmat_sweep
+    import gmat_sweep.api as api_mod
+
+    assert "latin_hypercube_extend" not in gmat_sweep.__all__
+    assert "latin_hypercube_extend" not in api_mod.__all__
+    # Direct import from gmat_sweep.api still works — used by typed-refusal
+    # wrappers that want the SweepConfigError rather than AttributeError.
+    from gmat_sweep.api import latin_hypercube_extend as _direct
+
+    assert _direct is not None

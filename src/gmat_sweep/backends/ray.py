@@ -198,4 +198,10 @@ class RayPool(Pool):
 
 def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )

@@ -161,6 +161,7 @@ class _NamedSpecificPool(Pool):
                 output_paths={},
                 started_at=now,
                 ended_at=now,
+                duration_s=0.0,
             )
             f.set_result(outcome)
             yield outcome
@@ -427,6 +428,7 @@ class _InterruptingPool(Pool):
                 output_paths={},
                 started_at=now,
                 ended_at=now,
+                duration_s=0.0,
             )
         raise KeyboardInterrupt
 

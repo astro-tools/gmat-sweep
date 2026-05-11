@@ -175,13 +175,23 @@ class _SyntheticFailingPool(Pool):
 def _ok_outcome(spec: RunSpec, output_paths: dict[str, Path]) -> RunOutcome:
     now = datetime.now(timezone.utc)
     return RunOutcome.ok(
-        run_id=spec.run_id, output_paths=output_paths, started_at=now, ended_at=now
+        run_id=spec.run_id,
+        output_paths=output_paths,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
     )
 
 
 def _failed_outcome(spec: RunSpec, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=spec.run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=spec.run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )
 
 
 def _drive_synthetic_sweep(

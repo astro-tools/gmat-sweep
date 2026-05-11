@@ -31,6 +31,7 @@ See :class:`gmat_sweep.backends.base.Pool` for the semantics of
 
 from __future__ import annotations
 
+import os
 import traceback
 import warnings
 from collections.abc import Callable, Iterable, Iterator
@@ -101,6 +102,9 @@ class LocalJoblibPool(Pool):
             )
         self._workers = resolved
         self._reuse_gmat_context = reuse_gmat_context
+        # Resolve -1 ("all cores") to a concrete count for max_workers — the
+        # Pool.imap default uses this for the in-flight cap.
+        self._resolved_max_workers: int = (os.cpu_count() or 1) if resolved == -1 else resolved
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
         self._parallel = joblib.Parallel(
@@ -109,6 +113,10 @@ class LocalJoblibPool(Pool):
             return_as="generator_unordered",
         )
         self._parallel.__enter__()
+
+    @property
+    def max_workers(self) -> int:
+        return self._resolved_max_workers
 
     def submit(self, spec: RunSpec) -> Future[RunOutcome]:
         if self._closed:
@@ -177,4 +185,10 @@ class LocalJoblibPool(Pool):
 
 def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )

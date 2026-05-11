@@ -25,12 +25,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 __all__ = ["RunOutcome", "RunSpec", "RunStatus", "SweepSpec"]
 
 
 RunStatus = Literal["ok", "failed", "skipped"]
+_RUN_STATUS_VALUES: frozenset[str] = frozenset(get_args(RunStatus))
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,22 +54,43 @@ class RunSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "script_path": str(self.script_path),
-            "overrides": dict(self.overrides),
+            "overrides": self.overrides,
             "output_dir": str(self.output_dir),
             "run_id": self.run_id,
             "seed": self.seed,
-            "run_options": dict(self.run_options),
+            "run_options": self.run_options,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunSpec:
+        script_path = data["script_path"]
+        if not isinstance(script_path, str):
+            raise ValueError(f"RunSpec.script_path must be str, got {type(script_path).__name__}")
+        overrides = data["overrides"]
+        if not isinstance(overrides, dict):
+            raise ValueError(f"RunSpec.overrides must be a dict, got {type(overrides).__name__}")
+        output_dir = data["output_dir"]
+        if not isinstance(output_dir, str):
+            raise ValueError(f"RunSpec.output_dir must be str, got {type(output_dir).__name__}")
+        run_id = data["run_id"]
+        # bool is an int subclass — reject it explicitly so True doesn't sneak through as 1.
+        if type(run_id) is not int:
+            raise ValueError(f"RunSpec.run_id must be int, got {type(run_id).__name__}")
+        seed = data["seed"]
+        if seed is not None and type(seed) is not int:
+            raise ValueError(f"RunSpec.seed must be int or None, got {type(seed).__name__}")
+        run_options = data["run_options"]
+        if not isinstance(run_options, dict):
+            raise ValueError(
+                f"RunSpec.run_options must be a dict, got {type(run_options).__name__}"
+            )
         return cls(
-            script_path=Path(data["script_path"]),
-            overrides=dict(data["overrides"]),
-            output_dir=Path(data["output_dir"]),
-            run_id=int(data["run_id"]),
-            seed=None if data["seed"] is None else int(data["seed"]),
-            run_options=dict(data["run_options"]),
+            script_path=Path(script_path),
+            overrides=dict(overrides),
+            output_dir=Path(output_dir),
+            run_id=run_id,
+            seed=seed,
+            run_options=dict(run_options),
         )
 
 
@@ -95,7 +117,7 @@ class SweepSpec:
             "mission_script_path": str(self.mission_script_path),
             "runs": [r.to_dict() for r in self.runs],
             "backend": self.backend,
-            "backend_kwargs": dict(self.backend_kwargs),
+            "backend_kwargs": self.backend_kwargs,
             "output_dir": str(self.output_dir),
             "manifest_path": str(self.manifest_path),
             "sweep_seed": self.sweep_seed,
@@ -122,9 +144,15 @@ class RunOutcome:
     ReportFile resource name) to the on-disk Parquet artefact written
     under :attr:`RunSpec.output_dir`. Empty for failed and skipped runs.
     ``stderr`` is ``None`` for successful runs and the captured worker
-    stderr / traceback string for failed runs. ``duration_s`` is computed
-    by the :meth:`ok` / :meth:`failed` helpers from the bookend timestamps
-    so the three values cannot disagree.
+    stderr / traceback string for failed runs.
+
+    ``duration_s`` is measured from a :func:`time.monotonic` bookend
+    pair around the run body, not from
+    ``(ended_at - started_at).total_seconds()``: a wall-clock
+    correction (NTP step) mid-run would otherwise drive ``duration_s``
+    negative or zero. ``started_at`` / ``ended_at`` remain wall-clock
+    audit timestamps. Callers pass the monotonic delta in via the
+    :meth:`ok` / :meth:`failed` helpers.
     """
 
     run_id: int
@@ -143,12 +171,13 @@ class RunOutcome:
         output_paths: dict[str, Path],
         started_at: datetime,
         ended_at: datetime,
+        duration_s: float,
     ) -> RunOutcome:
         return cls(
             run_id=run_id,
             status="ok",
             output_paths=dict(output_paths),
-            duration_s=(ended_at - started_at).total_seconds(),
+            duration_s=duration_s,
             stderr=None,
             started_at=started_at,
             ended_at=ended_at,
@@ -162,12 +191,13 @@ class RunOutcome:
         stderr: str,
         started_at: datetime,
         ended_at: datetime,
+        duration_s: float,
     ) -> RunOutcome:
         return cls(
             run_id=run_id,
             status="failed",
             output_paths={},
-            duration_s=(ended_at - started_at).total_seconds(),
+            duration_s=duration_s,
             stderr=stderr,
             started_at=started_at,
             ended_at=ended_at,
@@ -186,9 +216,14 @@ class RunOutcome:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunOutcome:
+        status = data["status"]
+        if status not in _RUN_STATUS_VALUES:
+            raise ValueError(
+                f"RunOutcome.status must be one of {sorted(_RUN_STATUS_VALUES)}, got {status!r}"
+            )
         return cls(
             run_id=int(data["run_id"]),
-            status=cast(RunStatus, data["status"]),
+            status=cast(RunStatus, status),
             output_paths={k: Path(v) for k, v in data["output_paths"].items()},
             duration_s=float(data["duration_s"]),
             stderr=None if data["stderr"] is None else str(data["stderr"]),

@@ -102,6 +102,7 @@ def test_run_outcome_ok_helper_sets_status_and_clears_stderr() -> None:
         output_paths={"ReportFile1": Path("/o/run-2/r1.parquet")},
         started_at=started,
         ended_at=ended,
+        duration_s=12.0,
     )
     assert out.status == "ok"
     assert out.stderr is None
@@ -117,6 +118,7 @@ def test_run_outcome_failed_helper_captures_stderr_and_empty_outputs() -> None:
         stderr="GMAT exploded",
         started_at=started,
         ended_at=ended,
+        duration_s=5.0,
     )
     assert out.status == "failed"
     assert out.stderr == "GMAT exploded"
@@ -135,6 +137,7 @@ def test_run_outcome_ok_round_trips_paths_and_timestamps() -> None:
         },
         started_at=started,
         ended_at=ended,
+        duration_s=90.0,
     )
     restored = RunOutcome.from_dict(json.loads(json.dumps(original.to_dict())))
     assert restored == original
@@ -149,6 +152,7 @@ def test_run_outcome_failed_round_trips_with_stderr() -> None:
         stderr="GMAT exploded",
         started_at=started,
         ended_at=ended,
+        duration_s=5.0,
     )
     restored = RunOutcome.from_dict(json.loads(json.dumps(original.to_dict())))
     assert restored == original
@@ -169,3 +173,70 @@ def test_run_outcome_skipped_constructed_directly_round_trips() -> None:
     restored = RunOutcome.from_dict(json.loads(json.dumps(skipped.to_dict())))
     assert restored == skipped
     assert restored.status == "skipped"
+
+
+def test_run_outcome_from_dict_rejects_unknown_status() -> None:
+    moment = _utc(2026, 5, 4, 0, 0, 0)
+    payload = {
+        "run_id": 1,
+        "status": "banana",
+        "output_paths": {},
+        "duration_s": 0.0,
+        "stderr": None,
+        "started_at": moment.isoformat(),
+        "ended_at": moment.isoformat(),
+    }
+    with pytest.raises(ValueError, match="banana"):
+        RunOutcome.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "field, bad_value",
+    [
+        ("script_path", 123),
+        ("output_dir", None),
+        ("run_id", "0"),
+        ("run_id", True),  # bool is an int subclass — reject explicitly
+        ("seed", "42"),
+        ("overrides", ["Sat.SMA", 7000.0]),
+        ("run_options", "overwrite"),
+    ],
+)
+def test_run_spec_from_dict_rejects_malformed_field(field: str, bad_value: object) -> None:
+    payload: dict[str, object] = {
+        "script_path": "/missions/flyby.script",
+        "overrides": {"Sat.SMA": 7000.0},
+        "output_dir": "/sweep-out/run-0",
+        "run_id": 0,
+        "seed": 42,
+        "run_options": {},
+    }
+    payload[field] = bad_value
+    with pytest.raises(ValueError, match=field):
+        RunSpec.from_dict(payload)
+
+
+def test_run_outcome_duration_unaffected_by_wall_clock_step() -> None:
+    """Wall-clock bookends can disagree with duration_s when NTP corrects mid-run.
+
+    The fix is to source duration from time.monotonic() inside the worker; this
+    test asserts the helpers accept (and preserve) a duration that contradicts
+    `ended_at - started_at`.
+    """
+    started = _utc(2026, 5, 4, 12, 0, 0)
+    # Simulate the system clock being stepped backwards by 5 seconds mid-run:
+    # ended_at is *before* started_at, but monotonic-derived duration is 3.0 s.
+    ended = _utc(2026, 5, 4, 11, 59, 55)
+    monotonic_duration = 3.0
+
+    out = RunOutcome.ok(
+        run_id=0,
+        output_paths={},
+        started_at=started,
+        ended_at=ended,
+        duration_s=monotonic_duration,
+    )
+    assert out.duration_s == monotonic_duration
+    # Sanity: the wall-clock delta is negative; the helper trusted the
+    # caller's monotonic value rather than re-deriving.
+    assert (ended - started).total_seconds() < 0

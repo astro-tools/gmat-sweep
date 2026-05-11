@@ -175,7 +175,9 @@ def test_close_cancels_pending_futures(tmp_path: Path) -> None:
 
 def _ok_outcome(run_id: int) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.ok(run_id=run_id, output_paths={}, started_at=now, ended_at=now)
+    return RunOutcome.ok(
+        run_id=run_id, output_paths={}, started_at=now, ended_at=now, duration_s=0.0
+    )
 
 
 def test_default_dispatches_run_one_directly(

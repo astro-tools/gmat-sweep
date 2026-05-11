@@ -32,6 +32,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,6 +66,7 @@ def run_spec_in_subprocess(
     """
     interpreter = python or sys.executable
     started_at = datetime.now(timezone.utc)
+    start_monotonic = time.monotonic()
 
     with tempfile.TemporaryDirectory(prefix="gmat-sweep-spec-") as td:
         spec_path = Path(td) / "spec.json"
@@ -95,6 +97,7 @@ def run_spec_in_subprocess(
                 stderr=f"_run_subprocess timed out after {timeout}s\n{captured}".strip(),
                 started_at=started_at,
                 ended_at=ended_at,
+                duration_s=time.monotonic() - start_monotonic,
             )
         except OSError as exc:
             ended_at = datetime.now(timezone.utc)
@@ -103,9 +106,18 @@ def run_spec_in_subprocess(
                 stderr=f"_run_subprocess could not be spawned: {exc}",
                 started_at=started_at,
                 ended_at=ended_at,
+                duration_s=time.monotonic() - start_monotonic,
             )
 
         if result.returncode != 0:
+            # The child may have completed its run but failed to write the
+            # outcome JSON (exit=4): the worker now falls back to printing
+            # the outcome to stdout. Try to recover that before folding a
+            # synthetic failure — losing a 30-minute GMAT run because the
+            # outcome path was bad is the work-loss path issue #134 closes.
+            recovered = _recover_outcome_from_stdout(result.stdout, spec.run_id)
+            if recovered is not None:
+                return recovered
             ended_at = datetime.now(timezone.utc)
             return RunOutcome.failed(
                 run_id=spec.run_id,
@@ -114,6 +126,35 @@ def run_spec_in_subprocess(
                 ).rstrip(),
                 started_at=started_at,
                 ended_at=ended_at,
+                duration_s=time.monotonic() - start_monotonic,
             )
 
         return RunOutcome.from_dict(json.loads(outcome_path.read_text(encoding="utf-8")))
+
+
+def _recover_outcome_from_stdout(stdout: str, expected_run_id: int) -> RunOutcome | None:
+    """Try to parse a worker-printed outcome JSON from ``stdout``.
+
+    The worker emits the outcome as a single line on stdout when its
+    ``--outcome`` write fails post-``run_one``. Returns the parsed
+    outcome on success; ``None`` on any parse failure or run_id mismatch
+    so the caller falls back to its synthetic-failed path.
+    """
+    if not stdout:
+        return None
+    # The worker prints exactly one JSON line for the outcome; scan from
+    # the tail so unrelated chatter on stdout (warnings, etc.) doesn't
+    # block recovery.
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+            outcome = RunOutcome.from_dict(data)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+        if outcome.run_id != expected_run_id:
+            return None
+        return outcome
+    return None

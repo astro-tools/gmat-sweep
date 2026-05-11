@@ -97,6 +97,70 @@ class Pool(ABC):
     def close(self) -> None:
         """Release backend resources. Idempotent."""
 
+    @property
+    def max_workers(self) -> int:
+        """Best-effort worker count for sizing the in-flight cap.
+
+        Subclasses should override to expose their actual worker count
+        (loky's ``n_jobs`` resolved against ``cpu_count``, Ray's
+        cluster size, …). Returning ``1`` is the safe fallback when
+        the backend cannot answer — the caller's bounded-submit loop
+        will dispatch sequentially, which is correct (if slow) for
+        every backend.
+        """
+        return 1
+
+    def imap(
+        self,
+        specs: Iterable[RunSpec],
+        *,
+        in_flight: int | None = None,
+    ) -> Iterator[tuple[RunSpec, RunOutcome]]:
+        """Stream ``specs`` through the pool, yielding ``(spec, outcome)`` pairs.
+
+        Outcomes are yielded in completion order, paired with the
+        :class:`RunSpec` that produced them. Bounds the in-flight set
+        to ``in_flight`` (default ``4 * self.max_workers``) so a 10⁵-spec
+        iterator does not pin 10⁵ payloads + 10⁵ futures in driver memory.
+        Specs are pulled from the iterator lazily — only ``in_flight``
+        specs are materialised at any one time.
+
+        Each yielded pair carries the :class:`RunSpec` that produced
+        the :class:`RunOutcome`: the caller does not need to maintain a
+        side-table from ``outcome.run_id`` back to the spec, and the
+        spec object becomes garbage-collectable the moment the caller
+        finishes processing it.
+
+        Default implementation: chunked submit / drain. Specs are
+        consumed ``in_flight`` at a time, each chunk drained through
+        :meth:`as_completed` before the next chunk is submitted. This
+        bounds RSS but loses pipelining within a chunk — backends with
+        true future-by-future progress (e.g. those backed by
+        :class:`concurrent.futures.Executor`) should override with a
+        sliding-window submit/wait loop for better throughput.
+        """
+        if in_flight is None:
+            in_flight = max(1, 4 * self.max_workers)
+        if in_flight < 1:
+            raise ValueError(f"in_flight must be >= 1, got {in_flight}")
+
+        iterator = iter(specs)
+        while True:
+            chunk_specs: list[RunSpec] = []
+            chunk_futures: list[Future[RunOutcome]] = []
+            for _ in range(in_flight):
+                try:
+                    spec = next(iterator)
+                except StopIteration:
+                    break
+                chunk_specs.append(spec)
+                chunk_futures.append(self.submit(spec))
+            if not chunk_specs:
+                return
+            spec_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in chunk_specs}
+            for outcome in self.as_completed(chunk_futures):
+                yield spec_by_run_id[outcome.run_id], outcome
+
     def __enter__(self) -> Pool:
         return self
 

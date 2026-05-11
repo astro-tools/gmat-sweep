@@ -132,8 +132,16 @@ class MPIPool(Pool):
         self._executor = _mpi_futures.MPIPoolExecutor(
             max_workers=max_workers, **mpi_executor_kwargs
         )
+        # User-supplied max_workers is the only signal we have driver-side
+        # (the MPI universe size is set by mpiexec). Conservative fallback
+        # of 1 when None — pass in_flight= to :meth:`imap` to tune.
+        self._resolved_max_workers: int = max_workers if max_workers is not None else 1
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
+
+    @property
+    def max_workers(self) -> int:
+        return self._resolved_max_workers
 
     def submit(self, spec: RunSpec) -> Future[RunOutcome]:
         if self._closed:
@@ -188,4 +196,10 @@ class MPIPool(Pool):
 
 def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )

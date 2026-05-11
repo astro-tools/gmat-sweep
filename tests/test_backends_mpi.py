@@ -30,7 +30,9 @@ def _make_spec(*, output_dir: Path, run_id: int = 0) -> RunSpec:
 
 def _ok_outcome(run_id: int) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.ok(run_id=run_id, output_paths={}, started_at=now, ended_at=now)
+    return RunOutcome.ok(
+        run_id=run_id, output_paths={}, started_at=now, ended_at=now, duration_s=0.0
+    )
 
 
 class _StubMPIPoolExecutor:
