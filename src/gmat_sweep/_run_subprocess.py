@@ -31,7 +31,14 @@ not produce an outcome JSON at all:
 - ``2`` — bad CLI arguments (argparse default).
 - ``3`` — unreadable ``--spec`` file (missing, permission denied, malformed
   JSON, or a payload that fails :meth:`gmat_sweep.spec.RunSpec.from_dict`).
-- ``4`` — unwriteable ``--outcome`` file.
+- ``4`` — unwriteable ``--outcome`` file. Two flavours:
+  fail-fast — the ``--outcome`` path is probed with a touch + unlink
+  before ``run_one`` is invoked, so a bad path doesn't cost a 30-minute
+  GMAT run; and post-run — if ``run_one`` completed but the outcome JSON
+  fails to land on disk, the outcome is printed to stdout as a single
+  JSON line before exiting ``4``. The parent
+  (:func:`gmat_sweep.backends._subprocess.run_spec_in_subprocess`)
+  recovers the outcome from stdout in that case.
 - Anything else — the OS killed the process (signal, OOM, segfault). The
   parent classifies non-zero exits as transport failures and folds the
   captured stderr into a synthetic
@@ -83,11 +90,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return _EXIT_BAD_SPEC
 
+    # Fail-fast on a bad --outcome path. A 30-minute GMAT run that then
+    # discovers it cannot write the outcome JSON is the work-loss path
+    # this probe closes; we'd rather find out now and exit 4 before
+    # paying for run_one. The post-run write below still has its own
+    # exception handling for races (disk fills mid-run, path made
+    # read-only between probe and write, …).
+    try:
+        outcome_path.parent.mkdir(parents=True, exist_ok=True)
+        outcome_path.touch()
+        outcome_path.unlink()
+    except OSError as exc:
+        print(
+            f"_run_subprocess: --outcome path is not writable {outcome_path}: {exc}",
+            file=sys.stderr,
+        )
+        return _EXIT_BAD_OUTCOME
+
     outcome = run_one(spec)
 
     try:
-        outcome_path.write_text(json.dumps(outcome.to_dict()), encoding="utf-8")
+        with outcome_path.open("w", encoding="utf-8") as f:
+            json.dump(outcome.to_dict(), f)
     except OSError as exc:
+        # Race after the writability probe (disk filled mid-run, fs
+        # remounted read-only, …): emit the outcome on stdout so the
+        # parent backend can recover it instead of synthesising a
+        # failed outcome that drops the worker's actual run.
+        print(json.dumps(outcome.to_dict()))
         print(
             f"_run_subprocess: cannot write outcome {outcome_path}: {exc}",
             file=sys.stderr,

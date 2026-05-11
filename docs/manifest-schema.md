@@ -24,10 +24,20 @@ file is bit-for-bit deterministic across processes and trivially
 line by dropping it (a partial write loses one entry; the rest of the file
 parses cleanly).
 
-The header's `run_count` field is the *expected* run count at sweep launch
-time. It is **not rewritten** as entries arrive, so the on-disk header may
-report more runs than the file actually contains during and after a
-`Ctrl-C`'d sweep. Read `len(manifest.entries)` for the actual count.
+The header's `run_count` field is the *expected* run count at the time of
+first save, and is **frozen on disk for the life of the manifest** — the
+header is append-only by design, so a torn last line costs exactly one
+entry and the header stays valid. Consequences worth knowing:
+
+- During a `Ctrl-C`'d sweep, `run_count` reports more runs than the file
+  actually contains. Read `len(manifest.entries)` (or `manifest.find_missing(...)`)
+  for the actual count and the gap.
+- After [`Sweep.extend(n=K)`][gmat_sweep.Sweep.extend], `run_count` still
+  reports the *original* size — it does not gain `K`. Read
+  [`manifest.total_run_count`][gmat_sweep.Manifest.total_run_count]
+  for the live total (original + extensions), or
+  [`manifest.extension_run_count`][gmat_sweep.Manifest.extension_run_count]
+  for just the extension delta.
 
 ## Header fields
 
@@ -58,7 +68,7 @@ report more runs than the file actually contains during and after a
 | `os_platform`          | `platform.platform()` — same string `gmat-run` records.                                          |
 | `sweep_seed`           | The seed passed to [`sweep(seed=...)`][gmat_sweep.sweep], [`monte_carlo(seed=...)`][gmat_sweep.monte_carlo], or [`latin_hypercube(seed=...)`][gmat_sweep.latin_hypercube], or `null`. |
 | `parameter_spec`       | The run set the sweep expanded, tagged with a `_kind` discriminator. One of four shapes — see [`parameter_spec` shapes](#parameter_spec-shapes) below. |
-| `run_count`            | The number of runs in the sweep at launch.                                                       |
+| `run_count`            | The number of runs in the sweep at launch. Frozen on disk — does not change after [`Sweep.extend()`][gmat_sweep.Sweep.extend]; read [`Manifest.total_run_count`][gmat_sweep.Manifest.total_run_count] for the live total. |
 | `backend`              | The execution backend's class name (`pool.__class__.__name__`) — e.g. `"LocalJoblibPool"`, `"DaskPool"`, `"RayPool"`, or any third-party `Pool` subclass. Optional on load: manifests written before this field landed report `"unknown"`. |
 
 ### `parameter_spec` shapes
@@ -167,7 +177,9 @@ print(manifest.script_sha256, manifest.run_count, len(manifest.entries))
 
 # Streaming tail-only scans (do not materialise the entry list):
 failed_ids = Manifest.find_failed(manifest_path)
-missing_ids = Manifest.find_missing(manifest_path, range(manifest.run_count))
+# Use total_run_count rather than the frozen header run_count when iterating
+# expected ids on an extended manifest — see "Header fields" above.
+missing_ids = Manifest.find_missing(manifest_path, range(manifest.total_run_count))
 
 # Lazy iteration if you need each entry but not all at once:
 for entry in Manifest.iter_entries(manifest_path):
@@ -254,12 +266,14 @@ recoverable from the entries themselves; the convenience accessor is:
 ```python
 manifest = Manifest.load("./sweep/manifest.jsonl")
 manifest.extension_run_count  # 0 for fresh sweeps; N after extend(n=N)
+manifest.total_run_count      # original n + extension_run_count
 ```
 
-The total run count on disk after any number of extensions is
-`max(e.run_id for e in manifest.entries) + 1`, the same expression
-that already covers `Ctrl-C`'d sweeps where `len(entries) <
-parameter_spec["n"]`.
+`manifest.run_count` is the frozen header value (original size at first
+save); `manifest.total_run_count` is the live total derived from the
+entries, and is the right value to feed into
+[`find_missing`][gmat_sweep.Manifest.find_missing] when iterating
+expected run ids on an extended manifest.
 
 The `_kind` of a Monte Carlo manifest stays `"monte_carlo"` after
 extension; only Monte Carlo manifests support extension at all

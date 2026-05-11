@@ -51,6 +51,7 @@ def fake_subprocess_run(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
             output_paths={"report__R": spec.output_dir / "report__R.parquet"},
             started_at=now,
             ended_at=now,
+            duration_s=0.0,
         )
         Path(argv[outcome_idx]).write_text(json.dumps(outcome.to_dict()))
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -152,6 +153,96 @@ def test_non_zero_exit_returns_failed_outcome_with_stderr(
     assert outcome.stderr is not None
     assert "exited with status 3" in outcome.stderr
     assert "cannot read spec" in outcome.stderr
+
+
+def test_outcome_recovered_from_stdout_on_exit_four(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parent must recover outcome JSON printed to stdout when child exits 4.
+
+    Issue #134 item 1 closes the work-loss path where a 30-minute GMAT run
+    succeeded but the outcome JSON couldn't land on disk. The child prints
+    the outcome to stdout before exiting 4; the parent's stdout-recovery
+    path turns it back into a real RunOutcome instead of synthesising a
+    failed one.
+    """
+    now = datetime.now(timezone.utc)
+    real_outcome = RunOutcome.ok(
+        run_id=42,
+        output_paths={"report__R": tmp_path / "run-42" / "report__R.parquet"},
+        started_at=now,
+        ended_at=now,
+        duration_s=1800.0,  # 30 min — the work-loss path
+    )
+    stdout_payload = json.dumps(real_outcome.to_dict())
+
+    def _run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            argv,
+            4,
+            stdout=f"some unrelated noise\n{stdout_payload}\n",
+            stderr="cannot write outcome /tmp/x.json: [Errno 28] No space left on device",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    outcome = _subprocess.run_spec_in_subprocess(
+        _make_spec(output_dir=tmp_path / "run-42", run_id=42)
+    )
+
+    # The actual run was recovered — not a synthetic failed outcome.
+    assert outcome.status == "ok"
+    assert outcome.run_id == 42
+    assert outcome.duration_s == 1800.0
+
+
+def test_outcome_recovery_falls_back_to_failed_when_stdout_unparseable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            argv,
+            4,
+            stdout="not json at all",
+            stderr="cannot write outcome",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    outcome = _subprocess.run_spec_in_subprocess(
+        _make_spec(output_dir=tmp_path / "run-9", run_id=9)
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.run_id == 9
+    assert outcome.stderr is not None
+    assert "exited with status 4" in outcome.stderr
+
+
+def test_outcome_recovery_rejects_run_id_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stdout outcome whose run_id doesn't match the spec is *not* trusted."""
+    now = datetime.now(timezone.utc)
+    wrong = RunOutcome.ok(
+        run_id=999,  # ← doesn't match the spec's run_id below
+        output_paths={},
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )
+
+    def _run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 4, stdout=json.dumps(wrong.to_dict()), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+    outcome = _subprocess.run_spec_in_subprocess(
+        _make_spec(output_dir=tmp_path / "run-5", run_id=5)
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.run_id == 5  # the synthetic outcome carries the *expected* id
 
 
 def test_timeout_returns_failed_outcome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

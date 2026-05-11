@@ -17,6 +17,8 @@ from gmat_sweep.grids import (
     expand_monte_carlo_to_run_specs,
     expand_samples_to_run_specs,
     full_factorial,
+    full_factorial_size,
+    iter_grid_run_specs,
     latin_hypercube_samples,
 )
 from gmat_sweep.spec import RunSpec
@@ -565,3 +567,46 @@ def test_expand_latin_hypercube_deterministic_per_seed() -> None:
         output_dir="/o",
     )
     assert [s.overrides for s in a] == [s.overrides for s in b]
+
+
+# ---- iter_grid_run_specs / full_factorial_size (issue #133 item 6) --------
+
+
+def test_iter_grid_run_specs_yields_same_specs_as_eager_expander() -> None:
+    grid = {"a": [1, 2], "b": [10, 20, 30]}
+    eager = expand_grid_to_run_specs(grid, "/m.script", "/o")
+    streamed = list(iter_grid_run_specs(grid, "/m.script", "/o"))
+    assert eager == streamed
+
+
+def test_iter_grid_run_specs_is_lazy() -> None:
+    """The cartesian product is generated one spec at a time.
+
+    For a 10⁵-row factorial the driver should not pre-materialise the list —
+    pull the first three specs and assert the iterator hasn't exhausted.
+    """
+    grid = {"a": list(range(100)), "b": list(range(100)), "c": list(range(10))}
+    # 100 * 100 * 10 = 100_000 runs
+    it = iter_grid_run_specs(grid, "/m.script", "/o")
+    first_three = [next(it), next(it), next(it)]
+    assert [s.run_id for s in first_three] == [0, 1, 2]
+    # The iterator is still alive — consuming three of 100k doesn't exhaust it.
+    next_spec = next(it)
+    assert next_spec.run_id == 3
+
+
+def test_full_factorial_size_matches_iteration_length() -> None:
+    grid = {"a": [1, 2], "b": [10, 20, 30], "c": [100, 200]}
+    assert full_factorial_size(grid) == 2 * 3 * 2
+    assert full_factorial_size(grid) == len(list(full_factorial(grid)))
+
+
+def test_full_factorial_size_for_empty_grid_is_one() -> None:
+    assert full_factorial_size({}) == 1
+
+
+def test_full_factorial_size_validates_keys_and_values() -> None:
+    with pytest.raises(SweepConfigError):
+        full_factorial_size({"a": [1, 2], "b": []})
+    with pytest.raises(SweepConfigError):
+        full_factorial_size({1: [1, 2]})  # type: ignore[dict-item]

@@ -146,10 +146,9 @@ on disk.
 
 ### Why Latin hypercube can't be extended
 
-[`latin_hypercube_extend()`][gmat_sweep.latin_hypercube_extend] exists
-to refuse the operation cleanly. Extending a Latin hypercube sweep
-would change the per-axis stratification of every sample (the `n` bins
-under [`scipy.stats.qmc.LatinHypercube`][scipy-lh] repartition when `n`
+Extending a Latin hypercube sweep would change the per-axis
+stratification of every sample (the `n` bins under
+[`scipy.stats.qmc.LatinHypercube`][scipy-lh] repartition when `n`
 changes), so there is no slice of a larger LH draw that reproduces the
 original `n` samples bit-for-bit. If you need more samples for an LH
 study, run a fresh `latin_hypercube(n=old_n + new)` from scratch.

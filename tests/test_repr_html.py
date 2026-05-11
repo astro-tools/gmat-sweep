@@ -153,6 +153,7 @@ def test_run_outcome_repr_html_ok() -> None:
         output_paths={"ReportFile1": Path("/o/run-7/r1.parquet")},
         started_at=_utc(2026, 5, 4, 0, 0, 0),
         ended_at=_utc(2026, 5, 4, 0, 0, 12),
+        duration_s=12.0,
     )
     html = outcome._repr_html_()
     _assert_well_formed_html(html)
@@ -171,6 +172,7 @@ def test_run_outcome_repr_html_failed_truncates_long_stderr() -> None:
         stderr=f"{long_first_line}\nsecond line not shown",
         started_at=_utc(2026, 5, 4, 0, 0, 0),
         ended_at=_utc(2026, 5, 4, 0, 0, 1),
+        duration_s=1.0,
     )
     html = outcome._repr_html_()
     _assert_well_formed_html(html)
@@ -186,6 +188,7 @@ def test_run_outcome_repr_html_escapes_html_in_stderr() -> None:
         stderr="<script>alert('boom')</script>",
         started_at=_utc(2026, 5, 4),
         ended_at=_utc(2026, 5, 4, 0, 0, 1),
+        duration_s=1.0,
     )
     html = outcome._repr_html_()
     _assert_well_formed_html(html)

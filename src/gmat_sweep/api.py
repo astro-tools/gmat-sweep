@@ -14,10 +14,11 @@ from gmat_sweep.backends.joblib import LocalJoblibPool
 from gmat_sweep.distributions import DistSpec, _serialise_perturb
 from gmat_sweep.errors import SweepConfigError
 from gmat_sweep.grids import (
-    expand_grid_to_run_specs,
     expand_latin_hypercube_to_run_specs,
     expand_monte_carlo_to_run_specs,
     expand_samples_to_run_specs,
+    full_factorial_size,
+    iter_grid_run_specs,
 )
 from gmat_sweep.spec import RunSpec
 from gmat_sweep.sweep import Sweep
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "latin_hypercube",
-    "latin_hypercube_extend",
     "monte_carlo",
     "monte_carlo_extend",
     "sweep",
@@ -199,21 +199,26 @@ def sweep(
     mission_path = Path(mission)
 
     parameter_spec: dict[str, Any]
-    build_runs: Callable[[Path], list[RunSpec]]
+    build_runs: Callable[[Path], Iterable[RunSpec]]
+    expected_run_count: int | None = None
     if grid is not None:
-        # Materialise grid values once: expand_grid_to_run_specs would do it
-        # for the cartesian product, but we also need the materialised dict
-        # for the manifest header (generators don't survive json.dumps), so
-        # do it up front and reuse the same object.
+        # Materialise grid values once: iter_grid_run_specs would do it for
+        # the cartesian product, but we also need the materialised dict for
+        # the manifest header (generators don't survive json.dumps), so do
+        # it up front and reuse the same object.
         materialised_grid: dict[str, list[Any]] = {k: list(v) for k, v in grid.items()}
         # Every parameter_spec shape carries a ``_kind`` discriminator so a
         # downstream reader doesn't have to infer the sweep kind from the
         # keys present. Older grid manifests omit the tag, and
         # ``Manifest.load`` keeps loading them as if ``_kind="grid"``.
         parameter_spec = {"_kind": "grid", **materialised_grid}
+        expected_run_count = full_factorial_size(materialised_grid)
 
-        def build_runs(output_dir: Path) -> list[RunSpec]:
-            return expand_grid_to_run_specs(materialised_grid, mission_path, output_dir)
+        def build_runs(output_dir: Path) -> Iterable[RunSpec]:
+            # Streaming: the cartesian product is generated lazily and the
+            # pool's bounded imap dispatcher caps in-flight specs to
+            # ~4 * workers. A 10⁵-row factorial never materialises in full.
+            return iter_grid_run_specs(materialised_grid, mission_path, output_dir)
     else:
         assert samples is not None  # narrowed by the XOR check above
         # ``rows`` is a list-of-lists in column order so the round-trip is a
@@ -224,7 +229,7 @@ def sweep(
             "rows": samples.values.tolist(),
         }
 
-        def build_runs(output_dir: Path) -> list[RunSpec]:
+        def build_runs(output_dir: Path) -> Iterable[RunSpec]:
             return expand_samples_to_run_specs(samples, mission_path, output_dir)
 
     return _run_sweep(
@@ -238,6 +243,7 @@ def sweep(
         engine=engine,
         fsync_each=fsync_each,
         fsync_batch=fsync_batch,
+        expected_run_count=expected_run_count,
     )
 
 
@@ -651,6 +657,10 @@ def latin_hypercube_extend(
     :func:`monte_carlo_extend` so a caller writing a generic
     "extend whatever sweep this is" wrapper gets a clear error rather
     than an :class:`AttributeError`.
+
+    Not in :data:`__all__` and not in the user-facing docs: it is a typed
+    refusal sentinel for advanced wrappers, not a feature. Import it
+    directly from :mod:`gmat_sweep.api` if you need it.
     """
     raise SweepConfigError(
         "latin_hypercube_extend is unsupported: extending a Latin hypercube sweep "
@@ -678,7 +688,7 @@ def _resolve_pool(backend: Pool | None) -> Iterator[Pool]:
 def _run_sweep(
     *,
     mission_path: Path,
-    build_runs: Callable[[Path], list[RunSpec]],
+    build_runs: Callable[[Path], Iterable[RunSpec]],
     parameter_spec: dict[str, Any],
     sweep_seed: int | None,
     backend: Pool | None,
@@ -687,6 +697,7 @@ def _run_sweep(
     engine: str,
     fsync_each: bool = True,
     fsync_batch: int = 50,
+    expected_run_count: int | None = None,
 ) -> DataFrame:
     """Shared orchestration for the public entry points.
 
@@ -729,6 +740,7 @@ def _run_sweep(
                 progress=progress,
                 fsync_each=fsync_each,
                 fsync_batch=fsync_batch,
+                expected_run_count=expected_run_count,
             )
             .run()
             .to_dataframe(engine=engine)

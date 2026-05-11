@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import platform
 import warnings
-from collections.abc import Mapping, Sequence
-from concurrent.futures import Future
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -38,7 +37,7 @@ if TYPE_CHECKING:
 
     from gmat_sweep.aggregate import DataFrame
     from gmat_sweep.backends.base import Pool
-    from gmat_sweep.spec import RunOutcome, RunSpec
+    from gmat_sweep.spec import RunSpec
 
 __all__ = ["Sweep"]
 
@@ -56,7 +55,16 @@ class Sweep:
     runs:
         The :class:`RunSpec` instances to dispatch. ``run_id`` values must be
         unique. Order is preserved on the submission side; outcomes return in
-        completion order.
+        completion order. Pass an :class:`Iterable` (e.g. the streaming
+        generator from :func:`gmat_sweep.grids.iter_grid_run_specs`) to keep a
+        large factorial out of driver memory; in that case
+        ``expected_run_count`` is required for the manifest header.
+    expected_run_count:
+        Total run count for the manifest header and progress bar. Required
+        when ``runs`` is a non-:class:`Sequence` iterable (no ``__len__``);
+        derived as ``len(runs)`` otherwise. The :meth:`resume` and
+        :meth:`extend` paths always pass a finite :class:`Sequence` so this
+        stays ``None`` for them.
     backend:
         A constructed :class:`Pool`. The caller owns its lifecycle — typically
         a ``with LocalJoblibPool(...) as pool:`` block.
@@ -109,7 +117,7 @@ class Sweep:
     def __init__(
         self,
         *,
-        runs: Sequence[RunSpec],
+        runs: Iterable[RunSpec],
         backend: Pool,
         manifest_path: Path,
         output_dir: Path,
@@ -120,6 +128,7 @@ class Sweep:
         allow_unisolated_pool: bool = False,
         fsync_each: bool = True,
         fsync_batch: int = 50,
+        expected_run_count: int | None = None,
     ) -> None:
         if backend.subprocess_isolated is not True and not allow_unisolated_pool:
             raise BackendError(
@@ -130,7 +139,36 @@ class Sweep:
             )
         if fsync_batch < 1:
             raise SweepConfigError(f"fsync_batch must be >= 1, got {fsync_batch}")
-        self._runs: list[RunSpec] = list(runs)
+        # Two modes:
+        # * Sequence in → materialise as ``self._runs`` for the
+        #   :meth:`resume`/:meth:`extend`/:meth:`_repr_html_` lookups that
+        #   need the full list. ``run()`` still streams through
+        #   :meth:`Pool.imap` for the bounded-in-flight benefit.
+        # * Iterable (non-Sequence) in → ``self._runs`` is an empty list
+        #   and ``_materialised`` is False. ``run()`` consumes the
+        #   provided iterator via ``self._runs_stream``; resume/extend
+        #   refuse, since they need the spec lookup.
+        if isinstance(runs, Sequence):
+            self._runs: list[RunSpec] = list(runs)
+            self._runs_stream: Iterable[RunSpec] = self._runs
+            self._materialised: bool = True
+            derived_count = len(self._runs)
+        else:
+            self._runs = []
+            self._runs_stream = runs
+            self._materialised = False
+            derived_count = -1  # sentinel — must be supplied via expected_run_count
+        if expected_run_count is None:
+            if derived_count < 0:
+                raise SweepConfigError(
+                    "Sweep(runs=...) needs expected_run_count when runs is an "
+                    "iterator (no __len__); pass the count or hand in a Sequence."
+                )
+            self._run_count: int = derived_count
+        else:
+            if expected_run_count < 0:
+                raise SweepConfigError(f"expected_run_count must be >= 0, got {expected_run_count}")
+            self._run_count = expected_run_count
         self._backend = backend
         self._manifest_path = Path(manifest_path)
         self._output_dir = Path(output_dir)
@@ -155,26 +193,40 @@ class Sweep:
         between any two iterations leaves a parseable file containing exactly
         the runs that finished.
 
+        Dispatch streams the run iterable through :meth:`Pool.imap`, which
+        bounds the in-flight set to roughly ``4 * max_workers`` so a 10⁵-run
+        sweep does not pin 10⁵ :class:`RunSpec` payloads + 10⁵ futures in
+        driver memory. The grid expansion is itself lazy
+        (:func:`gmat_sweep.grids.iter_grid_run_specs`), so on a large
+        factorial neither the spec list nor the future list materialises in
+        full.
+
         :exc:`KeyboardInterrupt` is not caught; it propagates so the caller's
         ``with``-managed pool exits and cancels still-pending futures.
         """
-        self._enforce_debug_pool_single_spec(self._runs)
+        # DebugPool requires a known finite count of exactly 1; defer the
+        # check to the materialised-list path (it can't run a streaming
+        # iterator anyway).
+        if self._materialised:
+            self._enforce_debug_pool_single_spec(self._runs)
+        elif self._backend.subprocess_isolated == "debug":
+            raise BackendError(
+                "DebugPool dispatches a single spec in-process; streaming "
+                "Sweep(runs=<iterator>) is incompatible. Pass a length-1 list "
+                "instead."
+            )
         manifest = self._build_manifest()
         manifest.save(self._manifest_path)
         self._manifest = manifest
 
-        specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in self._runs}
-        futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in self._runs]
-
         progress_bar = tqdm(
-            total=len(self._runs),
+            total=self._run_count,
             disable=not self._progress,
             desc="gmat-sweep",
             unit="run",
         )
         try:
-            for outcome in self._backend.as_completed(futures):
-                spec = specs_by_run_id[outcome.run_id]
+            for spec, outcome in self._backend.imap(self._runs_stream):
                 entry = ManifestEntry.from_outcome(
                     outcome,
                     overrides=spec.overrides,
@@ -314,6 +366,11 @@ class Sweep:
         """
         if not self._loaded_from_manifest or self._manifest is None:
             raise RuntimeError("Sweep.resume requires a Sweep built via Sweep.from_manifest")
+        if not self._materialised:
+            raise RuntimeError(
+                "Sweep.resume requires a materialised runs list — streaming "
+                "Sweep(runs=<iterator>) is incompatible with resume."
+            )
         manifest = self._manifest
 
         expected_run_ids = [s.run_id for s in self._runs]
@@ -327,8 +384,6 @@ class Sweep:
         runs_to_submit: list[RunSpec] = [specs_by_run_id[rid] for rid in sorted(to_retry)]
         self._enforce_debug_pool_single_spec(runs_to_submit)
 
-        futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in runs_to_submit]
-
         progress_bar = tqdm(
             total=len(runs_to_submit),
             disable=not self._progress,
@@ -336,8 +391,7 @@ class Sweep:
             unit="run",
         )
         try:
-            for outcome in self._backend.as_completed(futures):
-                spec = specs_by_run_id[outcome.run_id]
+            for spec, outcome in self._backend.imap(runs_to_submit):
                 entry = ManifestEntry.from_outcome(
                     outcome,
                     overrides=spec.overrides,
@@ -377,6 +431,11 @@ class Sweep:
         """
         if not self._loaded_from_manifest or self._manifest is None:
             raise RuntimeError("Sweep.extend requires a Sweep built via Sweep.from_manifest")
+        if not self._materialised:
+            raise RuntimeError(
+                "Sweep.extend requires a materialised runs list — streaming "
+                "Sweep(runs=<iterator>) is incompatible with extend."
+            )
         manifest = self._manifest
 
         kind = manifest.parameter_spec.get("_kind")
@@ -424,9 +483,6 @@ class Sweep:
         )
         self._enforce_debug_pool_single_spec(new_runs)
 
-        specs_by_run_id: dict[int, RunSpec] = {s.run_id: s for s in new_runs}
-        futures: list[Future[RunOutcome]] = [self._backend.submit(s) for s in new_runs]
-
         progress_bar = tqdm(
             total=len(new_runs),
             disable=not self._progress,
@@ -434,8 +490,7 @@ class Sweep:
             unit="run",
         )
         try:
-            for outcome in self._backend.as_completed(futures):
-                spec = specs_by_run_id[outcome.run_id]
+            for spec, outcome in self._backend.imap(new_runs):
                 entry = ManifestEntry.from_outcome(
                     outcome,
                     overrides=spec.overrides,
@@ -450,6 +505,7 @@ class Sweep:
         # Track the new specs on the Sweep so a follow-up resume() (e.g. if
         # a worker in this batch failed) can find them in self._runs.
         self._runs.extend(new_runs)
+        self._run_count += len(new_runs)
 
         # Reload to dedupe by run_id last-wins, matching resume().
         self._manifest = Manifest.load(self._manifest_path)
@@ -601,7 +657,7 @@ class Sweep:
         rows: list[tuple[str, str]] = [
             ("script", f"<code>{_html.escape(str(self._script_path))}</code>"),
             ("script_sha256", sha_cell),
-            ("run_count", str(len(self._runs))),
+            ("run_count", str(self._run_count)),
             ("parameter_spec._kind", _html.escape(str(kind))),
             ("backend", _html.escape(type(self._backend).__name__)),
         ]
@@ -611,11 +667,17 @@ class Sweep:
         if self._manifest is None:
             rows.append(("status", "<em>not yet executed</em>"))
         else:
-            counts = {"ok": 0, "failed": 0, "skipped": 0}
+            from collections import Counter
+
+            counts: Counter[str] = Counter()
             for entry in self._manifest.entries:
                 counts[entry.status] += 1
-            tally = ", ".join(f"{counts[k]} {k}" for k in ("ok", "failed", "skipped"))
-            rows.append(("outcomes", _html.escape(tally)))
+            known = ("ok", "failed", "skipped")
+            other = sum(v for k, v in counts.items() if k not in known)
+            parts = [f"{counts.get(k, 0)} {k}" for k in known]
+            if other:
+                parts.append(f"{other} other")
+            rows.append(("outcomes", _html.escape(", ".join(parts))))
 
         return build_kv_table("Sweep", rows)
 
@@ -646,7 +708,7 @@ class Sweep:
             os_platform=platform.platform(),
             sweep_seed=self._sweep_seed,
             parameter_spec=self._parameter_spec,
-            run_count=len(self._runs),
+            run_count=self._run_count,
             backend=self._backend.__class__.__name__,
             fsync_each=self._fsync_each,
             fsync_batch=self._fsync_batch,

@@ -260,6 +260,35 @@ def test_run_one_never_raises_for_known_failure_modes(
     assert outcome.stderr
 
 
+def test_run_one_failed_when_filehandler_init_raises(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A FileHandler init failure must be folded into RunOutcome.failed, not raised.
+
+    The bug fixed in #134 (item 4): mkdir succeeded but FileHandler.__init__
+    raised (permission denied, EROFS, ENOSPC), and the exception escaped
+    run_one, violating the module's "never raises" contract.
+    """
+    import logging
+
+    original = logging.FileHandler
+
+    def _exploding_filehandler(*args: Any, **kwargs: Any) -> logging.FileHandler:
+        raise PermissionError("simulated FileHandler init failure")
+
+    monkeypatch.setattr(logging, "FileHandler", _exploding_filehandler)
+    try:
+        spec = _make_spec(output_dir=tmp_path / "run-0")
+        outcome = run_one(spec)
+    finally:
+        monkeypatch.setattr(logging, "FileHandler", original)
+
+    assert outcome.status == "failed"
+    assert outcome.stderr is not None
+    assert "PermissionError" in outcome.stderr
+    assert "simulated FileHandler init failure" in outcome.stderr
+
+
 # ---- time-column synthesis ----------------------------------------------
 #
 # gmat-run's ReportFile parser names columns after the GMAT field (e.g.

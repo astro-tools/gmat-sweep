@@ -130,12 +130,21 @@ class DaskPool(Pool):
             self._client = _distributed.Client(self._cluster)
             self._owns_client = True
             self._owns_cluster = True
+            self._resolved_max_workers: int = workers
         else:
             self._client = client
+            # User-supplied client: cluster size is unknown without an RPC;
+            # ``1`` is the conservative fallback for the imap in-flight cap.
+            # Pass ``in_flight=...`` to :meth:`imap` explicitly to override.
+            self._resolved_max_workers = 1
 
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
         self._distributed = _distributed
+
+    @property
+    def max_workers(self) -> int:
+        return self._resolved_max_workers
 
     def submit(self, spec: RunSpec) -> Future[RunOutcome]:
         if self._closed:
@@ -199,4 +208,10 @@ class DaskPool(Pool):
 
 def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )

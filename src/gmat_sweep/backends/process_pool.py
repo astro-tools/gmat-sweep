@@ -38,6 +38,7 @@ message pointing at :class:`LocalJoblibPool` for the 3.10 path.
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -109,8 +110,21 @@ class ProcessPoolExecutorPool(Pool):
             max_workers=max_workers,
             max_tasks_per_child=1,
         )
+        # Cache the resolved worker count for max_workers. The
+        # ProcessPoolExecutor doesn't expose its own count publicly, so
+        # we mirror its resolution rule: caller-supplied value if set,
+        # otherwise os.process_cpu_count() (3.13+) / os.cpu_count().
+        self._resolved_max_workers: int = (
+            max_workers
+            if max_workers is not None
+            else (getattr(os, "process_cpu_count", os.cpu_count)() or 1)
+        )
         self._pending: dict[Future[RunOutcome], RunSpec] = {}
         self._closed = False
+
+    @property
+    def max_workers(self) -> int:
+        return self._resolved_max_workers
 
     def submit(self, spec: RunSpec) -> Future[RunOutcome]:
         if self._closed:
@@ -164,4 +178,10 @@ class ProcessPoolExecutorPool(Pool):
 
 def _failed_outcome(run_id: int, stderr: str) -> RunOutcome:
     now = datetime.now(timezone.utc)
-    return RunOutcome.failed(run_id=run_id, stderr=stderr, started_at=now, ended_at=now)
+    return RunOutcome.failed(
+        run_id=run_id,
+        stderr=stderr,
+        started_at=now,
+        ended_at=now,
+        duration_s=0.0,
+    )

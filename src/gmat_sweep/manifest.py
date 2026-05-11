@@ -516,6 +516,27 @@ class Manifest:
         max_run_id = max(e.run_id for e in self.entries)
         return max(0, max_run_id + 1 - original_n_raw)
 
+    @property
+    def total_run_count(self) -> int:
+        """The live run count — the on-disk header's ``run_count`` plus any extensions.
+
+        The header's ``run_count`` field is frozen at first
+        :meth:`save` and is not rewritten on :meth:`Sweep.extend`
+        (append-only manifest header — see ``docs/manifest-schema.md``).
+        Reading ``run_count`` alone therefore lags the actual run set
+        after every extend; this property is what callers want when
+        they ask "how many runs are now in this sweep, including
+        extensions?".
+
+        Implementation: ``max(header.run_count, max(e.run_id) + 1)`` so
+        a mid-sweep ``Ctrl-C`` (entries < run_count) still reports the
+        expected total, and an extended manifest (max_run_id ≥
+        run_count) reports the post-extend total.
+        """
+        if not self.entries:
+            return self.run_count
+        return max(self.run_count, max(e.run_id for e in self.entries) + 1)
+
 
 def _fsync_dir(directory: Path) -> None:
     # Directory fsync ensures the new file's metadata (existence, size) is

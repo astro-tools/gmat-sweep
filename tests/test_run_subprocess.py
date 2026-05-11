@@ -137,14 +137,62 @@ def test_spec_with_wrong_type_returns_three(tmp_path: Path) -> None:
     assert rc == 3
 
 
+def test_outcome_write_failure_after_run_prints_outcome_to_stdout(
+    tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Recovery path for #134 item 1: a post-run_one OSError on the outcome write
+    still emits the outcome to stdout so the parent backend can recover it,
+    instead of losing the run."""
+    spec_path = tmp_path / "spec.json"
+    outcome_path = tmp_path / "outcome.json"
+    _write_spec(spec_path, output_dir=tmp_path / "run-0", run_id=7)
+
+    # The writability probe passes (path doesn't exist yet, parent is writable).
+    # Inject a post-run OSError by replacing Path.open *only after* run_one has
+    # produced the outcome — monkeypatch via a counter.
+    import pathlib
+
+    real_open = pathlib.Path.open
+    call_count = {"n": 0}
+
+    def _open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        # Only fail on the write-mode reopen for the outcome path. The probe
+        # uses touch() (which goes through os.open), not Path.open().
+        if self == outcome_path and args and args[0] == "w":
+            call_count["n"] += 1
+            raise OSError("simulated post-run write failure")
+        return real_open(self, *args, **kwargs)
+
+    import types
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(pathlib.Path, "open", _open)
+        rc = _run_subprocess.main(["--spec", str(spec_path), "--outcome", str(outcome_path)])
+    finally:
+        monkeypatch.undo()
+    _ = types  # silence unused
+
+    assert rc == 4
+    assert call_count["n"] >= 1
+    captured = capsys.readouterr()
+    # The outcome JSON appears on stdout — parent can recover the run.
+    last_json_line = next(
+        line for line in reversed(captured.out.splitlines()) if line.startswith("{")
+    )
+    recovered = RunOutcome.from_dict(json.loads(last_json_line))
+    assert recovered.run_id == 7
+    assert recovered.status == "ok"
+
+
 def test_unwriteable_outcome_path_returns_four(
     tmp_path: Path, fake_gmat_run: FakeGmatRun, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec_path = tmp_path / "spec.json"
     _write_spec(spec_path, output_dir=tmp_path / "run-0")
 
-    # Pre-create the outcome path as a *directory* so write_text fails with
-    # IsADirectoryError (a subclass of OSError).
+    # Pre-create the outcome path as a *directory* so touch / write_text fails
+    # with IsADirectoryError (a subclass of OSError).
     outcome_path = tmp_path / "outcome.json"
     outcome_path.mkdir()
 
@@ -152,4 +200,9 @@ def test_unwriteable_outcome_path_returns_four(
 
     assert rc == 4
     captured = capsys.readouterr()
-    assert "cannot write outcome" in captured.err
+    # The writability probe fires before run_one, so the user-facing message
+    # is "not writable", not "cannot write outcome" — same exit code, earlier
+    # detection. Either message is acceptable surface for this test.
+    assert "outcome" in captured.err and (
+        "not writable" in captured.err or "cannot write outcome" in captured.err
+    )

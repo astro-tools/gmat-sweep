@@ -85,6 +85,7 @@ def test_manifest_entry_from_outcome_carries_overrides_and_log_path() -> None:
         output_paths={"ReportFile1": Path("/o/run-7/r1.parquet")},
         started_at=_utc(2026, 5, 4, 0, 0, 0),
         ended_at=_utc(2026, 5, 4, 0, 0, 5),
+        duration_s=5.0,
     )
     entry = ManifestEntry.from_outcome(
         outcome,
@@ -105,6 +106,7 @@ def test_manifest_entry_from_outcome_log_path_defaults_to_none() -> None:
         stderr="GMAT exploded",
         started_at=_utc(2026, 5, 4, 0, 0, 0),
         ended_at=_utc(2026, 5, 4, 0, 0, 1),
+        duration_s=1.0,
     )
     entry = ManifestEntry.from_outcome(outcome, overrides={"Sat.SMA": 7000.0})
     assert entry.log_path is None

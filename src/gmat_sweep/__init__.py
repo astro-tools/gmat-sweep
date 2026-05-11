@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     )
     from gmat_sweep.api import (
         latin_hypercube,
-        latin_hypercube_extend,
         monte_carlo,
         monte_carlo_extend,
         sweep,
@@ -54,6 +53,8 @@ if TYPE_CHECKING:
         expand_monte_carlo_to_run_specs,
         expand_samples_to_run_specs,
         full_factorial,
+        full_factorial_size,
+        iter_grid_run_specs,
         latin_hypercube_samples,
     )
     from gmat_sweep.manifest import (
@@ -91,7 +92,6 @@ _LAZY_ATTRS: dict[str, str] = {
     "sweep_diff": "gmat_sweep.aggregate",
     "sweep_summary": "gmat_sweep.aggregate",
     "latin_hypercube": "gmat_sweep.api",
-    "latin_hypercube_extend": "gmat_sweep.api",
     "monte_carlo": "gmat_sweep.api",
     "monte_carlo_extend": "gmat_sweep.api",
     "sweep": "gmat_sweep.api",
@@ -103,6 +103,8 @@ _LAZY_ATTRS: dict[str, str] = {
     "expand_monte_carlo_to_run_specs": "gmat_sweep.grids",
     "expand_samples_to_run_specs": "gmat_sweep.grids",
     "full_factorial": "gmat_sweep.grids",
+    "full_factorial_size": "gmat_sweep.grids",
+    "iter_grid_run_specs": "gmat_sweep.grids",
     "latin_hypercube_samples": "gmat_sweep.grids",
     "MANIFEST_SCHEMA_VERSION": "gmat_sweep.manifest",
     "Manifest": "gmat_sweep.manifest",
@@ -189,8 +191,9 @@ __all__ = [
     "expand_monte_carlo_to_run_specs",
     "expand_samples_to_run_specs",
     "full_factorial",
+    "full_factorial_size",
+    "iter_grid_run_specs",
     "latin_hypercube",
-    "latin_hypercube_extend",
     "latin_hypercube_samples",
     "lazy_contacts",
     "lazy_ephemerides",
