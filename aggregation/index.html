@@ -1,0 +1,2325 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Run parameter sweeps and Monte Carlo dispersions over GMAT missions in parallel from Python.">
+      
+      
+      
+        <link rel="canonical" href="https://astro-tools.github.io/gmat-sweep/aggregation/">
+      
+      
+        <link rel="prev" href="../sensitivity/">
+      
+      
+        <link rel="next" href="../resume/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Aggregation - gmat-sweep</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#aggregating-sweep-outputs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="gmat-sweep" class="md-header__button md-logo" aria-label="gmat-sweep" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            gmat-sweep
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Aggregation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/astro-tools/gmat-sweep" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    astro-tools/gmat-sweep
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="gmat-sweep" class="md-nav__button md-logo" aria-label="gmat-sweep" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    gmat-sweep
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/astro-tools/gmat-sweep" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    astro-tools/gmat-sweep
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-spec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parameter spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monte-carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sensitivity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-name-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The name selector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index shapes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Index shapes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reports-and-ephemerides-run_id-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports and ephemerides — (run_id, time)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#contacts-run_id-interval_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contacts — (run_id, interval_id)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusing-multiple-reports-per-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fusing multiple reports per run
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusing multiple reports per run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-streaming-vs-eager-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory: streaming vs. eager reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summarising-across-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summarising across runs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Summarising across runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bytime-vs-byrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        by="time" vs by="run_id"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing-two-sweeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two sweeps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Comparing two sweeps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-shape_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-selects-which-suffixes-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        how selects which suffixes appear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#onnone-vs-onrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on=None vs on="run_id"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tolerance-masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tolerance masking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#index-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#polars-output-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Polars output engine
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resume/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../manifest-schema/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manifest schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-versions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported versions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../examples/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_13" id="__nav_13_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/01_sma_scan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Single-axis SMA scan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/02_epoch_arrival_grid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-axis epoch × time-of-flight grid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/03_killed_sweep_recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surviving a kill: partial manifest recovery and programmatic resume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/04_monte_carlo_dispersion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo dispersion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/05_latin_hypercube/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Latin hypercube vs Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/06_dask_cluster_recipe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dask cluster recipe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/07_ray_autoscaling_recipe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ray autoscaling recipe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/08_sobol_sensitivity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sobol sensitivity indices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/09_archive_bundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archive bundle — pack a sweep for handoff
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/10_extending_monte_carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending a Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cookbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../recipes/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recipes
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_15" id="__nav_15_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Recipes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/slurm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slurm with srun
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes pod-per-worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/kubernetes-jobpool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes Job-per-run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/ray-autoscaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ray autoscaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-name-selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The name selector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index shapes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Index shapes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reports-and-ephemerides-run_id-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports and ephemerides — (run_id, time)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#contacts-run_id-interval_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contacts — (run_id, interval_id)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusing-multiple-reports-per-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fusing multiple reports per run
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fusing multiple reports per run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#column-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Column shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-streaming-vs-eager-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory: streaming vs. eager reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summarising-across-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summarising across runs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Summarising across runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bytime-vs-byrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        by="time" vs by="run_id"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing-two-sweeps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two sweeps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Comparing two sweeps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-shape_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-selects-which-suffixes-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        how selects which suffixes appear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#onnone-vs-onrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on=None vs on="run_id"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tolerance-masking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tolerance masking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failed-and-skipped-runs_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed and skipped runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#index-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index alignment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#polars-output-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Polars output engine
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="aggregating-sweep-outputs">Aggregating sweep outputs<a class="headerlink" href="#aggregating-sweep-outputs" title="Permanent link">&para;</a></h1>
+<p><code>gmat-sweep</code> writes each run's outputs as one Parquet file per GMAT
+output kind, then assembles them on demand into multi-indexed
+<code>pandas.DataFrame</code>s. Three entry points cover the three kinds gmat-run
+surfaces:</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>GMAT output kind</th>
+<th>Index</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a class="autorefs autorefs-internal" title="            lazy_multiindex" href="../api/#gmat_sweep.lazy_multiindex"><code>lazy_multiindex</code></a></td>
+<td><code>ReportFile</code></td>
+<td><code>(run_id, time)</code></td>
+</tr>
+<tr>
+<td><a class="autorefs autorefs-internal" title="            lazy_ephemerides" href="../api/#gmat_sweep.lazy_ephemerides"><code>lazy_ephemerides</code></a></td>
+<td><code>EphemerisFile</code> (OEM, STK, SPK)</td>
+<td><code>(run_id, time)</code></td>
+</tr>
+<tr>
+<td><a class="autorefs autorefs-internal" title="            lazy_contacts" href="../api/#gmat_sweep.lazy_contacts"><code>lazy_contacts</code></a></td>
+<td><code>ContactLocator</code></td>
+<td><code>(run_id, interval_id)</code></td>
+</tr>
+</tbody>
+</table>
+<p>The matching <a class="autorefs autorefs-internal" title="            Sweep" href="../api/#gmat_sweep.Sweep"><code>Sweep</code></a> convenience methods —
+<code>Sweep.to_dataframe</code>, <code>Sweep.to_ephemerides</code>, <code>Sweep.to_contacts</code> —
+delegate to these with the sweep's manifest and output directory already
+bound. <a class="autorefs autorefs-internal" title="            sweep" href="../api/#gmat_sweep.sweep"><code>sweep()</code></a> returns
+<code>Sweep.to_dataframe(name=None)</code> directly for the common single-report
+case.</p>
+<h2 id="the-name-selector">The <code>name</code> selector<a class="headerlink" href="#the-name-selector" title="Permanent link">&para;</a></h2>
+<p>Every entry point accepts <code>name: str | None = None</code>. With one output of
+the relevant kind across the sweep, <code>name=None</code> resolves to that sole
+output automatically. With two or more, <code>name=None</code> raises
+<a class="autorefs autorefs-internal" title="            SweepConfigError" href="../api/#gmat_sweep.SweepConfigError"><code>SweepConfigError</code></a> listing the available
+names — pass <code>name="..."</code> to pick one, and call the same function twice
+to get two frames.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">Manifest</span><span class="p">,</span> <span class="n">lazy_contacts</span><span class="p">,</span> <span class="n">lazy_ephemerides</span><span class="p">,</span> <span class="n">lazy_multiindex</span><span class="p">,</span> <span class="n">sweep</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Single-report case: sweep() returns the report frame directly.</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">reports</span> <span class="o">=</span> <span class="n">sweep</span><span class="p">(</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="s2">&quot;mission.script&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">grid</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Sat.SMA&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">7000</span><span class="p">,</span> <span class="mi">7100</span><span class="p">,</span> <span class="mi">7200</span><span class="p">]},</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">out</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Mixed outputs (report + ephemeris + contact): re-load the manifest and</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># pull each frame independently.</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">Manifest</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep/manifest.jsonl&quot;</span><span class="p">))</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">ephemerides</span> <span class="o">=</span> <span class="n">lazy_ephemerides</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">))</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">contacts</span> <span class="o">=</span> <span class="n">lazy_contacts</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">))</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="c1"># Two ReportFiles (e.g. spacecraft state + maneuvers): pass `name=` to pick.</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="n">states</span> <span class="o">=</span> <span class="n">lazy_multiindex</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;StateReport&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="n">burns</span> <span class="o">=</span> <span class="n">lazy_multiindex</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;BurnReport&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="failed-and-skipped-runs">Failed and skipped runs<a class="headerlink" href="#failed-and-skipped-runs" title="Permanent link">&para;</a></h2>
+<p>Failed and skipped runs surface as one row per run with the data columns
+NaN-filled and the <code>__status</code> column set to <code>"failed"</code> or <code>"skipped"</code>.
+The secondary index level carries a kind-appropriate missing value:</p>
+<ul>
+<li><code>lazy_multiindex</code> / <code>lazy_ephemerides</code> — <code>time = NaT</code> (<code>datetime64[ns]</code>).</li>
+<li><code>lazy_contacts</code> — <code>interval_id = pd.NA</code> (nullable <code>Int64</code>).</li>
+</ul>
+<p>An <code>ok</code> run that ran successfully but did not produce the requested
+output kind (e.g. asking for ephemerides on a sweep where one specific
+run only emitted reports) lands the same way, with <code>__status="ok"</code> so
+it remains distinguishable from a true failure.</p>
+<h2 id="index-shapes">Index shapes<a class="headerlink" href="#index-shapes" title="Permanent link">&para;</a></h2>
+<h3 id="reports-and-ephemerides-run_id-time">Reports and ephemerides — <code>(run_id, time)</code><a class="headerlink" href="#reports-and-ephemerides-run_id-time" title="Permanent link">&para;</a></h3>
+<p>The worker copies the first datetime column of each frame to a column
+literally named <code>time</code> before writing Parquet — so user column names
+(<code>Sat.UTCGregorian</code>, <code>Epoch</code>, …) round-trip into the aggregated frame
+unchanged, while the aggregator gets the consistent <code>time</code> level it
+needs. SPK, STK-TimePosVel, and CCSDS-OEM ephemeris frames all expose
+their epoch as <code>Epoch</code>, so the same synthesis covers every gmat-run
+ephemeris format.</p>
+<h3 id="contacts-run_id-interval_id">Contacts — <code>(run_id, interval_id)</code><a class="headerlink" href="#contacts-run_id-interval_id" title="Permanent link">&para;</a></h3>
+<p>Contact frames are intervals, not point samples — one row per
+visibility interval. The worker assigns a fresh <code>interval_id</code> column
+(<code>range(len(df))</code>, so <code>0..K-1</code> per run) at write time. Use <code>interval_id</code>
+the same way you'd use a per-run row position; the actual visibility
+times are still in the data columns (<code>Start</code>, <code>Stop</code>, <code>Duration</code>, etc.,
+depending on the <code>ContactLocator.ReportFormat</code> setting).</p>
+<h2 id="fusing-multiple-reports-per-run">Fusing multiple reports per run<a class="headerlink" href="#fusing-multiple-reports-per-run" title="Permanent link">&para;</a></h2>
+<p>When a sweep produces several <code>ReportFile</code> outputs and you want them
+side-by-side on a shared timeline,
+<a class="autorefs autorefs-internal" title="            lazy_fused_reports" href="../api/#gmat_sweep.lazy_fused_reports"><code>lazy_fused_reports</code></a> (and
+<code>Sweep.to_fused_reports</code>) reshape them into one wide DataFrame with a
+column-level <code>pandas.MultiIndex</code> keyed by <code>(report_name, column)</code>. The
+first name in <code>names</code> is the merge anchor; subsequent reports are
+joined onto it per <code>run_id</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>tolerance</code></th>
+<th>Merge per run</th>
+<th>When it fits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"exact"</code> (literal)</td>
+<td>inner join on <code>time</code></td>
+<td>every report shares the same step setting and you only want rows present in all of them</td>
+</tr>
+<tr>
+<td><code>pd.Timedelta(...)</code></td>
+<td><code>pd.merge_asof</code> (<code>backward</code> direction, default)</td>
+<td>reports use different cadences and a "nearest within window" match per anchor row is what you want</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">Manifest</span><span class="p">,</span> <span class="n">lazy_fused_reports</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">Manifest</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep/manifest.jsonl&quot;</span><span class="p">))</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Two reports on the same step setting → exact inner join.</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">exact</span> <span class="o">=</span> <span class="n">lazy_fused_reports</span><span class="p">(</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">),</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;StateReport&quot;</span><span class="p">,</span> <span class="s2">&quot;BurnReport&quot;</span><span class="p">],</span> <span class="n">tolerance</span><span class="o">=</span><span class="s2">&quot;exact&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Reports on different cadences (e.g. 1 Hz state + 10 s maneuvers) → asof merge</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># with a per-row tolerance window.</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="n">fused</span> <span class="o">=</span> <span class="n">lazy_fused_reports</span><span class="p">(</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="n">manifest</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">),</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;StateReport&quot;</span><span class="p">,</span> <span class="s2">&quot;BurnReport&quot;</span><span class="p">],</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="n">tolerance</span><span class="o">=</span><span class="n">pd</span><span class="o">.</span><span class="n">Timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">2</span><span class="p">),</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="p">)</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># Anchor&#39;s columns under (StateReport, *), right-side under (BurnReport, *).</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="n">fused</span><span class="p">[(</span><span class="s2">&quot;StateReport&quot;</span><span class="p">,</span> <span class="s2">&quot;Sat.X&quot;</span><span class="p">)]</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="n">fused</span><span class="p">[(</span><span class="s2">&quot;BurnReport&quot;</span><span class="p">,</span> <span class="s2">&quot;Sat.Tank.Mass&quot;</span><span class="p">)]</span>
+</code></pre></div>
+<h3 id="column-shape">Column shape<a class="headerlink" href="#column-shape" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>(report_name, column)</code></td>
+<td>data column from that report</td>
+</tr>
+<tr>
+<td><code>(report_name, "__status")</code></td>
+<td>per-report status — preserves the <a class="autorefs autorefs-internal" title="            lazy_multiindex" href="../api/#gmat_sweep.lazy_multiindex"><code>lazy_multiindex</code></a> contract for each report independently (e.g. one report failed-for-this-run while others succeeded)</td>
+</tr>
+<tr>
+<td><code>("__status", "")</code></td>
+<td>run-level status, mirrored from the manifest entry</td>
+</tr>
+</tbody>
+</table>
+<p>A run whose anchor failed (<code>status != "ok"</code> for the first name in
+<code>names</code>, or its parquet was missing) lands as a single <code>time=NaT</code> row
+with all data NaN. The per-report <code>__status</code> columns still surface every
+report's individual state for that run, but the other reports' data is
+not merged in — anchor-failure shadows the rest of the row. Pick the
+report most likely to be present as the first entry of <code>names</code>.</p>
+<p><code>tolerance</code> is required (no default). See the
+<a href="https://pandas.pydata.org/docs/reference/api/pandas.merge_asof.html"><code>pandas.merge_asof</code> reference</a>
+for the <code>direction</code> (<code>backward</code> by default), <code>allow_exact_matches</code>, and
+accepted <code>tolerance</code> types.</p>
+<h2 id="memory-streaming-vs-eager-reads">Memory: streaming vs. eager reads<a class="headerlink" href="#memory-streaming-vs-eager-reads" title="Permanent link">&para;</a></h2>
+<p><code>lazy_multiindex</code> and <code>lazy_ephemerides</code> accept <code>spool: bool = True</code>.
+With <code>spool=True</code> (default) each per-run Parquet is read one record
+batch at a time; <code>spool=False</code> reads each Parquet eagerly in one
+shot — simpler control flow, slightly higher peak per-fragment memory,
+useful on small sweeps. The result frame is identical either way.</p>
+<p>Per-fragment batches stay in Arrow and are concatenated buffer-shared
+via <code>pyarrow.concat_tables</code> before a single <code>to_pandas</code> materialisation
+at the end, so peak driver memory is bounded by the final frame plus a
+small per-fragment overhead — not the sum of one pandas frame per
+fragment. The contract that a 10k-run sweep does not have to fit in
+memory at multiplicative cost holds in both <code>spool</code> modes.</p>
+<p><code>lazy_contacts</code> does not take a <code>spool</code> flag — <code>ContactLocator</code> outputs
+are typically tiny (one row per pass) and the streaming overhead is not
+worth the knob.</p>
+<h2 id="summarising-across-runs">Summarising across runs<a class="headerlink" href="#summarising-across-runs" title="Permanent link">&para;</a></h2>
+<p><code>gmat-sweep</code> returns one row per <code>(run_id, time)</code> — every run kept,
+every time step kept. The canonical next step for dispersion analysis
+is to collapse across runs at each time step into per-time
+statistics: median, 5th and 95th percentile, mean, std, and a count of
+ok contributions. <a class="autorefs autorefs-internal" title="            sweep_summary" href="../api/#gmat_sweep.sweep_summary"><code>sweep_summary</code></a> does
+exactly that and pairs with
+<a class="autorefs autorefs-internal" title="            sweep_band_plot" href="../api/#gmat_sweep.plotting.sweep_band_plot"><code>sweep_band_plot</code></a> (gated on the
+<code>[plot]</code> extra) for the matching figure.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">Manifest</span><span class="p">,</span> <span class="n">lazy_multiindex</span><span class="p">,</span> <span class="n">sweep_summary</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep.plotting</span><span class="w"> </span><span class="kn">import</span> <span class="n">sweep_band_plot</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">manifest</span> <span class="o">=</span> <span class="n">Manifest</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep/manifest.jsonl&quot;</span><span class="p">))</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">lazy_multiindex</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./sweep&quot;</span><span class="p">))</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># Default: per-time-step 5/50/95 + mean + std across runs.</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">summary</span> <span class="o">=</span> <span class="n">sweep_summary</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># (time, q=0.5) slice — the median Sat.X over time across all runs.</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">median_x</span> <span class="o">=</span> <span class="n">summary</span><span class="p">[(</span><span class="s2">&quot;q0.5&quot;</span><span class="p">,</span> <span class="s2">&quot;Sat.X&quot;</span><span class="p">)]</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c1"># Median + 5–95% band for Sat.X.</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">ax</span> <span class="o">=</span> <span class="n">sweep_band_plot</span><span class="p">(</span><span class="n">summary</span><span class="p">,</span> <span class="s2">&quot;Sat.X&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">ax</span><span class="o">.</span><span class="n">figure</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">&quot;sat_x_band.png&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="output-shape">Output shape<a class="headerlink" href="#output-shape" title="Permanent link">&para;</a></h3>
+<p>The result is a single DataFrame whose row index is the unique values
+of the <code>by</code> level and whose column index is a two-level
+<code>pandas.MultiIndex</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>(statistic, field)</code></td>
+<td>one column per <code>(statistic, original-column)</code> pair</td>
+</tr>
+</tbody>
+</table>
+<p>Statistic labels are exactly the entries of <code>include</code> followed by
+<code>f"q{q_val}"</code> for each requested quantile — e.g. <code>"mean"</code>, <code>"std"</code>,
+<code>"q0.05"</code>, <code>"q0.5"</code>, <code>"q0.95"</code> for the defaults. <code>count_ok</code> counts
+non-NaN values per group; useful for spotting time steps where many
+runs produced NaNs.</p>
+<h3 id="bytime-vs-byrun_id"><code>by="time"</code> vs <code>by="run_id"</code><a class="headerlink" href="#bytime-vs-byrun_id" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>by="time"</code> (default) — collapse across runs at each time step. The
+  natural input for "median over time with a 5/95% band".</li>
+<li><code>by="run_id"</code> — collapse across time steps within each run. The
+  natural input for per-run summary metrics (e.g. mean Sat.X over the
+  whole trajectory).</li>
+</ul>
+<p>Other values raise <code>SweepConfigError</code>. Categorical groupings and
+arbitrary <code>by=</code> keys are intentionally out of scope in this release.</p>
+<h3 id="failed-and-skipped-runs_1">Failed and skipped runs<a class="headerlink" href="#failed-and-skipped-runs_1" title="Permanent link">&para;</a></h3>
+<p>By default (<code>dropna=True</code>) <code>sweep_summary</code> filters rows where
+<code>__status != "ok"</code> before aggregating, so failed and skipped runs are
+excluded from every statistic. Pass <code>dropna=False</code> to keep them — the
+NaT marker rows from non-ok runs land as a NaT-keyed group in the
+output (mostly NaN, with <code>count_ok</code> reflecting the contribution).</p>
+<h2 id="comparing-two-sweeps">Comparing two sweeps<a class="headerlink" href="#comparing-two-sweeps" title="Permanent link">&para;</a></h2>
+<p>Once you have two sweep DataFrames of the same shape — baseline vs.
+perturbed, before vs. after a <code>.script</code> edit, two backends on the same
+sweep — <a class="autorefs autorefs-internal" title="            sweep_diff" href="../api/#gmat_sweep.sweep_diff"><code>sweep_diff</code></a> turns them into a single
+diff frame ready for plotting.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">Manifest</span><span class="p">,</span> <span class="n">lazy_multiindex</span><span class="p">,</span> <span class="n">sweep_diff</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">baseline</span> <span class="o">=</span> <span class="n">lazy_multiindex</span><span class="p">(</span><span class="n">Manifest</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./baseline/manifest.jsonl&quot;</span><span class="p">)),</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./baseline&quot;</span><span class="p">))</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">perturbed</span> <span class="o">=</span> <span class="n">lazy_multiindex</span><span class="p">(</span><span class="n">Manifest</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./perturbed/manifest.jsonl&quot;</span><span class="p">)),</span> <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;./perturbed&quot;</span><span class="p">))</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># Per-row absolute and relative diff for every shared numeric column.</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">diff</span> <span class="o">=</span> <span class="n">sweep_diff</span><span class="p">(</span><span class="n">baseline</span><span class="p">,</span> <span class="n">perturbed</span><span class="p">)</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="c1"># (run_id, time) → Sat.SMA shifted by exactly +50 km, everywhere.</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">diff</span><span class="p">[[</span><span class="s2">&quot;Sat.SMA__diff&quot;</span><span class="p">,</span> <span class="s2">&quot;Sat.SMA__rel&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
+</code></pre></div>
+<p>For each numeric column shared between the two inputs, <code>sweep_diff</code>
+emits <code>&lt;col&gt;__diff = b - a</code> and/or <code>&lt;col&gt;__rel = (b - a) / a</code>. Columns
+present on only one side, and shared columns whose dtype is non-numeric,
+are silently dropped — the contract is "compare the comparable".</p>
+<h3 id="output-shape_1">Output shape<a class="headerlink" href="#output-shape_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;col&gt;__diff</code></td>
+<td>absolute difference, <code>b - a</code></td>
+</tr>
+<tr>
+<td><code>&lt;col&gt;__rel</code></td>
+<td>relative difference, <code>(b - a) / a</code> (NaN where <code>a == 0</code>)</td>
+</tr>
+<tr>
+<td><code>__status_diff</code></td>
+<td><code>"ok"</code> when both sides are <code>__status="ok"</code>; otherwise <code>"&lt;a_status&gt;/&lt;b_status&gt;"</code> (e.g. <code>"failed/ok"</code>). Omitted when neither input has a <code>__status</code> column.</td>
+</tr>
+</tbody>
+</table>
+<p>The row index matches the inputs' (aligned) index — typically
+<code>(run_id, time)</code> or just <code>run_id</code> after the <code>on="run_id"</code> collapse below.</p>
+<h3 id="how-selects-which-suffixes-appear"><code>how</code> selects which suffixes appear<a class="headerlink" href="#how-selects-which-suffixes-appear" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th><code>how</code></th>
+<th>Columns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"absolute"</code></td>
+<td>only <code>&lt;col&gt;__diff</code></td>
+</tr>
+<tr>
+<td><code>"relative"</code></td>
+<td>only <code>&lt;col&gt;__rel</code></td>
+</tr>
+<tr>
+<td><code>"both"</code> (default)</td>
+<td>both, interleaved as <code>&lt;col&gt;__diff</code>, <code>&lt;col&gt;__rel</code>, <code>&lt;col2&gt;__diff</code>, <code>&lt;col2&gt;__rel</code>, …</td>
+</tr>
+</tbody>
+</table>
+<h3 id="onnone-vs-onrun_id"><code>on=None</code> vs <code>on="run_id"</code><a class="headerlink" href="#onnone-vs-onrun_id" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>on=None</code> (default) — align on the existing index (typically
+  <code>(run_id, time)</code>). The diff is per-row, per-time-step.</li>
+<li><code>on="run_id"</code> — collapse each side to its per-run <strong>final-step row</strong>
+  via <code>groupby(level="run_id").last()</code>, then diff. Output is indexed by
+  <code>run_id</code>. The natural shape for "did the dispersion of the final
+  state change?" comparisons.</li>
+</ul>
+<h3 id="tolerance-masking">Tolerance masking<a class="headerlink" href="#tolerance-masking" title="Permanent link">&para;</a></h3>
+<p><code>tolerance=</code> masks every diff whose absolute value is strictly below
+the cutoff to NaN — both <code>__diff</code> and the matching <code>__rel</code> are masked
+at the same positions, so the surviving non-NaN entries highlight the
+meaningful changes only.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Single cutoff applied to every column.</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">diff</span> <span class="o">=</span> <span class="n">sweep_diff</span><span class="p">(</span><span class="n">baseline</span><span class="p">,</span> <span class="n">perturbed</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Per-column cutoffs — useful when columns carry mixed units.</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">cutoff</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">return</span> <span class="mf">1e-3</span> <span class="k">if</span> <span class="n">col</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.SMA&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="mf">1e-6</span>  <span class="c1"># km vs. km/s</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">diff</span> <span class="o">=</span> <span class="n">sweep_diff</span><span class="p">(</span><span class="n">baseline</span><span class="p">,</span> <span class="n">perturbed</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="n">cutoff</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="failed-and-skipped-runs_2">Failed and skipped runs<a class="headerlink" href="#failed-and-skipped-runs_2" title="Permanent link">&para;</a></h3>
+<p><code>__status_diff</code> records the per-row pair so a downstream filter or plot
+can drop or annotate them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">clean</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">diff</span><span class="p">[</span><span class="s2">&quot;__status_diff&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">mismatched</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">diff</span><span class="p">[</span><span class="s2">&quot;__status_diff&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;ok&quot;</span><span class="p">]</span>
+</code></pre></div>
+<p>A row where one side failed and the other succeeded surfaces as
+<code>"failed/ok"</code> (or the symmetric <code>"ok/failed"</code>), with the data columns
+NaN — failed runs do not produce numeric outputs to subtract.</p>
+<h3 id="index-alignment">Index alignment<a class="headerlink" href="#index-alignment" title="Permanent link">&para;</a></h3>
+<p><code>sweep_diff</code> aligns the two inputs on the intersection of their
+indexes. Keys present on only one side are silently dropped. The
+function does <strong>not</strong> reshape across <code>parameter_spec</code> shapes — diffing a
+grid sweep against a Monte Carlo sweep is the user's responsibility to
+align (e.g. via <code>df.reset_index().set_index([...])</code>) before calling.</p>
+<h2 id="polars-output-engine">Polars output engine<a class="headerlink" href="#polars-output-engine" title="Permanent link">&para;</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Experimental</p>
+<p>The polars output engine is experimental. The column-naming and
+dtype rules described below are not yet contractual and may change
+in a future minor version. Stable production code should pin
+<code>engine="pandas"</code> (the default) or pin the gmat-sweep version.</p>
+</div>
+<p>Pandas is the default and only return type with no extra installed.
+With the <code>[polars]</code> extra, every flat-column DataFrame-returning entry
+point in this module accepts an <code>engine="polars"</code> keyword that returns
+a <a href="https://docs.pola.rs/api/python/stable/reference/dataframe/index.html"><code>polars.DataFrame</code></a> instead.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pip<span class="w"> </span>install<span class="w"> </span>gmat-sweep<span class="o">[</span>polars<span class="o">]</span>
+</code></pre></div>
+<p>The MultiIndex on <code>lazy_multiindex</code>/<code>lazy_ephemerides</code> (<code>(run_id, time)</code>)
+and <code>lazy_contacts</code> (<code>(run_id, interval_id)</code>) is flattened into two
+sorted leading columns; row order, row count, and the non-index column
+set match the pandas-engine equivalent. Polars carries the typed nulls
+across — <code>NaT</code> becomes a polars <code>null</code> in <code>Datetime[ns]</code>, the nullable
+<code>Int64</code> <code>interval_id</code> round-trips to a polars <code>Int64</code> with <code>null</code>, and
+<code>NaN</code> in numeric columns becomes a <code>null</code> in <code>Float64</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gmat_sweep</span><span class="w"> </span><span class="kn">import</span> <span class="n">sweep</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># pandas (default) — returns a (run_id, time)-MultiIndexed pandas DataFrame.</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">df</span> <span class="o">=</span> <span class="n">sweep</span><span class="p">(</span><span class="s2">&quot;mission.script&quot;</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Sat.SMA&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">7000</span><span class="p">,</span> <span class="mi">7100</span><span class="p">]},</span> <span class="n">out</span><span class="o">=...</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># polars — returns a polars.DataFrame with run_id/time as leading columns.</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">plf</span> <span class="o">=</span> <span class="n">sweep</span><span class="p">(</span><span class="s2">&quot;mission.script&quot;</span><span class="p">,</span> <span class="n">grid</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Sat.SMA&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">7000</span><span class="p">,</span> <span class="mi">7100</span><span class="p">]},</span> <span class="n">out</span><span class="o">=...</span><span class="p">,</span> <span class="n">engine</span><span class="o">=</span><span class="s2">&quot;polars&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">plf</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">plf</span><span class="p">[</span><span class="s2">&quot;__status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="s2">&quot;run_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p>The <code>engine="polars"</code> knob is available on:</p>
+<ul>
+<li>The top-level entry points: <a class="autorefs autorefs-internal" title="            sweep" href="../api/#gmat_sweep.sweep"><code>sweep</code></a>,
+  <a class="autorefs autorefs-internal" title="            monte_carlo" href="../api/#gmat_sweep.monte_carlo"><code>monte_carlo</code></a>,
+  <a class="autorefs autorefs-internal" title="            latin_hypercube" href="../api/#gmat_sweep.latin_hypercube"><code>latin_hypercube</code></a>, and
+  <a class="autorefs autorefs-internal" title="            monte_carlo_extend" href="../api/#gmat_sweep.monte_carlo_extend"><code>monte_carlo_extend</code></a>.</li>
+<li>The <code>Sweep</code> orchestrator methods:
+  <a class="autorefs autorefs-internal" title="            to_dataframe" href="../api/#gmat_sweep.Sweep.to_dataframe"><code>Sweep.to_dataframe</code></a>,
+  <a class="autorefs autorefs-internal" title="            to_ephemerides" href="../api/#gmat_sweep.Sweep.to_ephemerides"><code>Sweep.to_ephemerides</code></a>,
+  <a class="autorefs autorefs-internal" title="            to_contacts" href="../api/#gmat_sweep.Sweep.to_contacts"><code>Sweep.to_contacts</code></a>. The
+  <code>Sweep.to_polars()</code> shortcut is equivalent to
+  <code>Sweep.to_dataframe(engine="polars")</code>.</li>
+<li>The standalone aggregators:
+  <a class="autorefs autorefs-internal" title="            lazy_multiindex" href="../api/#gmat_sweep.lazy_multiindex"><code>lazy_multiindex</code></a>,
+  <a class="autorefs autorefs-internal" title="            lazy_ephemerides" href="../api/#gmat_sweep.lazy_ephemerides"><code>lazy_ephemerides</code></a>,
+  <a class="autorefs autorefs-internal" title="            lazy_contacts" href="../api/#gmat_sweep.lazy_contacts"><code>lazy_contacts</code></a>,
+  <a class="autorefs autorefs-internal" title="            mc_convergence" href="../api/#gmat_sweep.mc_convergence"><code>mc_convergence</code></a>, and
+  <a class="autorefs autorefs-internal" title="            sweep_diff" href="../api/#gmat_sweep.sweep_diff"><code>sweep_diff</code></a>.</li>
+</ul>
+<p>Two helpers stay pandas-only because their output carries a column-level
+<code>MultiIndex</code> and polars has no native equivalent:
+<a class="autorefs autorefs-internal" title="            sweep_summary" href="../api/#gmat_sweep.sweep_summary"><code>sweep_summary</code></a> (<code>(statistic, field)</code>
+columns) and
+<a class="autorefs autorefs-internal" title="            lazy_fused_reports" href="../api/#gmat_sweep.lazy_fused_reports"><code>lazy_fused_reports</code></a> /
+<a class="autorefs autorefs-internal" title="            to_fused_reports" href="../api/#gmat_sweep.Sweep.to_fused_reports"><code>Sweep.to_fused_reports</code></a>
+(<code>(report_name, column)</code> columns). Convert by hand when you need a
+flat polars frame:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">polars</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pl</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">summary</span> <span class="o">=</span> <span class="n">sweep_summary</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">flat</span> <span class="o">=</span> <span class="n">summary</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">flat</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stat</span><span class="si">}</span><span class="s2">__</span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">stat</span><span class="p">,</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">flat</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">plf_summary</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">from_pandas</span><span class="p">(</span><span class="n">flat</span><span class="o">.</span><span class="n">reset_index</span><span class="p">())</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/astro-tools/gmat-sweep" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.indexes", "navigation.instant", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

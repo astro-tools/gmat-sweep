@@ -1,0 +1,2145 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Run parameter sweeps and Monte Carlo dispersions over GMAT missions in parallel from Python.">
+      
+      
+      
+        <link rel="canonical" href="https://astro-tools.github.io/gmat-sweep/cli/">
+      
+      
+        <link rel="prev" href="../resume/">
+      
+      
+        <link rel="next" href="../manifest-schema/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CLI reference - gmat-sweep</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="gmat-sweep" class="md-header__button md-logo" aria-label="gmat-sweep" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            gmat-sweep
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/astro-tools/gmat-sweep" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    astro-tools/gmat-sweep
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="gmat-sweep" class="md-nav__button md-logo" aria-label="gmat-sweep" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    gmat-sweep
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/astro-tools/gmat-sweep" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    astro-tools/gmat-sweep
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameter-spec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parameter spec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backends/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monte-carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sensitivity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aggregation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aggregation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resume/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Resume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#common-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manifest-fsync-cadence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest fsync cadence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monte-carlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        monte-carlo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latin-hypercube" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        latin-hypercube
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explicit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        explicit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        extend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        show
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="show">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-run-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --run N
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#archive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        archive
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../manifest-schema/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manifest schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../supported-versions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Supported versions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_13" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../examples/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_13" id="__nav_13_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_13">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/01_sma_scan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Single-axis SMA scan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/02_epoch_arrival_grid/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-axis epoch × time-of-flight grid
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/03_killed_sweep_recovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Surviving a kill: partial manifest recovery and programmatic resume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/04_monte_carlo_dispersion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monte Carlo dispersion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/05_latin_hypercube/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Latin hypercube vs Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/06_dask_cluster_recipe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dask cluster recipe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/07_ray_autoscaling_recipe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ray autoscaling recipe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/08_sobol_sensitivity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sobol sensitivity indices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/09_archive_bundle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archive bundle — pack a sweep for handoff
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/10_extending_monte_carlo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending a Monte Carlo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cookbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cookbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_15" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../recipes/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recipes
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_15" id="__nav_15_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Recipes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/slurm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slurm with srun
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes pod-per-worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/kubernetes-jobpool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes Job-per-run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../recipes/ray-autoscaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ray autoscaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#common-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manifest-fsync-cadence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest fsync cadence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monte-carlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        monte-carlo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latin-hypercube" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        latin-hypercube
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#explicit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        explicit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resume
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        extend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        show
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="show">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-run-n" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --run N
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#archive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        archive
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-reference">CLI reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
+<p><code>gmat-sweep</code> ships a <code>gmat-sweep</code> console script. Every Python entry point on
+the public surface has a matching subcommand, so you can drive a sweep,
+inspect a manifest, or resume a partial run without writing Python.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>gmat-sweep &lt;subcommand&gt; [options] [SCRIPT]
+</code></pre></div>
+<p>The subcommands:</p>
+<ul>
+<li><a href="#run"><code>run</code></a> — full-factorial grid sweep.</li>
+<li><a href="#monte-carlo"><code>monte-carlo</code></a> — stochastic dispersion sweep.</li>
+<li><a href="#latin-hypercube"><code>latin-hypercube</code></a> — Latin hypercube sweep.</li>
+<li><a href="#explicit"><code>explicit</code></a> — explicit-row sweep from a CSV or Parquet design.</li>
+<li><a href="#resume"><code>resume</code></a> — re-run only the failed and missing entries from a
+  prior manifest.</li>
+<li><a href="#extend"><code>extend</code></a> — append more bit-deterministic Monte Carlo runs to an
+  existing sweep.</li>
+<li><a href="#show"><code>show</code></a> — print a one-line summary of a manifest.</li>
+<li><a href="#archive"><code>archive</code></a> — pack a finished sweep into a portable <code>.zip</code> for
+  archival deposit.</li>
+</ul>
+<p><code>gmat-sweep --help</code> lists them. Each subcommand has its own <code>--help</code>.</p>
+<h2 id="common-options">Common options<a class="headerlink" href="#common-options" title="Permanent link">&para;</a></h2>
+<p>The sweep-running subcommands (<code>run</code>, <code>monte-carlo</code>, <code>latin-hypercube</code>,
+<code>explicit</code>) share three flags:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--workers N</code></td>
+<td><code>-1</code></td>
+<td>Number of subprocess workers. <code>-1</code> uses every available core. Not accepted on <code>--backend mpi</code> (the launcher fixes the rank count); passing it there exits <code>2</code>.</td>
+</tr>
+<tr>
+<td><code>--out PATH</code></td>
+<td>—</td>
+<td>Required. Output directory for per-run artefacts and <code>manifest.jsonl</code>.</td>
+</tr>
+<tr>
+<td><code>SCRIPT</code></td>
+<td>—</td>
+<td>Required positional. Path to the GMAT <code>.script</code> every run loads.</td>
+</tr>
+</tbody>
+</table>
+<p>The post-hoc subcommands (<code>extend</code>, <code>resume</code>, <code>archive</code>) take the script as
+a <code>--script PATH</code> flag instead — the manifest is the primary positional
+input on those, and the script is a parameter pointing at the previously-
+loaded mission file.</p>
+<p>Each of those four subcommands writes a <code>manifest.jsonl</code> under <code>--out</code> and
+prints a one-line summary to stdout when the sweep finishes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>N runs (A ok[, B failed][, C skipped]) in T.TT s — output: PATH
+</code></pre></div>
+<h2 id="choosing-a-backend">Choosing a backend<a class="headerlink" href="#choosing-a-backend" title="Permanent link">&para;</a></h2>
+<p>The four sweep-running subcommands and <code>resume</code> accept <code>--backend</code>. <code>show</code>
+does not — it never runs anything.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Pool</th>
+<th>Extras</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local</code> (default)</td>
+<td><a class="autorefs autorefs-internal" title="            LocalJoblibPool" href="../api/#gmat_sweep.LocalJoblibPool"><code>LocalJoblibPool</code></a> over loky workers</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>dask</code></td>
+<td><a class="autorefs autorefs-internal" title="            DaskPool" href="../api/#gmat_sweep.backends.DaskPool"><code>DaskPool</code></a> over a <code>LocalCluster</code></td>
+<td><code>pip install gmat-sweep[dask]</code></td>
+</tr>
+<tr>
+<td><code>ray</code></td>
+<td><a class="autorefs autorefs-internal" title="            RayPool" href="../api/#gmat_sweep.backends.RayPool"><code>RayPool</code></a> over a local Ray runtime</td>
+<td><code>pip install gmat-sweep[ray]</code></td>
+</tr>
+<tr>
+<td><code>mpi</code></td>
+<td><a class="autorefs autorefs-internal" title="            MPIPool" href="../api/#gmat_sweep.backends.MPIPool"><code>MPIPool</code></a> over <code>mpi4py.futures</code></td>
+<td><code>pip install gmat-sweep[mpi]</code> (plus a system MPI install)</td>
+</tr>
+</tbody>
+</table>
+<p><code>--workers N</code> maps onto each backend in the natural way: <code>LocalJoblibPool</code>
+takes it as <code>max_workers</code>, <code>DaskPool</code> as <code>n_workers</code>, <code>RayPool</code> as <code>num_cpus</code>.
+The default <code>-1</code> means "let the pool pick" (every available core for the
+local pool, <code>os.cpu_count()</code> for Dask, Ray's own auto-detect for Ray).
+<code>--workers</code> is not supported on <code>--backend mpi</code> — the rank count is fixed
+by the MPI launcher (<code>mpirun -n K</code>) or by <code>--backend-arg max_workers=N</code>
+under dynamic spawn; passing <code>--workers</code> there exits <code>2</code>.</p>
+<p><code>--backend-arg KEY=VALUE</code> is an escape hatch for less-common pool
+constructor kwargs. It is repeatable, values are coerced int → float → str,
+and the parsed pairs are forwarded as <code>**kwargs</code> to the chosen pool.
+Examples:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>gmat-sweep<span class="w"> </span>run<span class="w"> </span>--backend<span class="w"> </span>dask<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span>--backend-arg<span class="w"> </span><span class="nv">threads_per_worker</span><span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span>--grid<span class="w"> </span>Sat.SMA<span class="o">=</span><span class="m">7000</span>:7200:3<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span>--out<span class="w"> </span>./sweep<span class="w"> </span>mission.script
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>gmat-sweep<span class="w"> </span>run<span class="w"> </span>--backend<span class="w"> </span>ray<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span>--backend-arg<span class="w"> </span><span class="nv">address</span><span class="o">=</span>ray://head:10001<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span>--grid<span class="w"> </span>Sat.SMA<span class="o">=</span><span class="m">7000</span>:7200:3<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span>--out<span class="w"> </span>./sweep<span class="w"> </span>mission.script
+</code></pre></div>
+<p><code>--backend-arg</code> is rejected with <code>--backend local</code> (the local pool has no
+extra kwargs to forward). Missing extras (<code>[dask]</code> / <code>[ray]</code> / <code>[mpi]</code> not
+installed) exit with code <code>4</code> and a "pip install gmat-sweep[…]" message
+on stderr. Unknown kwargs surface the same way — they reach the pool
+constructor and are rejected there.</p>
+<h2 id="manifest-fsync-cadence">Manifest fsync cadence<a class="headerlink" href="#manifest-fsync-cadence" title="Permanent link">&para;</a></h2>
+<p>Every sweep-running subcommand (<code>run</code>, <code>monte-carlo</code>, <code>latin-hypercube</code>,
+<code>explicit</code>, <code>extend</code>, <code>resume</code>) accepts two flags that control how often
+the manifest is fsynced:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--fsync-each</code> / <code>--no-fsync-each</code></td>
+<td><code>--fsync-each</code></td>
+<td>When set, the manifest is fsynced after every appended entry — strict per-run durability. Pass <code>--no-fsync-each</code> to amortise the fsync cost across batches.</td>
+</tr>
+<tr>
+<td><code>--fsync-batch N</code></td>
+<td><code>50</code></td>
+<td>Fsync interval (in entries) when <code>--no-fsync-each</code> is set. Ignored otherwise.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--no-fsync-each</code> is a measurable speedup for sub-second runs at large
+counts (Monte Carlo dispersion sweeps, parameter scans where each run
+takes &lt;100 ms) where the per-entry fsync would otherwise dominate the
+driver thread. The tradeoff: a host crash between fsync boundaries can
+leave up to <code>--fsync-batch - 1</code> recently-completed entries missing from
+the on-disk manifest. The per-run Parquet outputs and the script hash
+are unaffected, and <code>gmat-sweep resume</code> re-runs only the missing slice.
+See <a href="../manifest-schema/#fsync-cadence-and-durability">Manifest schema § Fsync cadence and durability</a>
+for the full contract.</p>
+<h2 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>any other <a class="autorefs autorefs-internal" title="            GmatSweepError" href="../api/#gmat_sweep.GmatSweepError"><code>GmatSweepError</code></a></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td><a class="autorefs autorefs-internal" title="            SweepConfigError" href="../api/#gmat_sweep.SweepConfigError"><code>SweepConfigError</code></a> or argparse usage error</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td><a class="autorefs autorefs-internal" title="            ManifestCorruptError" href="../api/#gmat_sweep.ManifestCorruptError"><code>ManifestCorruptError</code></a> or missing manifest</td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td><a class="autorefs autorefs-internal" title="            BackendError" href="../api/#gmat_sweep.BackendError"><code>BackendError</code></a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="run"><code>run</code><a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
+<p>Run a full-factorial grid sweep. Each <code>--grid</code> flag adds one axis; multiple
+flags combine into the cartesian product.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>gmat-sweep<span class="w"> </span>run<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span>--grid<span class="w"> </span><span class="s1">&#39;Sat.SMA=7000:8000:5&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span>--grid<span class="w"> </span><span class="s1">&#39;Sat.DryMass=100,200,300&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span>--out<span class="w"> </span>./sweep-out<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span>mission.script
+</code></pre></div>
+<p><code>--grid SPEC</code> accepts two forms:</p>
+<ul>
+<li><code>name=lo:hi:count</code> — <code>count</code> evenly-spaced points from <code>lo</code> to <code>hi</code>
+  inclusive (numpy linspace). <code>count</code> must be ≥ 2.</li>
+<li><code>name=v1,v2,v3</code> — explicit comma-separated values, each coerced via
+  int → float → str fallback.</li>
+</ul>
+<p>Repeated <code>--grid</code> flags for the same axis name exit with code <code>2</code>.</p>
+<h2 id="monte-carlo"><code>monte-carlo</code><a class="headerlink" href="#monte-carlo" title="Permanent link">&para;</a></h2>
+<p>Run <code>n</code> independent stochastic samples by sampling each <code>--perturb</code>
+parameter from its own distribution. With <code>--seed</code> set, two runs at the
+same <code>(--perturb, --n, --seed)</code> produce bit-equal DataFrames; without
+<code>--seed</code> the draws fall back to OS entropy and are not reproducible.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>gmat-sweep<span class="w"> </span>monte-carlo<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span>--n<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span>--perturb<span class="w"> </span><span class="s1">&#39;Sat.SMA=normal:7100:50&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span>--perturb<span class="w"> </span><span class="s1">&#39;Sat.INC=uniform:0:90&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span>--seed<span class="w"> </span><span class="m">42</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span>--out<span class="w"> </span>./mc-out<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span>mission.script
+</code></pre></div>
+<p><code>--perturb SPEC</code> takes one of three shorthands:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>scipy equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name=normal:mu:sigma</code></td>
+<td><code>scipy.stats.norm(loc=mu, scale=sigma)</code></td>
+</tr>
+<tr>
+<td><code>name=uniform:lo:hi</code></td>
+<td><code>scipy.stats.uniform(loc=lo, scale=hi-lo)</code></td>
+</tr>
+<tr>
+<td><code>name=lognormal:mu:sigma</code></td>
+<td><code>scipy.stats.lognorm(s=sigma, scale=exp(mu))</code></td>
+</tr>
+</tbody>
+</table>
+<p>Per-parameter sub-seeds are derived from the parameter's <em>name</em>, so adding a
+<code>--perturb</code> flag to an existing sweep does not change the draws of any other
+parameter at any <code>run_id</code> — see <a href="../monte-carlo/">Monte Carlo</a> for the full
+determinism contract.</p>
+<p><code>--seed</code> is optional; without it, the draw set falls back to OS entropy and
+is not reproducible. An unknown distribution tag (e.g. <code>triangular</code>) exits
+with code <code>2</code>.</p>
+<h2 id="latin-hypercube"><code>latin-hypercube</code><a class="headerlink" href="#latin-hypercube" title="Permanent link">&para;</a></h2>
+<p>Draw <code>n</code> Latin hypercube points stratified across each <code>--perturb</code> axis,
+mapping each axis through the user's distribution. Same <code>--perturb</code> syntax as
+<code>monte-carlo</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>gmat-sweep<span class="w"> </span>latin-hypercube<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span>--n<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span>--perturb<span class="w"> </span><span class="s1">&#39;Sat.SMA=normal:7100:50&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span>--seed<span class="w"> </span><span class="m">42</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span>--out<span class="w"> </span>./lhs-out<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span>mission.script
+</code></pre></div>
+<p>Latin hypercube sampling typically beats plain Monte Carlo when <code>n</code> is small
+relative to the problem's dimensionality, because the per-axis coverage is
+enforced by construction.</p>
+<h2 id="explicit"><code>explicit</code><a class="headerlink" href="#explicit" title="Permanent link">&para;</a></h2>
+<p>Run one mission per row of a pre-built sample design. Column names are
+<a href="../parameter-spec/#dotted-path-keys">dotted-path field names</a>; the row index
+becomes <code>run_id</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>gmat-sweep<span class="w"> </span>explicit<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span>--samples<span class="w"> </span>./samples.csv<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span>--out<span class="w"> </span>./explicit-out<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span>mission.script
+</code></pre></div>
+<p><code>--samples PATH</code> accepts <code>.csv</code> (loaded via <code>pandas.read_csv</code>) and <code>.parquet</code>
+(loaded via <code>pandas.read_parquet</code>). Other suffixes exit with code <code>2</code>. The
+loaded DataFrame must use a default <code>RangeIndex(start=0)</code>, have unique string
+column names, and contain no all-NaN columns — any violation surfaces as a
+<a class="autorefs autorefs-internal" title="            SweepConfigError" href="../api/#gmat_sweep.SweepConfigError"><code>SweepConfigError</code></a> (exit code <code>2</code>) before any
+runs start.</p>
+<p>Use <code>explicit</code> when you have already built a sampling design (Halton, Sobol,
+custom optimisation results) and want to hand it in directly.</p>
+<h2 id="resume"><code>resume</code><a class="headerlink" href="#resume" title="Permanent link">&para;</a></h2>
+<p>Re-run only the failed and never-recorded entries from an existing
+<code>manifest.jsonl</code>. Successful runs' Parquet files are reused from disk.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>gmat-sweep<span class="w"> </span>resume<span class="w"> </span>./sweep-out/manifest.jsonl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span>--script<span class="w"> </span>mission.script<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">4</span>
+</code></pre></div>
+<p>Required positional: <code>MANIFEST</code> — the existing <code>manifest.jsonl</code>.</p>
+<p>Required flag: <code>--script PATH</code> — the same GMAT <code>.script</code> the original sweep
+loaded. Its canonical SHA-256 must equal the manifest's <code>script_sha256</code>; see
+<a href="../resume/#script-drift">Resume § Script drift</a> for the full contract. Add
+<code>--allow-script-drift</code> to proceed past a hash mismatch (emits a
+<code>RuntimeWarning</code>).</p>
+<p>A missing <code>MANIFEST</code> exits with code <code>3</code>; a missing <code>--script</code> or a hash
+mismatch exits with code <code>2</code>.</p>
+<h2 id="extend"><code>extend</code><a class="headerlink" href="#extend" title="Permanent link">&para;</a></h2>
+<p>Append <code>N</code> more bit-deterministic Monte Carlo runs to an existing sweep.
+The base manifest's <code>seed</code> and <code>perturb</code> mapping are reused so the new
+draws are bit-equal to the same indices of a fresh
+<code>monte_carlo(n=old_n + N)</code> call.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>gmat-sweep<span class="w"> </span>extend<span class="w"> </span>./mc-out/manifest.jsonl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span>--n<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span>--script<span class="w"> </span>mission.script<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span>--workers<span class="w"> </span><span class="m">8</span>
+</code></pre></div>
+<p>Required positional: <code>MANIFEST</code> — an existing Monte Carlo
+<code>manifest.jsonl</code>. Grid, explicit-row, and Latin hypercube manifests
+exit with code <code>2</code> (their stochastic semantics don't admit clean
+extension).</p>
+<p>Required flags:</p>
+<ul>
+<li><code>--n N</code> — number of additional stochastic runs to append, ≥ 1.</li>
+<li><code>--script PATH</code> — the same GMAT <code>.script</code> the original sweep loaded.
+  Same hash-drift contract as <code>resume</code>; add <code>--allow-script-drift</code> to
+  proceed past a mismatch.</li>
+</ul>
+<p><code>extend</code> refuses if the base sweep has any <code>failed</code> or missing runs in
+its original <code>[0, n)</code> range — the underlying error names them and
+points at <code>gmat-sweep resume</code>. Run <code>resume</code> first, then <code>extend</code>.</p>
+<p>A missing <code>MANIFEST</code> exits with code <code>3</code>; a non-Monte-Carlo manifest,
+an incomplete base sweep, a missing <code>--script</code>, or a hash mismatch
+exits with code <code>2</code>. See
+<a href="../monte-carlo/#extending-an-existing-sweep">Monte Carlo § Extending an existing sweep</a>
+for the full determinism contract.</p>
+<h2 id="show"><code>show</code><a class="headerlink" href="#show" title="Permanent link">&para;</a></h2>
+<p>Inspect a manifest produced by any of the sweep-running subcommands. Three
+modes:</p>
+<ul>
+<li>default — one-line summary.</li>
+<li><code>--detail</code> — per-run table sorted with <code>failed</code> first, then <code>skipped</code>, then
+  <code>ok</code>, plus the same one-line summary at the bottom.</li>
+<li><code>--run N</code> — full record for <code>run_id=N</code>: header fields, override dict, and
+  the unsuppressed <code>stderr</code>.</li>
+</ul>
+<p><code>--detail</code> and <code>--run</code> are mutually exclusive.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>gmat-sweep<span class="w"> </span>show<span class="w"> </span>./sweep-out/manifest.jsonl
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>5 runs (4 ok, 1 failed) in 53.41 s — output: ./sweep-out
+</code></pre></div>
+<h3 id="-detail"><code>--detail</code><a class="headerlink" href="#-detail" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>gmat-sweep<span class="w"> </span>show<span class="w"> </span>--detail<span class="w"> </span>./sweep-out/manifest.jsonl
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>run_id  status   duration_s  stderr_summary                  log_path
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>1       failed   0.21        ValueError: Sat.SMA out of...   ./sweep-out/run-1/worker.log
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>0       ok       12.43       —                               ./sweep-out/run-0/worker.log
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>2       ok       11.97       —                               ./sweep-out/run-2/worker.log
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>3       ok       14.02       —                               ./sweep-out/run-3/worker.log
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>4       ok       14.78       —                               ./sweep-out/run-4/worker.log
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>5 runs (4 ok, 1 failed) in 53.41 s — output: ./sweep-out
+</code></pre></div>
+<p><code>stderr_summary</code> is the first line of the run's captured <code>stderr</code>, truncated
+to 60 characters with a <code>...</code> ellipsis. <code>ok</code> rows show <code>—</code> (no captured
+<code>stderr</code>).</p>
+<p><code>--filter STATUS</code> narrows the table to one of <code>ok</code>, <code>failed</code>, <code>skipped</code>. The
+trailing summary line still reflects the full manifest. <code>--filter</code> requires
+<code>--detail</code>.</p>
+<h3 id="-run-n"><code>--run N</code><a class="headerlink" href="#-run-n" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>gmat-sweep<span class="w"> </span>show<span class="w"> </span>--run<span class="w"> </span><span class="m">1</span><span class="w"> </span>./sweep-out/manifest.jsonl
+</code></pre></div>
+<p>Prints <code>run_id=1</code>'s full record (status, duration, timestamps, log path,
+override dict, full unsuppressed <code>stderr</code>). Exit code <code>0</code>. If <code>N</code> is not in
+the manifest, exits with code <code>3</code> and a <code>gmat-sweep: run_id N not found in
+manifest</code> message on stderr.</p>
+<h3 id="exit-codes_1">Exit codes<a class="headerlink" href="#exit-codes_1" title="Permanent link">&para;</a></h3>
+<p>A missing or unparseable manifest, or a <code>--run N</code> for an <code>N</code> not in the
+manifest, exits with code <code>3</code>. An unparseable manifest's error message
+includes the file path and the 1-indexed line number that failed to
+parse — e.g. <code>gmat-sweep: manifest entry on line 42 is malformed: ...
+(./sweep/manifest.jsonl:42)</code> — so the offending line can be located
+without re-parsing the file by hand. Whole-file failures (empty file,
+header-line truncation) print just the path.</p>
+<h2 id="archive"><code>archive</code><a class="headerlink" href="#archive" title="Permanent link">&para;</a></h2>
+<p>Pack a finished sweep — script, manifest, per-run Parquet outputs — into a
+single self-describing <code>.zip</code> suitable for archival deposit (Zenodo, JOSS
+supplementary material) or internal handoff.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>gmat-sweep<span class="w"> </span>archive<span class="w"> </span>./sweep-out/manifest.jsonl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">    </span>--script<span class="w"> </span>mission.script<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span>--out<span class="w"> </span>./sma-scan-2026q2.zip
+</code></pre></div>
+<p>Required positional: <code>MANIFEST</code> — the existing <code>manifest.jsonl</code>.</p>
+<p>Required flags:</p>
+<ul>
+<li><code>--script PATH</code> — the same GMAT <code>.script</code> the sweep loaded. Its canonical
+  SHA-256 must equal the manifest's <code>script_sha256</code>; same hash-drift contract
+  as <code>resume</code> and <code>extend</code>. Add <code>--allow-script-drift</code> to proceed past a
+  mismatch — the bundle still records the manifest's original hash so a
+  downstream verifier can spot the drift.</li>
+<li><code>--out PATH</code> — destination <code>.zip</code> path. Parent directories are created on
+  demand.</li>
+</ul>
+<p><code>--include-logs</code> bundles every per-run <code>worker.log</code> and keeps the manifest's
+<code>log_path</code> field pointing at it (rewritten to bundle-relative form). The
+default drops the logs and sets <code>log_path</code> to <code>null</code> in the bundled manifest,
+keeping the archive small.</p>
+<p>The bundled manifest's <code>output_paths</code> are rewritten to be bundle-relative
+(<code>runs/run-&lt;id&gt;/&lt;basename&gt;</code>), and the bundle is byte-deterministic — two
+archives of the same manifest produce identical bytes. See
+<a href="../cookbook/#pattern-4-archival-deposit-zenodo-joss">Cookbook § Pattern 4 — Archival deposit</a>
+for the full layout and the reproduce-from-bundle recipe.</p>
+<p>A missing <code>MANIFEST</code> exits with code <code>3</code>; a missing <code>--script</code>, or a hash
+mismatch without <code>--allow-script-drift</code>, exits with code <code>2</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/astro-tools/gmat-sweep" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.indexes", "navigation.instant", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
