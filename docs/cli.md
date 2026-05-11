@@ -57,11 +57,15 @@ does not — it never runs anything.
 | `local` (default) | [`LocalJoblibPool`][gmat_sweep.LocalJoblibPool] over loky workers | none |
 | `dask`          | [`DaskPool`][gmat_sweep.backends.DaskPool] over a `LocalCluster` | `pip install gmat-sweep[dask]` |
 | `ray`           | [`RayPool`][gmat_sweep.backends.RayPool] over a local Ray runtime | `pip install gmat-sweep[ray]` |
+| `mpi`           | [`MPIPool`][gmat_sweep.backends.MPIPool] over `mpi4py.futures` | `pip install gmat-sweep[mpi]` (plus a system MPI install) |
 
 `--workers N` maps onto each backend in the natural way: `LocalJoblibPool`
-takes it as `workers`, `DaskPool` as `n_workers`, `RayPool` as `num_cpus`.
+takes it as `max_workers`, `DaskPool` as `n_workers`, `RayPool` as `num_cpus`.
 The default `-1` means "let the pool pick" (every available core for the
 local pool, `os.cpu_count()` for Dask, Ray's own auto-detect for Ray).
+`--workers` is not supported on `--backend mpi` — the rank count is fixed
+by the MPI launcher (`mpirun -n K`) or by `--backend-arg max_workers=N`
+under dynamic spawn; passing `--workers` there exits `2`.
 
 `--backend-arg KEY=VALUE` is an escape hatch for less-common pool
 constructor kwargs. It is repeatable, values are coerced int → float → str,
@@ -81,10 +85,10 @@ gmat-sweep run --backend ray \
 ```
 
 `--backend-arg` is rejected with `--backend local` (the local pool has no
-extra kwargs to forward). Missing extras (`[dask]` / `[ray]` not installed)
-exit with code `4` and a "pip install gmat-sweep[…]" message on stderr.
-Unknown kwargs surface the same way — they reach the pool constructor and
-are rejected there.
+extra kwargs to forward). Missing extras (`[dask]` / `[ray]` / `[mpi]` not
+installed) exit with code `4` and a "pip install gmat-sweep[…]" message
+on stderr. Unknown kwargs surface the same way — they reach the pool
+constructor and are rejected there.
 
 ## Manifest fsync cadence
 

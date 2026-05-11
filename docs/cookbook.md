@@ -108,9 +108,14 @@ To export every successful run in a sweep:
 ```python
 from pathlib import Path
 
-from gmat_sweep import Sweep
+from gmat_sweep import LocalJoblibPool, Sweep
 
-sweep = Sweep.from_manifest(Path("./sweep/manifest.jsonl"))
+with LocalJoblibPool() as pool:
+    sweep = Sweep.from_manifest(
+        Path("./sweep/manifest.jsonl"),
+        Path("./mission.script"),
+        backend=pool,
+    )
 ephem = sweep.to_ephemerides()
 
 out_dir = Path("./oem")
@@ -251,12 +256,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from gmat_sweep import Manifest, Sweep
+from gmat_sweep import LocalJoblibPool, Manifest, Sweep
 
 
 def compare_sweeps(
     tool_a_root: Path,
     tool_b_root: Path,
+    script_path: Path,
     *,
     state_columns: tuple[str, ...] = ("Sat.EarthMJ2000Eq.X",
                                       "Sat.EarthMJ2000Eq.Y",
@@ -273,8 +279,13 @@ def compare_sweeps(
             f"A: {a_manifest.script_sha256[:12]}, B: {b_manifest.script_sha256[:12]}"
         )
 
-    a_df = Sweep.from_manifest(tool_a_root / "manifest.jsonl").to_dataframe()
-    b_df = Sweep.from_manifest(tool_b_root / "manifest.jsonl").to_dataframe()
+    with LocalJoblibPool() as pool:
+        a_df = Sweep.from_manifest(
+            tool_a_root / "manifest.jsonl", script_path, backend=pool
+        ).to_dataframe()
+        b_df = Sweep.from_manifest(
+            tool_b_root / "manifest.jsonl", script_path, backend=pool
+        ).to_dataframe()
 
     a_ok = {e.run_id: e.overrides for e in a_manifest.entries if e.status == "ok"}
     b_ok = {e.run_id: e.overrides for e in b_manifest.entries if e.status == "ok"}

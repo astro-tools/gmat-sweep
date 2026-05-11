@@ -135,7 +135,7 @@ hashes; same for two clones with different `core.autocrlf` settings.
 | `output_paths` | Map from the prefixed output basename (`report__<name>`, `ephemeris__<name>`, `contact__<name>`) to the per-run Parquet path. Empty `{}` for non-`ok` runs. The prefix encodes the GMAT output kind so [`lazy_multiindex`][gmat_sweep.lazy_multiindex] / [`lazy_ephemerides`][gmat_sweep.lazy_ephemerides] / [`lazy_contacts`][gmat_sweep.lazy_contacts] can dispatch without reading the file. |
 | `started_at`   | UTC `datetime` the worker began this run, ISO-8601 with tz offset.                                           |
 | `ended_at`     | UTC `datetime` the worker returned its outcome, ISO-8601.                                                    |
-| `duration_s`   | `(ended_at - started_at).total_seconds()`. Computed once on the worker side; the three timing fields cannot disagree. |
+| `duration_s`   | Run duration in seconds, measured by the worker as a `time.monotonic` delta around the run body. Not equal to `(ended_at - started_at).total_seconds()` — measuring monotonically keeps `duration_s` non-negative across mid-run wall-clock corrections (NTP step), while `started_at` / `ended_at` remain wall-clock audit timestamps. |
 | `stderr`       | `null` for successful runs. For failed runs: the formatted Python traceback, optionally followed by the captured GMAT engine log. |
 | `log_path`     | Path to the worker log file (`worker.log` under the per-run output directory), or `null`. Present whether the run succeeded or failed. |
 

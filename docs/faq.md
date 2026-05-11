@@ -42,11 +42,15 @@ pool constructor:
   it when you compose one Dask or Ray pool across calls that load
   different `.script` files.
 
-The contract is uniform across `LocalJoblibPool`, `DaskPool`, and
-`RayPool`. Under the default, a sweep of N runs with W workers pays
-roughly W bootstraps total, not 1 and not N — for a small sweep that's
-overhead worth knowing about; for a meaningfully large sweep it is a
-rounding error.
+The contract is uniform across every shipped pool — `LocalJoblibPool`,
+`ProcessPoolExecutorPool`, `DaskPool`, `RayPool`, `KubernetesJobPool`,
+`MPIPool`, and `DebugPool` — and the `Pool` ABC enforces it on any
+third-party subclass. Under the default, a sweep of N runs with W
+workers pays roughly W bootstraps total, not 1 and not N — for a small
+sweep that's overhead worth knowing about; for a meaningfully large
+sweep it is a rounding error. `ProcessPoolExecutorPool` is the
+exception by construction: `max_tasks_per_child=1` gives every task a
+fresh interpreter, so it pays N bootstraps regardless of mode.
 
 ## Why does `gmat-sweep` depend on `gmat-run`?
 
