@@ -22,6 +22,14 @@ the canonical `ghcr.io/astro-tools/gmat` image; per-PR cells trim
 from 18 to 10 with the heavy integration work moving to a scheduled
 `integration.yml`. Coverage gate raises from ≥ 85% to ≥ 90%.
 
+A late-cycle hardening pass closes the v0.4-review punch list across
+the manifest, aggregator, worker / orchestration, every backend
+pool, the CLI, and the plot helpers: streaming manifest scans, an
+fsync cadence knob, a streaming grid generator + `Pool.imap`,
+Welford's online variance, uniform `RunOutcome.failed` folding on
+worker-side transport failures, lazy `gmat-sweep.cli` cold start,
+and monotonic-clock `duration_s`.
+
 ### Added
 
 - `KubernetesJobPool` (`gmat-sweep[k8s]`) — every run becomes one
@@ -153,6 +161,62 @@ from 18 to 10 with the heavy integration work moving to a scheduled
 - `CITATION.cff` at the repo root so GitHub's "Cite this
   repository" UI and academic tooling resolve a canonical
   citation for the project (#116).
+- [`Pool.imap(specs, *, in_flight=None)`][gmat_sweep.Pool.imap]
+  ABC method with a chunked default bounded to
+  `4 * max_workers`; every backend overrides the new
+  `Pool.max_workers` property to expose its actual count.
+  `grids.iter_grid_run_specs` + `full_factorial_size` give lazy
+  grid expansion; `Sweep.__init__` accepts an `Iterable[RunSpec]`
+  plus `expected_run_count`; `api.sweep(grid=...)` streams the
+  cartesian product end-to-end. A 10⁵-row factorial no longer
+  pins 10⁵ specs + 10⁵ futures in driver memory (#140).
+- [`Manifest.iter_entries(path)`][gmat_sweep.Manifest.iter_entries]
+  lazily yields parsed entries from disk; `Manifest.find_failed`
+  and `Manifest.find_missing` become classmethods taking a `path`
+  and consume `iter_entries` so `gmat-sweep resume` on a 10k-run
+  manifest no longer pays 10k JSON parses against an entry list it
+  never reads. `Manifest.load` stays eager for the consumers that
+  need every entry (#137).
+- [`Manifest.fsync_each: bool = True`][gmat_sweep.Manifest] plus
+  `Manifest.fsync_batch: int = 50` — fsyncs amortise across
+  batches when `fsync_each=False`, with `Manifest.close()`
+  flushing the tail on successful sweep exit. Plumbed through
+  `Sweep`, the four public API entry points, and every
+  sweep-running CLI subcommand as `--fsync-each / --no-fsync-each`
+  and `--fsync-batch N`. The default preserves v0.3 strict-
+  per-entry durability; `KeyboardInterrupt` deliberately skips
+  `close()` so the resume flow picks up the lost-tail slice (#137).
+- [`Manifest.total_run_count`][gmat_sweep.Manifest.total_run_count]
+  property — live total derived from the entries
+  (`run_count + extension_run_count`). The header's `run_count`
+  field stays frozen on disk to preserve the documented append-
+  only / torn-tail tolerance (#140).
+- `Manifest._migrate_header(data, from_version, path)` schema-
+  migration shim — no-op for v1 → v1 today; the ladder gives a
+  future v2 bump a single place to hang per-version migration
+  steps (#137).
+- [`ManifestCorruptError.line_number: int | None`][gmat_sweep.ManifestCorruptError]
+  — 1-indexed line that failed to parse, `None` for whole-file
+  failures. `Manifest.load` and `iter_entries` set it on every
+  line-localised raise; the CLI's top-level error handler prints
+  `path:line` so the offending line is locatable without
+  re-grepping (#137).
+- `KubernetesJobPool` gains
+  `job_deadline_seconds: int = 3600` (validated `>= 1`) to hang-
+  protect stuck Jobs — the drain loop checks each in-flight Job's
+  elapsed monotonic time and folds an expired Job into a
+  synthetic `RunOutcome.failed` with a background-propagation
+  delete. `close()` now tracks `_in_flight_jobs: set[str]` and
+  issues a background-propagation delete for each on shutdown,
+  swallowing per-Job `ApiException` so one delete failure (TTL
+  race, RBAC, transient network) does not orphan the rest.
+  `_submit_job` wraps `create_namespaced_job` in a try/finally so
+  the spec JSON written to the PVC is unlinked on every create-
+  failure path (typed `ApiException`, network errors,
+  `KeyboardInterrupt`) (#135).
+- `sweep_corner` gains a `kind="scatter"|"hexbin"|"auto"` kwarg;
+  `"auto"` (the default) flips to hexbin past 2000 runs to avoid
+  silent overplot saturation (#139).
 
 ### Changed
 
@@ -174,6 +238,60 @@ from 18 to 10 with the heavy integration work moving to a scheduled
   copy across `manifest-schema.md`, `parameter-spec.md`,
   `supported-versions.md`, and a handful of source comments is
   scrubbed (#127).
+- Every backend pool now folds worker-side transport failures
+  (loky / `ProcessPoolExecutor` / Dask / MPI rank / Ray worker
+  death, `RayTaskError`, pickling fault, …) into a synthetic
+  `RunOutcome.failed` at the drain site instead of letting
+  `.result()` raise and abort the sweep. `LocalJoblibPool.close()`
+  cancels parked futures *before* exiting the `Parallel` context
+  (the old order let loky compute an outcome on the way out and
+  silently drop it). `RayPool` uses `ray.wait(..., fetch_local=True)`
+  so the per-ref `ray.get` is in-store, dropping the second network
+  trip per outcome. `DaskPool` switches to
+  `distributed.as_completed(..., with_results=True, raise_errors=False)`
+  so the completion event, the result, and worker-side exception
+  folding share one round-trip. `ProcessPoolExecutorPool` dispatches
+  `run_one` directly on both `reuse_gmat_context` values —
+  `max_tasks_per_child=1` already gives every task a fresh
+  interpreter, so the old `run_spec_in_subprocess` hop was
+  double-paying the subprocess cost (#138).
+- `LocalJoblibPool` deprecates `workers=` in favour of
+  `max_workers=` (kept as alias with `DeprecationWarning`). Docs,
+  README, notebooks, CLI, and internal callsites switched (#138).
+- `Manifest.find_failed()` / `Manifest.find_missing(...)` become
+  classmethods taking a `path` argument. Pre-1.0; the only
+  public doc snippet that called the old form has been updated (#137).
+- `_aggregate` replaces the per-fragment `pd.DataFrame`
+  accumulator + `pd.concat` with a single
+  `pa.concat_tables(...).to_pandas()` — peak Python-heap allocation
+  no longer scales linearly with run count (measured ~8× the
+  final-frame size on a 1000-run fixture; the old path was ~67×).
+  `lazy_fused_reports` replaces the O(N · runs) per-(report,
+  `run_id`) boolean mask with one `groupby('run_id')` per report,
+  and asserts anchor sortedness on `time` before
+  `pd.merge_asof` (#136).
+- `import gmat_sweep.cli` is now lazy — `pandas` / `pyarrow` /
+  `tqdm` / `joblib` are not pulled until first use.
+  `gmat-sweep --help` cold start drops from ~300–800 ms to ~120 ms
+  on a warm cache. Pinned by
+  `test_cold_start_does_not_load_heavy_dependencies` in
+  `tests/test_import.py` (#139).
+- `_parse_grid_value` / `_parse_backend_arg` reject `nan` / `inf`
+  / `-inf`; linspace bounds get the same check. `gmat-sweep show
+  --filter STATUS` rejects without `--detail` before stat'ing the
+  manifest. `--backend mpi` paired with a non-default `--workers`
+  exits 2 with a spelled-out MPI exception instead of silently
+  ignoring the flag. `monte-carlo --help` description mirrors the
+  actual determinism contract (#139).
+- `_gather_param_values` prefers `manifest.parameter_spec`
+  overrides (design values) over `df.columns` (measured values)
+  for params in the spec, warning on disagreement.
+  `sweep_heatmap` validates pivot-axis dtype before
+  `np.asarray(..., dtype=float)`; a string axis raises a typed
+  `SweepConfigError` pointing at `sweep_corner` (#139).
+- The polars output engine is marked **experimental** in
+  `docs/aggregation.md` and on the canonical `lazy_multiindex`
+  engine docstring (`sweep_diff` / `mc_convergence` defer to it) (#136).
 
 ### Fixed
 
@@ -186,6 +304,71 @@ from 18 to 10 with the heavy integration work moving to a scheduled
   CWD — per-run Parquet files landed under the GMAT install
   directory and the aggregator failed to find them. Existing
   absolute-`out=` callers see no behavioural change (#112).
+- Running-stats variance switches from the cumulative
+  sum-of-squares identity to Welford's online recurrence — fixes
+  catastrophic cancellation on km-magnitude metrics where
+  `np.clip(var, 0, None)` was reporting zero std. Regression test:
+  5000 samples from `N(7.1e3, 50²)` now match `np.std(ddof=1)` to
+  1e-6 relative (#136).
+- `sweep_summary` rejects duplicate `q` / `include` entries up
+  front with `SweepConfigError` instead of producing a non-unique
+  column MultiIndex. `sweep_diff(on='run_id')` sorts before
+  `groupby().last()` so the terminal-row collapse is deterministic
+  under shuffled input. `mc_convergence` adds an explicit
+  `sort_values(['time', 'n'])` at the bottom of
+  `_running_stats_per_time`, pinning the docstring's stated
+  ordering contract (#136).
+- `canonical_script_sha256` strips a leading UTF-8 BOM before
+  line-ending normalisation, so a `.script` saved from a
+  BOM-emitting Windows editor and the same script saved without
+  a BOM hash equal (#137).
+- `_run_subprocess` probes `--outcome` writability *before* the
+  `run_one` call, so a bad output path no longer burns a
+  30-minute GMAT run. On a post-run write failure the outcome is
+  printed to stdout; `backends._subprocess.run_spec_in_subprocess`
+  recovers it before falling back to a synthetic
+  `RunOutcome.failed`. `worker.run_one`'s `mkdir` / logger /
+  `FileHandler` setup now sits inside the `try` block, so a
+  `FileHandler` init failure folds into `RunOutcome.failed` instead
+  of escaping the worker (#140).
+- `duration_s` is now sourced from `time.monotonic()`; an NTP step
+  mid-run can no longer drive duration negative.
+  `RunOutcome.from_dict` validates `status in {ok, failed, skipped}`;
+  `RunSpec.from_dict` validates field types explicitly. Both raise
+  `ValueError` naming the bad field, which
+  `manifest._parse_entry_line` wraps to `ManifestCorruptError` and
+  `_run_subprocess.py` maps to `_EXIT_BAD_SPEC=3` (#140).
+- `Sweep._repr_html_`'s status counter buckets unknown statuses
+  under `"other"` instead of raising `KeyError`. `RunSpec.to_dict`
+  / `SweepSpec.to_dict` drop their per-call `dict(...)` defensive
+  copies — `json.dumps` doesn't mutate (#140).
+- `latin_hypercube_extend` is removed from `__all__` and
+  `docs/api.md`. The function is a typed-refusal sentinel —
+  raises `SweepConfigError` with a substantive explanation (LH
+  extension changes stratification of every existing sample, so
+  there is no bit-equal slice) — and remains importable from
+  `gmat_sweep.api` for generic wrappers that want the typed
+  error (#140).
+- Doc drift swept out by walking every page against the current
+  source and re-executing all ten example notebooks: two
+  `Sweep.from_manifest(Path(...))` examples in
+  [`docs/cookbook.md`](docs/cookbook.md) were missing the required
+  `script_path` positional and `backend=` keyword (would raise
+  `TypeError` as written); rewritten with `LocalJoblibPool`.
+  `docs/manifest-schema.md` described `duration_s` as
+  `(ended_at - started_at).total_seconds()`; rewritten to match
+  the actual `time.monotonic` bookend pair.
+  `docs/recipes/slurm.md` and `docs/recipes/ray-autoscaling.md`
+  referenced a non-existent `_worker_entrypoint`; rewritten to
+  point at `gmat_sweep.worker.run_one` (reuse path) and
+  `gmat_sweep.backends._subprocess.run_spec_in_subprocess`
+  (fresh-bootstrap path). Pool-inventory enumerations across
+  `docs/index.md`, `docs/getting-started.md`, `docs/faq.md`,
+  `docs/recipes/index.md`, `docs/backends.md`, and `docs/cli.md`
+  refreshed to the seven shipped pools; the missing `mpi` entry in
+  `cli.md`'s "Choosing a backend" table is back, and the deprecated
+  `LocalJoblibPool(workers=...)` snippet swapped for
+  `max_workers=...` (#141).
 
 [0.4.0]: https://github.com/astro-tools/gmat-sweep/releases/tag/v0.4.0
 
